@@ -1,5 +1,6 @@
 package com.example.wiprober
 
+import android.annotation.SuppressLint
 import android.os.SystemClock
 import android.view.View
 import android.widget.TextView
@@ -15,6 +16,7 @@ import java.util.Locale
  * saved when the tests finish.
  */
 class ThroughputProgressDialog(private val activity: AppCompatActivity) {
+    @SuppressLint("InflateParams") // dialog content has no parent until the dialog attaches it
     private val view = activity.layoutInflater.inflate(R.layout.dialog_throughput_progress, null)
     private val stepText = view.findViewById<TextView>(R.id.throughputStep)
     private val phaseText = view.findViewById<TextView>(R.id.throughputPhase)
