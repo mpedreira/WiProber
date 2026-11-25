@@ -39,7 +39,12 @@ internal class SurveyAndroidCoordinator(
 
     private val saveEsxLauncher = activity.registerForActivityResult(
         ActivityResultContracts.CreateDocument(ESX_MIME_TYPE)
-    ) { callbacks.onExportDestinationSelected(it) }
+    ) { callbacks.onExportDestinationSelected(it, bundle = false) }
+
+    /** ESX + performance file; a separate launcher so the format survives Activity recreation. */
+    private val saveBundleLauncher = activity.registerForActivityResult(
+        ActivityResultContracts.CreateDocument(ZIP_MIME_TYPE)
+    ) { callbacks.onExportDestinationSelected(it, bundle = true) }
 
     private val enableWifiLauncher = activity.registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -84,6 +89,8 @@ internal class SurveyAndroidCoordinator(
     fun selectFloorMap() = selectFloorMapLauncher.launch("image/*")
 
     fun createEsxDocument(suggestedName: String) = saveEsxLauncher.launch(suggestedName)
+
+    fun createExportBundleDocument(suggestedName: String) = saveBundleLauncher.launch(suggestedName)
 
     fun ensureWifiScanAccess() {
         if (callbacks.pendingScanAccess()?.step != ScanAccessStep.CHECKING) return
@@ -222,7 +229,7 @@ internal class SurveyAndroidCoordinator(
         fun onNoteImageSelected(uri: Uri)
         fun onPictureCaptured(success: Boolean)
         fun onFloorMapSelected(uri: Uri?)
-        fun onExportDestinationSelected(uri: Uri?)
+        fun onExportDestinationSelected(uri: Uri?, bundle: Boolean)
         fun pendingScanAccess(): SurveyInteraction.AwaitingScanAccess?
         fun transitionScanAccess(expected: ScanAccessStep, next: ScanAccessStep): Boolean
         fun onScanAccessReady()
@@ -232,6 +239,7 @@ internal class SurveyAndroidCoordinator(
 
     companion object {
         private const val ESX_MIME_TYPE = "application/vnd.ekahau.esx"
+        private const val ZIP_MIME_TYPE = "application/zip"
     }
 }
 

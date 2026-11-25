@@ -46,6 +46,8 @@ class SurveyActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySurveyBinding
     private val viewModel: MainViewModel by viewModels()
     private val projectRepository by lazy { ProjectRepository(applicationContext) }
+    private val throughputSettingsStore by lazy { ThroughputSettingsStore(applicationContext) }
+    private val throughputProbe by lazy { ThroughputProbe(applicationContext) }
     private val noteImageMetadataReader by lazy { NoteImageMetadataReader(contentResolver) }
     private lateinit var wifiScanner: WifiScanner
     private lateinit var androidCoordinator: SurveyAndroidCoordinator
@@ -177,12 +179,12 @@ class SurveyActivity : AppCompatActivity() {
                     else showAddFloorDialog(uri)
                 }
 
-                override fun onExportDestinationSelected(uri: Uri?) {
+                override fun onExportDestinationSelected(uri: Uri?, bundle: Boolean) {
                     if (viewModel.screenState.value.interaction !=
                         SurveyInteraction.ProjectBusy(ProjectOperation.EXPORT_DESTINATION)
                     ) return
                     if (uri == null) viewModel.finishProjectOperation(ProjectOperation.EXPORT_DESTINATION)
-                    else exportProject(uri)
+                    else exportProject(uri, bundle)
                 }
 
                 override fun onScanAccessReady() = startPendingScanAction()
@@ -321,6 +323,10 @@ class SurveyActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.action_export_esx -> {
                     requestProjectExport()
+                    true
+                }
+                R.id.action_throughput_settings -> {
+                    ThroughputSettingsDialog.show(this, throughputSettingsStore)
                     true
                 }
                 R.id.action_about -> {
@@ -467,13 +473,15 @@ class SurveyActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     projectRepository.saveProject(projectId, floorId, activeSnapshot)
-                    FloorScalePolicy.uncalibratedFloors(projectRepository.snapshotProject(projectId))
+                    val projectSnapshot = projectRepository.snapshotProject(projectId)
+                    FloorScalePolicy.uncalibratedFloors(projectSnapshot) to
+                        PerformanceExport.hasMeasurements(projectSnapshot)
                 }
             }
             hideProjectOperation()
-            result.onSuccess { floors ->
-                if (floors.isEmpty()) selectExportDestination()
-                else showUncalibratedExportWarning(floors.map { it.name })
+            result.onSuccess { (floors, bundle) ->
+                if (floors.isEmpty()) selectExportDestination(bundle)
+                else showUncalibratedExportWarning(floors.map { it.name }, bundle)
             }.onFailure { error ->
                 viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT)
                 showExportFailure(error)
@@ -481,11 +489,11 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
-    private fun showUncalibratedExportWarning(floorNames: List<String>) {
+    private fun showUncalibratedExportWarning(floorNames: List<String>, bundle: Boolean) {
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.uncalibrated_export_title)
             .setMessage(getString(R.string.uncalibrated_export_message, floorNames.joinToString("\n")))
-            .setPositiveButton(R.string.export_with_assumed_scale) { _, _ -> selectExportDestination() }
+            .setPositiveButton(R.string.export_with_assumed_scale) { _, _ -> selectExportDestination(bundle) }
             .setNegativeButton(R.string.cancel_export) { _, _ ->
                 viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT)
             }
@@ -495,20 +503,23 @@ class SurveyActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun selectExportDestination() {
+    /** [bundle]: the project has throughput results, so export a ZIP with the ESX + performance file. */
+    private fun selectExportDestination(bundle: Boolean) {
         // A stale dialog or result after recreation must not authorize another export.
         if (viewModel.screenState.value.interaction !=
             SurveyInteraction.ProjectBusy(ProjectOperation.EXPORT_PREFLIGHT)
         ) return
-        val safeTitle = currentProjectTitle
-            .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
-            .ifBlank { "WiProber-project" }
         if (viewModel.beginProjectOperation(ProjectOperation.EXPORT_DESTINATION)) {
-            androidCoordinator.createEsxDocument("$safeTitle.esx")
+            if (bundle) androidCoordinator.createExportBundleDocument("${exportFileTitle()}.zip")
+            else androidCoordinator.createEsxDocument("${exportFileTitle()}.esx")
         }
     }
 
-    private fun exportProject(destination: Uri) {
+    private fun exportFileTitle(): String = currentProjectTitle
+        .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
+        .ifBlank { "WiProber-project" }
+
+    private fun exportProject(destination: Uri, bundle: Boolean) {
         val activeSnapshot = createProjectSnapshot()
         val projectId = currentProjectId
         val floorId = currentFloorId
@@ -527,7 +538,11 @@ class SurveyActivity : AppCompatActivity() {
                 runCatching {
                     projectRepository.saveProject(projectId, floorId, activeSnapshot)
                     val projectSnapshot = projectRepository.snapshotProject(projectId)
-                    EsxExportService(applicationContext).export(destination, projectSnapshot)
+                    EsxExportService(applicationContext).export(
+                        destination,
+                        projectSnapshot,
+                        bundleEsxName = if (bundle) "${exportFileTitle()}.esx" else null
+                    )
                     projectSnapshot.surveySummary()
                 }
             }
@@ -828,11 +843,21 @@ class SurveyActivity : AppCompatActivity() {
             when (val outcome = wifiScanner.scan()) {
                 is WifiScanOutcome.Success -> {
                     val wifiInfoList = mapScanResults(outcome.results)
-                    viewModel.completeStopAndGoScan(wifiInfoList)
-                    binding.surveyStatusText.text = getString(
+                    // The point stays pending (Stop-and-Go scanning) until its tests finish.
+                    val settings = throughputSettingsStore.load()
+                    val throughput = if (settings.anyEnabled) {
+                        binding.surveyStatusText.setText(R.string.throughput_in_progress)
+                        throughputProbe.measure(settings)
+                    } else {
+                        null
+                    }
+                    viewModel.completeStopAndGoScan(wifiInfoList, throughput)
+                    val scanSummary = getString(
                         R.string.scan_completed,
                         quantityString(R.plurals.network_count, outcome.results.size)
                     )
+                    binding.surveyStatusText.text = throughput
+                        ?.let { "$scanSummary\n${ThroughputSummary.format(it)}" } ?: scanSummary
                 }
 
                 is WifiScanOutcome.Failure -> {

@@ -184,14 +184,18 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun completeStopAndGoScan(wifiNetworks: List<WifiNetworkInfo>): ScanPoint? {
+    fun completeStopAndGoScan(
+        wifiNetworks: List<WifiNetworkInfo>,
+        throughput: PointThroughput? = null
+    ): ScanPoint? {
         val scan = _screenState.value.interaction as? SurveyInteraction.StopAndGoScanning ?: return null
         val timestamp = clock.now()
         val point = ScanPoint(
             timestamp = timestamp,
             x = scan.coordinate.x,
             y = scan.coordinate.y,
-            wifiNetworks = wifiNetworks.toList()
+            wifiNetworks = wifiNetworks.toList(),
+            throughput = throughput
         )
         recentScanTimestamps.addLast(timestamp)
         _screenState.update {

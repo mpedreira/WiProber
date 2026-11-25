@@ -20,7 +20,16 @@ data class EkahauReport(
     val accessPoints: EsxAccessPointsWrapper,
     val measuredRadios: EsxMeasuredRadiosWrapper,
     val notes: EsxNotesWrapper,
-    val pictureNotes: EsxPictureNotesWrapper
+    val pictureNotes: EsxPictureNotesWrapper,
+    /** Which generated survey and floor plan each Stop-and-Go point became, in export order. */
+    val stopAndGoSurveys: List<StopAndGoSurveyRef> = emptyList()
+)
+
+data class StopAndGoSurveyRef(
+    val surveyId: String,
+    val floorPlanId: String,
+    val floorName: String,
+    val point: ScanPoint
 )
 
 data class EkahauFloorInput(
@@ -144,6 +153,7 @@ class EkahauReportBuilder(
         val surveyLookups = mutableListOf<EsxSurveyLookup>()
         val surveysMap = mutableMapOf<String, EsxSurveysWrapper>()
         val binaryDataMap = mutableMapOf<String, ByteArray>()
+        val stopAndGoSurveys = mutableListOf<StopAndGoSurveyRef>()
 
         floorContexts.forEach { floorContext ->
             addFloorSurveys(
@@ -151,7 +161,8 @@ class EkahauReportBuilder(
                 apMap,
                 surveyLookups,
                 surveysMap,
-                binaryDataMap
+                binaryDataMap,
+                stopAndGoSurveys
             )
         }
 
@@ -231,7 +242,8 @@ class EkahauReportBuilder(
             accessPoints = accessPointsWrapper,
             measuredRadios = measuredRadiosWrapper,
             notes = EsxNotesWrapper(esxNotes),
-            pictureNotes = EsxPictureNotesWrapper(esxPictureNotes)
+            pictureNotes = EsxPictureNotesWrapper(esxPictureNotes),
+            stopAndGoSurveys = stopAndGoSurveys
         )
     }
 
@@ -240,7 +252,8 @@ class EkahauReportBuilder(
         apMap: Map<String, EsxAccessPointMeasurement>,
         surveyLookups: MutableList<EsxSurveyLookup>,
         surveysMap: MutableMap<String, EsxSurveysWrapper>,
-        binaryDataMap: MutableMap<String, ByteArray>
+        binaryDataMap: MutableMap<String, ByteArray>,
+        stopAndGoSurveys: MutableList<StopAndGoSurveyRef>
     ) {
         val floorPlan = floorContext.floorPlan
         floorContext.input.scanPoints.forEach { scanPoint ->
@@ -300,6 +313,7 @@ class EkahauReportBuilder(
             )
             surveysMap[survey.id] = EsxSurveysWrapper(listOf(survey))
             binaryDataMap[trackId] = BinaryDataSerializer.serialize(measurementsForBin)
+            stopAndGoSurveys += StopAndGoSurveyRef(survey.id, floorPlan.id, floorPlan.name, scanPoint)
         }
 
         floorContext.input.continuousSessions.forEach { session ->

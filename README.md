@@ -148,3 +148,24 @@ This project uses some third-party libraries and assets. Here are their licenses
 *   **AndroidX Libraries:** Licensed under the [Apache License Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 This project itself is licensed under the MIT license.
+
+## Per-point throughput tests (fork mpedreira/WiProber)
+
+After each Stop-and-Go scan WiProber can measure the connected Wi-Fi network:
+
+- **iPerf3 (TCP)** against your own server (`iperf3 -s`): download, upload and TCP-connect latency.
+- **Internet speed test** over HTTP with 4 parallel streams, by default against Cloudflare (`speed.cloudflare.com`); any server with compatible download/upload URLs works (e.g. a LibreSpeed backend).
+
+Configure it in the survey menu → *Throughput tests*. Server names and URLs are stored on the device only. All test traffic is bound to the Wi-Fi network, never mobile data.
+
+Projects with results are exported as a ZIP: the `.esx` (unchanged, opens in Ekahau as usual) plus `wiprober-performance.json`, one row per point and target:
+
+```json
+{ "format": "wiprober-performance", "version": 1, "esxFile": "Site.esx",
+  "measurements": [ { "surveyId": "…", "floorPlanId": "…", "floorName": "Ground", "x": 812.5, "y": 433.0,
+    "measuredAt": "2026-11-25T09:14:22.105Z", "target": "corporate", "method": "iperf3-tcp", "durationSeconds": 5,
+    "ssid": "CORP", "bssidStart": "…", "bssidEnd": "…", "rssi": -58, "linkMbps": 573,
+    "downMbps": 212.4, "upMbps": 148.0, "latencyMs": 2.1, "error": null } ] }
+```
+
+Values that could not be measured are `null` with the reason in `error`, never `0`. `x`/`y` are original floor-plan pixels, equal to the point's survey route point in the ESX; `surveyId` matches the ESX in the same ZIP only (it changes on every export), `floorPlanId` + `x`/`y` are stable.

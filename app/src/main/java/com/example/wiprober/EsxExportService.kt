@@ -8,7 +8,10 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import java.io.File
 
-/** Writes an immutable, whole-project snapshot to an ESX archive. */
+/**
+ * Writes an immutable, whole-project snapshot to an ESX archive. With [bundleEsxName] the
+ * destination receives a ZIP with that same ESX plus [PerformanceExport.FILE_NAME].
+ */
 class EsxExportService(
     context: Context,
     private val reportBuilder: EkahauReportBuilder = EkahauReportBuilder(),
@@ -17,14 +20,14 @@ class EsxExportService(
     private val appContext = context.applicationContext
     private val contentResolver = appContext.contentResolver
 
-    fun export(destinationUri: Uri, snapshot: ProjectExportSnapshot) {
+    fun export(destinationUri: Uri, snapshot: ProjectExportSnapshot, bundleEsxName: String? = null) {
         val exportDirectory = File(appContext.cacheDir, "esx-export-${System.nanoTime()}")
         val completeArchive = File(appContext.cacheDir, "${exportDirectory.name}.esx")
         require(exportDirectory.mkdirs()) { "Cannot create the ESX export workspace" }
 
         try {
             val sourceArchive = snapshot.sourceArchive
-            when {
+            val report: EkahauReport? = when {
                 sourceArchive != null && !hasSourceOverlayChanges(snapshot) -> {
                     validateSourceInventory(sourceArchive, snapshot.sourceCompatibility)
                     sourceArchive.inputStream().use { input ->
@@ -35,6 +38,7 @@ class EsxExportService(
                             "The ESX project is too large"
                         )
                     }
+                    null // nothing local to add, so no local measurements either
                 }
                 sourceArchive != null -> writeOverlayExport(
                     sourceArchive,
@@ -51,6 +55,16 @@ class EsxExportService(
             requireNotNull(contentResolver.openOutputStream(destinationUri, "wt")) {
                 "Cannot open the selected export destination"
             }.use { output ->
+                if (bundleEsxName != null) {
+                    val performance = PerformanceExport.build(report, bundleEsxName, System.currentTimeMillis())
+                    PerformanceExport.writeBundle(
+                        output,
+                        bundleEsxName,
+                        completeArchive,
+                        PerformanceExport.toBytes(performance)
+                    )
+                    return@use
+                }
                 completeArchive.inputStream().use {
                     BoundedIo.copy(
                         it,
@@ -70,7 +84,7 @@ class EsxExportService(
         snapshot: ProjectExportSnapshot,
         exportDirectory: File,
         completeArchive: File
-    ) {
+    ): EkahauReport {
         val report = buildReport(snapshot, localOnly = false)
         val filePayloads = linkedMapOf<String, File>()
         require(snapshot.floors.size == report.floorPlans.floorPlans.size) {
@@ -94,6 +108,7 @@ class EsxExportService(
             staticPayloads = staticPayloads,
             filePayloads = filePayloads
         )
+        return report
     }
 
     private fun writeOverlayExport(
@@ -101,7 +116,7 @@ class EsxExportService(
         snapshot: ProjectExportSnapshot,
         exportDirectory: File,
         completeArchive: File
-    ) {
+    ): EkahauReport {
         val report = buildReport(snapshot, localOnly = true)
         val additionalPayloads = linkedMapOf<String, File>()
         snapshot.floors.filterNot(FloorExportSnapshot::importedFromSource).forEach { floor ->
@@ -119,6 +134,7 @@ class EsxExportService(
             adapterInformation = createAdapterInformation(),
             additionalPayloads = additionalPayloads
         )
+        return report
     }
 
     private fun buildReport(snapshot: ProjectExportSnapshot, localOnly: Boolean): EkahauReport =

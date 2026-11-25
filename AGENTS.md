@@ -41,6 +41,13 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `EsxProjectImporter.kt`: maps bounded archive metadata, display payloads, notes, and route geometry into the local UI index; imported Wi-Fi/spectrum binaries stay opaque.
 - `BinaryTrackReader.kt`: strict ESX Wi-Fi track reader used for generated-writer compatibility tests, never for imported project indexing.
 - `NoteImageMetadataReader.kt`: bounded note-image metadata decoding and dimension/pixel validation off the UI thread.
+- `ThroughputModels.kt`: per-point throughput results (`PointThroughput`, one `ThroughputTestResult` per target) and device-side `ThroughputSettings`.
+- `Iperf3Client.kt`: minimal iperf3 TCP client (control protocol, one stream, download = reverse, upload).
+- `HttpSpeedTest.kt`: time-bounded HTTP download/upload with parallel streams (Cloudflare by default, any compatible URL).
+- `ThroughputRunner.kt`: runs the configured targets after a Stop-and-Go scan; null + `error` for anything not measured, never 0.
+- `ThroughputProbe.kt`: Android boundary; binds every connection to the Wi-Fi `Network` and reads the associated AP.
+- `ThroughputSettingsDialog.kt`: SharedPreferences store and settings dialog. Server names/URLs live on the device, never in the code.
+- `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file). It is never written inside the ESX.
 - `app/src/main/assets/`: static ESX payloads copied into every export. These files are part of the export contract, not generic sample data.
 
 Do not add more business logic to `SurveyActivity`. Prefer extracting a small, testable boundary (scanner, permission coordinator, survey state reducer/use case, ESX reader/writer, or storage component) as part of the change being made.
@@ -63,6 +70,11 @@ Do not add more business logic to `SurveyActivity`. Prefer extracting a small, t
 - A schema-v2 imported workspace has already lost its original archive and remains a documented legacy lossy project. Re-import the source ESX before claiming the schema-v3 preservation guarantee.
 
 When changing ESX handling, add fixture-based tests that validate JSON relationships, ZIP entries, time-unit conversions, binary reader/writer compatibility, and malformed/truncated input. A writer test that is read only by the project's own reader is necessary but not sufficient for Ekahau compatibility.
+
+## Throughput export
+
+- Projects with throughput results export a ZIP holding the ESX exactly as a plain export would produce it plus `wiprober-performance.json`. Never add WiProber files inside the ESX and never fill `throughputSessions`/`pingSessions` without a real Ekahau reference fixture.
+- Rows join the ESX of the same ZIP by `surveyId` and across exports by `floorPlanId` + `x`/`y` (original floor-plan pixels, identical to the survey route point). Local survey IDs are regenerated on every export.
 
 ## Android and Wi-Fi rules
 

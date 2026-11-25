@@ -209,4 +209,19 @@
     <string name="uncalibrated_export_message">These floors have no confirmed scale:\n\n%1$s\n\nExport will use an assumed scale of 0.025 metres per pixel for these floors. Distances in Ekahau may be incorrect. Cancel, select each listed floor, and use Calibrate scale, or explicitly continue with the assumed scale. This does not mark the floors as calibrated.</string>
     <string name="export_with_assumed_scale">Use assumed scale</string>
     <string name="cancel_export">Cancel export</string>
+    <!-- Per-point throughput tests -->
+    <string name="action_throughput_settings">Throughput tests</string>
+    <string name="throughput_settings_title">Throughput tests per point</string>
+    <string name="throughput_settings_hint">Run after each Stop-and-Go scan, over the connected Wi-Fi network. Projects with results are exported as a ZIP with the ESX plus wiprober-performance.json.</string>
+    <string name="throughput_iperf_enabled">iPerf3 test (TCP)</string>
+    <string name="throughput_iperf_label">Target name in the export</string>
+    <string name="throughput_iperf_host">iPerf3 server</string>
+    <string name="throughput_iperf_port">Port</string>
+    <string name="throughput_internet_enabled">Internet speed test</string>
+    <string name="throughput_internet_download_url">Download URL ({bytes} = size)</string>
+    <string name="throughput_internet_upload_url">Upload URL (empty = skip)</string>
+    <string name="throughput_duration_seconds">Seconds per direction</string>
+    <string name="throughput_restore_defaults">Defaults</string>
+    <string name="throughput_settings_saved">Throughput test settings saved</string>
+    <string name="throughput_in_progress">Scan done. Running throughput tests…</string>
 </resources>

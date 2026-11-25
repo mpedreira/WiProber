@@ -9,7 +9,9 @@ data class ScanPoint(
     val x: Float,        // Координата X на карте
     val y: Float,        // Координата Y на карте
     val wifiNetworks: List<WifiNetworkInfo>, // Список сетей, найденных в этой точке
-    val importedFromEsx: Boolean = false
+    val importedFromEsx: Boolean = false,
+    /** iPerf3 / Internet tests run at this point; exported as an Ekahau note pinned to it. */
+    val throughput: PointThroughput? = null
 )
 
 // Этот класс описывает информацию об одной Wi-Fi сети
