@@ -224,4 +224,14 @@
     <string name="throughput_restore_defaults">Defaults</string>
     <string name="throughput_settings_saved">Throughput test settings saved</string>
     <string name="throughput_in_progress">Scan done. Running throughput tests…</string>
+    <string name="throughput_progress_title">Measuring throughput</string>
+    <string name="throughput_progress_starting">Starting…</string>
+    <string name="throughput_progress_step">Step %1$d of %2$d · %3$s · %4$s</string>
+    <string name="throughput_progress_remaining">%1$d s left</string>
+    <string name="throughput_progress_finishing">Collecting results…</string>
+    <string name="throughput_progress_latency_hint">Connecting to the server…</string>
+    <string name="throughput_progress_failed">failed</string>
+    <string name="throughput_phase_latency">latency</string>
+    <string name="throughput_phase_download">download</string>
+    <string name="throughput_phase_upload">upload</string>
 </resources>

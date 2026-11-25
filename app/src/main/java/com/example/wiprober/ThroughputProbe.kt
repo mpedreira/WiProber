@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
 import java.net.HttpURLConnection
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -19,8 +21,13 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
     private val appContext = context.applicationContext
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val wifiManager = appContext.getSystemService(WifiManager::class.java)
+    private val mainThread = Handler(Looper.getMainLooper())
 
-    suspend fun measure(settings: ThroughputSettings): PointThroughput = withContext(Dispatchers.IO) {
+    /** [onProgress] is delivered on the main thread as each phase starts. */
+    suspend fun measure(
+        settings: ThroughputSettings,
+        onProgress: (ThroughputProgress) -> Unit = {}
+    ): PointThroughput = withContext(Dispatchers.IO) {
         val network = wifiNetwork()
         val runner = ThroughputRunner(
             iperf = Iperf3Client(socketFactory = network?.socketFactory ?: javax.net.SocketFactory.getDefault()),
@@ -31,7 +38,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
             connection = { if (network == null) null else connectionInfo() },
             clock = clock
         )
-        runner.measure(settings)
+        runner.measure(settings) { progress -> mainThread.post { onProgress(progress) } }
     }
 
     @Suppress("DEPRECATION") // allNetworks: the active network may be cellular while Wi-Fi is up

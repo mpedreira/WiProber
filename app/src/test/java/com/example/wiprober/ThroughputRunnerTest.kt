@@ -51,11 +51,15 @@ class ThroughputRunnerTest {
     }
 
     @Test
-    fun unreachableServerKeepsNullsAndRecordsRoaming() {
+    fun unreachableServerFailsFastKeepsNullsAndRecordsRoaming() {
         val aps = ArrayDeque(listOf(ap, ap.copy(bssid = "aa:bb:cc:dd:ee:02")))
+        val started = System.nanoTime()
         val test = runner { aps.removeFirst() }.measure(
-            ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = closedPort, iperfDurationSeconds = 1)
+            ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = closedPort, iperfDurationSeconds = 5)
         ).tests.single()
+        val elapsedMillis = (System.nanoTime() - started) / 1_000_000
+
+        assertTrue("took $elapsedMillis ms", elapsedMillis < 2_000) // no 5 s transfers attempted
 
         assertEquals("CORP", test.ssid)
         assertEquals(-58, test.rssi)
@@ -66,23 +70,56 @@ class ThroughputRunnerTest {
         assertNull(test.downMbps)
         assertNull(test.upMbps)
         val error = test.error.orEmpty()
-        assertTrue(error, error.startsWith("latency: ") && "download: " in error && "upload: " in error)
+        assertTrue(error, error.startsWith("latency: ") && error.endsWith("download/upload skipped: server unreachable"))
     }
 
     @Test
     fun internetWithoutUploadUrlSaysSo() {
-        val test = runner { ap }.measure(
+        // Reachable (latency works) but every HTTP request is cut: download fails, upload is unset.
+        val server = ServerSocket(0)
+        kotlin.concurrent.thread(isDaemon = true) {
+            while (!server.isClosed) runCatching { server.accept().close() }.onFailure { return@thread }
+        }
+        val test = server.use {
+            runner { ap }.measure(
             ThroughputSettings(
                 internetEnabled = true,
-                internetDownloadUrl = "http://127.0.0.1:$closedPort/__down?bytes={bytes}",
+                internetDownloadUrl = "http://127.0.0.1:${server.localPort}/__down?bytes={bytes}",
                 internetUploadUrl = " ",
                 internetDurationSeconds = 1
             )
         ).tests.single()
+        }
 
         assertEquals("internet", test.target)
         assertEquals(ThroughputTestResult.METHOD_HTTP, test.method)
         assertNull(test.upMbps)
-        assertTrue(test.error.orEmpty(), "upload: not configured" in test.error.orEmpty())
+        assertTrue(test.latencyMs != null)
+        assertNull(test.downMbps)
+        assertTrue(test.error.orEmpty(), test.error.orEmpty().startsWith("download: "))
+        assertTrue(test.error.orEmpty(), test.error.orEmpty().endsWith("upload: not configured"))
+    }
+
+    @Test
+    fun reportsEachPhaseAsItStartsWithStepNumbersAndFinishedValues() {
+        val events = mutableListOf<ThroughputProgress>()
+        runner { ap }.measure(
+            ThroughputSettings(
+                iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = closedPort,
+                internetEnabled = true,
+                internetDownloadUrl = "http://127.0.0.1:$closedPort/__down?bytes={bytes}",
+                internetDurationSeconds = 2
+            )
+        ) { events += it }
+
+        // Both servers are unreachable: only the latency phases start, transfers are skipped.
+        assertEquals(listOf(1, 4), events.map { it.step })
+        assertTrue(events.all { it.totalSteps == 6 && it.phase == ThroughputPhase.LATENCY && it.phaseSeconds == null })
+        assertEquals(listOf("corporate", "internet"), events.map { it.target })
+        assertEquals(
+            listOf(ThroughputPhase.LATENCY, ThroughputPhase.DOWNLOAD, ThroughputPhase.UPLOAD),
+            events[1].finished.map { it.phase }
+        )
+        assertTrue(events[1].finished.all { it.value == null })
     }
 }

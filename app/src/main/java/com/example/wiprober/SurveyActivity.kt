@@ -847,7 +847,13 @@ class SurveyActivity : AppCompatActivity() {
                     val settings = throughputSettingsStore.load()
                     val throughput = if (settings.anyEnabled) {
                         binding.surveyStatusText.setText(R.string.throughput_in_progress)
-                        throughputProbe.measure(settings)
+                        val progressDialog = ThroughputProgressDialog(this@SurveyActivity)
+                        progressDialog.show()
+                        try {
+                            throughputProbe.measure(settings, progressDialog::update)
+                        } finally {
+                            progressDialog.dismiss()
+                        }
                     } else {
                         null
                     }
