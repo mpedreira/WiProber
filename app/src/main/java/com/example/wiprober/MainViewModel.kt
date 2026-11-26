@@ -27,7 +27,8 @@ class MainViewModel @JvmOverloads constructor(
         scale: Double?,
         scanPoints: List<ScanPoint>,
         continuousSessions: List<ContinuousScanSession>,
-        notes: List<AppNote>
+        notes: List<AppNote>,
+        skippedSuggestions: List<SkippedSuggestion> = emptyList()
     ) {
         val selectedScanMode = _screenState.value.scanMode
         clearActiveSession()
@@ -38,6 +39,7 @@ class MainViewModel @JvmOverloads constructor(
             scanPoints = scanPoints.map { it.copy(wifiNetworks = it.wifiNetworks.toList()) },
             continuousScanSessions = continuousSessions.map { it.immutableCopy() },
             notes = notes.toList(),
+            skippedSuggestions = skippedSuggestions.map { SurveyCoordinate(it.x, it.y) },
             scanMode = selectedScanMode,
             actionHistory = buildList {
                 repeat(scanPoints.count { !it.importedFromEsx }) { add(LastAction.SCAN) }
@@ -202,6 +204,7 @@ class MainViewModel @JvmOverloads constructor(
             it.copy(
                 scanPoints = it.scanPoints + point,
                 actionHistory = it.actionHistory + LastAction.SCAN,
+                movedSuggestion = null,
                 interaction = SurveyInteraction.Idle
             )
         }
@@ -326,6 +329,11 @@ class MainViewModel @JvmOverloads constructor(
                 actionHistory = state.actionHistory.dropLast(1),
                 lastUndoneAction = action
             )
+            LastAction.SUGGESTION_SKIP -> state.copy(
+                skippedSuggestions = state.skippedSuggestions.dropLast(1),
+                actionHistory = state.actionHistory.dropLast(1),
+                lastUndoneAction = action
+            )
         }
         return action
     }
@@ -385,8 +393,29 @@ class MainViewModel @JvmOverloads constructor(
             metersPerUnit = state.metersPerUnit,
             scanPoints = state.scanPoints.toList(),
             continuousScanSessions = state.continuousScanSessions.map { it.immutableCopy() },
-            notes = state.notes.toList()
+            notes = state.notes.toList(),
+            skippedSuggestions = state.skippedSuggestions.map { SkippedSuggestion(it.x, it.y) }
         )
+    }
+
+    /** Marks the cell containing [coordinate] as "do not measure"; undoable. */
+    fun skipSuggestion(coordinate: SurveyCoordinate): Boolean {
+        val state = _screenState.value
+        if (state.interaction !is SurveyInteraction.Idle) return false
+        _screenState.value = state.copy(
+            skippedSuggestions = state.skippedSuggestions + coordinate,
+            movedSuggestion = null,
+            actionHistory = state.actionHistory + LastAction.SUGGESTION_SKIP
+        )
+        return true
+    }
+
+    /** The user dragged the next point elsewhere; it is kept until measured or skipped. */
+    fun moveSuggestion(coordinate: SurveyCoordinate): Boolean {
+        val state = _screenState.value
+        if (state.interaction !is SurveyInteraction.Idle) return false
+        _screenState.value = state.copy(movedSuggestion = coordinate)
+        return true
     }
 
     private fun startContinuousTrack(coordinate: SurveyCoordinate) {

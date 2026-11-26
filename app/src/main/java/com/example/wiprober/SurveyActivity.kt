@@ -10,7 +10,11 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.text.InputType
 import android.util.Log
+import android.annotation.SuppressLint
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
+import androidx.core.view.isVisible
 import android.widget.Button
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -48,6 +52,12 @@ class SurveyActivity : AppCompatActivity() {
     private val projectRepository by lazy { ProjectRepository(applicationContext) }
     private val throughputSettingsStore by lazy { ThroughputSettingsStore(applicationContext) }
     private val throughputProbe by lazy { ThroughputProbe(applicationContext) }
+    private val surveyGuideStore by lazy { SurveyGuideSettingsStore(applicationContext) }
+    /** Suggestion currently drawn on the map (floor-plan pixels), if any. */
+    private var currentSuggestion: SurveyCoordinate? = null
+    /** Last finger-down position on the map, for long-press moves of the suggestion. */
+    private var lastMapDownX = 0f
+    private var lastMapDownY = 0f
     private val noteImageMetadataReader by lazy { NoteImageMetadataReader(contentResolver) }
     private lateinit var wifiScanner: WifiScanner
     private lateinit var androidCoordinator: SurveyAndroidCoordinator
@@ -95,6 +105,7 @@ class SurveyActivity : AppCompatActivity() {
         setupWindowInsets()
         setupWorkspaceChrome()
         setupClickListeners()
+        setupSurveyGuideGestures()
         onBackPressedDispatcher.addCallback(this) {
             val blockingProjectOperation = binding.projectOperationOverlay.visibility == View.VISIBLE &&
                 binding.projectOperationProgress.visibility == View.VISIBLE
@@ -224,10 +235,12 @@ class SurveyActivity : AppCompatActivity() {
                     val surveyChanged = state.scanPoints != previous.scanPoints ||
                         state.continuousScanSessions != previous.continuousScanSessions ||
                         state.notes != previous.notes ||
-                        state.metersPerUnit != previous.metersPerUnit
+                        state.metersPerUnit != previous.metersPerUnit ||
+                        state.skippedSuggestions != previous.skippedSuggestions
 
                     binding.pointsOverlay.setScanPoints(state.scanPoints.map { Pair(it.x, it.y) })
                     binding.pointsOverlay.setCompletedTracks(state.continuousScanSessions)
+                    renderSurveyGuide(state)
                     binding.pointsOverlay.setActiveTrack(
                         state.activeTrackPoints.map { android.graphics.PointF(it.x, it.y) }
                     )
@@ -300,6 +313,7 @@ class SurveyActivity : AppCompatActivity() {
                             LastAction.SCAN -> R.string.last_scan_undone
                             LastAction.NOTE -> R.string.last_note_undone
                             LastAction.SCAN_SESSION -> R.string.last_track_undone
+                            LastAction.SUGGESTION_SKIP -> R.string.last_skip_undone
                         }
                         Toast.makeText(this@SurveyActivity, message, Toast.LENGTH_SHORT).show()
                         viewModel.consumeLastUndoneAction()
@@ -323,6 +337,12 @@ class SurveyActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.action_export_esx -> {
                     requestProjectExport()
+                    true
+                }
+                R.id.action_survey_guide -> {
+                    SurveyGuideSettingsDialog.show(this, surveyGuideStore) {
+                        renderSurveyGuide(viewModel.screenState.value)
+                    }
                     true
                 }
                 R.id.action_throughput_settings -> {
@@ -418,8 +438,10 @@ class SurveyActivity : AppCompatActivity() {
                         }
                     } else {
                         if (prepareForScan()) {
-                            lastTouchX = originalCoords[0]
-                            lastTouchY = originalCoords[1]
+                            // A tap on the suggestion measures exactly at the suggested point.
+                            val target = suggestionAt(x, y)
+                            lastTouchX = target?.x ?: originalCoords[0]
+                            lastTouchY = target?.y ?: originalCoords[1]
                             if (viewModel.requestStopAndGoScan(lastTouchX, lastTouchY)) {
                                 androidCoordinator.ensureWifiScanAccess()
                             }
@@ -429,6 +451,82 @@ class SurveyActivity : AppCompatActivity() {
             }
         }
 
+    }
+
+    @SuppressLint("ClickableViewAccessibility") // only records the position; PhotoView handles the touch
+    private fun setupSurveyGuideGestures() {
+        binding.pointsOverlay.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                lastMapDownX = event.x
+                lastMapDownY = event.y
+            }
+            false
+        }
+        binding.mapImageView.setOnLongClickListener {
+            val state = viewModel.screenState.value
+            if (!guideActive(state) || state.interaction !is SurveyInteraction.Idle) return@setOnLongClickListener false
+            val coords = getOriginalImageCoordinates(binding.mapImageView, lastMapDownX, lastMapDownY)
+                ?: return@setOnLongClickListener false
+            if (viewModel.moveSuggestion(SurveyCoordinate(coords[0], coords[1]))) {
+                binding.mapImageView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                Toast.makeText(this, R.string.guide_moved, Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
+        binding.skipSuggestionButton.setOnClickListener {
+            val suggestion = currentSuggestion ?: return@setOnClickListener
+            if (viewModel.skipSuggestion(suggestion)) {
+                Toast.makeText(this, R.string.guide_skipped, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** Stop-and-Go on a calibrated floor with the guide enabled. */
+    private fun guideActive(state: SurveyScreenState): Boolean =
+        state.hasMap && state.scanMode == SurveyScanMode.STOP_AND_GO &&
+            surveyGuideStore.load().enabled && (state.metersPerUnit ?: 0.0) > 0.0
+
+    /** Coverage gradient, next suggested point, Skip button and the "calibrate first" hint. */
+    private fun renderSurveyGuide(state: SurveyScreenState) {
+        val settings = surveyGuideStore.load()
+        val map = state.mapInfo
+        val scale = state.metersPerUnit?.takeIf { it > 0.0 }
+        val showGuide = settings.enabled && map != null && scale != null
+        binding.pointsOverlay.setCoverage(
+            samples = if (showGuide) {
+                SurveyGuide.coverageSamples(state.scanPoints, state.continuousScanSessions, settings.ssidFilter)
+            } else {
+                emptyList()
+            },
+            radiusPx = if (showGuide) (settings.coverageRadiusMeters / scale!!).toFloat() else null,
+            sourceWidth = map?.width ?: 0,
+            sourceHeight = map?.height ?: 0
+        )
+        val suggestion = if (showGuide && state.scanMode == SurveyScanMode.STOP_AND_GO) {
+            state.movedSuggestion ?: SurveyGuide.suggestNext(
+                map!!.width, map.height, scale, settings,
+                SurveyGuide.measurementOrder(state.scanPoints, state.continuousScanSessions),
+                state.skippedSuggestions
+            )
+        } else {
+            null
+        }
+        currentSuggestion = suggestion
+        binding.pointsOverlay.setSuggestion(
+            suggestion?.let { android.graphics.PointF(it.x, it.y) },
+            moved = state.movedSuggestion != null
+        )
+        binding.skipSuggestionButton.isVisible = suggestion != null && state.interaction is SurveyInteraction.Idle
+        binding.surveyGuideHint.isVisible = settings.enabled && map != null && scale == null &&
+            state.scanMode == SurveyScanMode.STOP_AND_GO
+    }
+
+    /** The suggestion if the tap ([x], [y] in map view coordinates) landed on its marker. */
+    private fun suggestionAt(x: Float, y: Float): SurveyCoordinate? {
+        val suggestion = currentSuggestion ?: return null
+        val marker = binding.pointsOverlay.screenPosition(suggestion.x, suggestion.y) ?: return null
+        val touchRadius = SUGGESTION_TOUCH_RADIUS_DP * resources.displayMetrics.density
+        return suggestion.takeIf { kotlin.math.hypot(x - marker.x, y - marker.y) <= touchRadius }
     }
 
     private fun setupWindowInsets() {
@@ -1308,7 +1406,8 @@ class SurveyActivity : AppCompatActivity() {
             scale = floor.metersPerUnit,
             scanPoints = floor.scanPoints,
             continuousSessions = floor.continuousScanSessions,
-            notes = floor.notes
+            notes = floor.notes,
+            skippedSuggestions = floor.skippedSuggestions
         )
         binding.mapImageView.post(::syncOverlayTransform)
     }
@@ -1390,6 +1489,7 @@ class SurveyActivity : AppCompatActivity() {
         private const val NOTE_PREVIEW_MAX_SIZE_PX = 1_024
         const val EXTRA_PROJECT_ID = "project_id"
         private const val SAVE_DEBOUNCE_MILLIS = 750L
+        private const val SUGGESTION_TOUCH_RADIUS_DP = 32f
         private const val SCAN_RETRY_DELAY_MILLIS = 1_000L
         private const val STATE_LAST_TOUCH_X = "last_touch_x"
         private const val STATE_LAST_TOUCH_Y = "last_touch_y"

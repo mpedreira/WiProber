@@ -48,6 +48,8 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `ThroughputProbe.kt`: Android boundary; binds every connection to the Wi-Fi `Network` and reads the associated AP.
 - `ThroughputSettingsDialog.kt`: SharedPreferences store and settings dialog. Server names/URLs live on the device, never in the code.
 - `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file). It is never written inside the ESX.
+- `SurveyGuide.kt`: Android-free survey guide: grid next-point suggestion (needs a calibrated scale), coverage samples (Continuous scans placed along the route by time) and the RSSI colour gradient.
+- `SurveyGuideSettingsDialog.kt`: device-side guide settings (spacing, coverage radius, SSID filter) and their dialog. Skipped guide cells are persisted with the floor (`skippedSuggestions`), never exported.
 - `app/src/main/assets/`: static ESX payloads copied into every export. These files are part of the export contract, not generic sample data.
 
 Do not add more business logic to `SurveyActivity`. Prefer extracting a small, testable boundary (scanner, permission coordinator, survey state reducer/use case, ESX reader/writer, or storage component) as part of the change being made.

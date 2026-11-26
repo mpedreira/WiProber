@@ -234,4 +234,17 @@
     <string name="throughput_phase_latency">latency</string>
     <string name="throughput_phase_download">download</string>
     <string name="throughput_phase_upload">upload</string>
+    <!-- Survey guide: next suggested point and coverage -->
+    <string name="action_survey_guide">Survey guide</string>
+    <string name="guide_settings_title">Survey guide</string>
+    <string name="guide_settings_hint">Suggests the next Stop-and-Go point on a grid and shades the measured area, coloured by signal (red −85 dBm → green −55 dBm). Needs the floor scale. Tap the suggestion to measure there, long-press the map to move it, or Skip it.</string>
+    <string name="guide_enabled">Show suggestion and coverage</string>
+    <string name="guide_spacing">Point spacing (m)</string>
+    <string name="guide_radius">Coverage radius (m)</string>
+    <string name="guide_ssid">Coverage SSID (empty = all networks)</string>
+    <string name="guide_skip">Skip</string>
+    <string name="guide_skipped">Cell skipped. Use Undo to bring it back.</string>
+    <string name="guide_moved">Next point moved here</string>
+    <string name="guide_needs_scale">Calibrate the scale to see the survey guide</string>
+    <string name="last_skip_undone">Skipped cell restored</string>
 </resources>

@@ -46,7 +46,8 @@ data class LocalSurveyFloor(
     val metersPerUnit: Double?,
     val scanPoints: List<ScanPoint>,
     val continuousScanSessions: List<ContinuousScanSession>,
-    val notes: List<AppNote>
+    val notes: List<AppNote>,
+    val skippedSuggestions: List<SkippedSuggestion> = emptyList()
 )
 
 data class LocalSurveyProject(
@@ -63,7 +64,9 @@ data class ProjectSnapshot(
     val metersPerUnit: Double?,
     val scanPoints: List<ScanPoint>,
     val continuousScanSessions: List<ContinuousScanSession>,
-    val notes: List<AppNote>
+    val notes: List<AppNote>,
+    /** Survey-guide cells marked "do not measure"; app-only, never exported. */
+    val skippedSuggestions: List<SkippedSuggestion> = emptyList()
 )
 
 data class ProjectExportSnapshot(
@@ -338,7 +341,8 @@ class ProjectRepository(
                         metersPerUnit = loaded.metersPerUnit,
                         scanPoints = loaded.scanPoints,
                         continuousScanSessions = loaded.continuousScanSessions,
-                        notes = loaded.notes
+                        notes = loaded.notes,
+                        skippedSuggestions = loaded.skippedSuggestions
                     )
                 )
             }
@@ -401,7 +405,8 @@ class ProjectRepository(
             metersPerUnit = survey.metersPerUnit,
             scanPoints = survey.scanPoints,
             continuousScanSessions = survey.continuousScanSessions,
-            notes = survey.notes.map { note -> note.toAppNote(projectDirectory) }
+            notes = survey.notes.map { note -> note.toAppNote(projectDirectory) },
+            skippedSuggestions = survey.skippedSuggestions.orEmpty()
         )
     }
 
@@ -431,7 +436,8 @@ class ProjectRepository(
                 metersPerUnit = snapshot.metersPerUnit,
                 scanPoints = snapshot.scanPoints,
                 continuousScanSessions = snapshot.continuousScanSessions,
-                notes = storedNotes
+                notes = storedNotes,
+                skippedSuggestions = snapshot.skippedSuggestions
             ).validate(projectDirectory)
         writeJsonAtomically(
             resolveProjectFile(projectDirectory, floor.surveyRelativePath),
@@ -1021,7 +1027,9 @@ class ProjectRepository(
         val metersPerUnit: Double? = null,
         val scanPoints: List<ScanPoint> = emptyList(),
         val continuousScanSessions: List<ContinuousScanSession> = emptyList(),
-        val notes: List<StoredNote> = emptyList()
+        val notes: List<StoredNote> = emptyList(),
+        /** Nullable: survey files written before the survey guide have no such field. */
+        val skippedSuggestions: List<SkippedSuggestion>? = emptyList()
     )
 
     private fun StoredSurvey.validate(projectDirectory: File): StoredSurvey {
@@ -1030,6 +1038,9 @@ class ProjectRepository(
             "Project contains too many Continuous sessions"
         }
         require(notes.size <= MAX_NOTES) { "Project contains too many notes" }
+        require(skippedSuggestions.orEmpty().size <= MAX_SKIPPED_SUGGESTIONS) {
+            "Project contains too many skipped guide cells"
+        }
         val waypointCount = continuousScanSessions.sumOf { it.waypoints.size.toLong() }
         val scanResultCount = continuousScanSessions.sumOf { it.scanResults.size.toLong() }
         val networkCount = scanPoints.sumOf { it.wifiNetworks.size.toLong() } +
@@ -1066,6 +1077,7 @@ class ProjectRepository(
     )
 
     companion object {
+        private const val MAX_SKIPPED_SUGGESTIONS = 100_000
         private const val PROJECT_SCHEMA_VERSION = 3
         private const val PREVIOUS_PROJECT_SCHEMA_VERSION = 2
         private const val LEGACY_PROJECT_SCHEMA_VERSION = 1

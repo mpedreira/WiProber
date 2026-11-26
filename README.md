@@ -171,3 +171,12 @@ Projects with results are exported as a ZIP: the `.esx` (unchanged, opens in Eka
 Each row also carries, when Android reports them: `rxLinkMbps` (`linkMbps` is the transmit rate), `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard` of the connected AP; `bssStationCount` and `bssChannelUtilizationPct` from the AP's BSS Load beacon element (only APs that advertise it); `latencyAvgMs`, `jitterMs` and `latencySamples` (10 TCP handshakes; `latencyMs` is the minimum); `deviceModel` and `androidVersion` of the phone. Android does not expose the noise floor, so there is no noise/SNR field.
 
 Values that could not be measured are `null` with the reason in `error`, never `0`. `x`/`y` are original floor-plan pixels, equal to the point's survey route point in the ESX; `surveyId` matches the ESX in the same ZIP only (it changes on every export), `floorPlanId` + `x`/`y` are stable.
+
+## Survey guide (fork mpedreira/WiProber)
+
+Once a floor's scale is calibrated, Stop-and-Go shows (menu → *Survey guide* to configure):
+
+- **Next suggested point** on a grid (default every 10 m), NetSpot-style: the nearest unmeasured cell from the last point, preferring to keep walking the same way. Tap the marker to measure exactly there, tap anywhere else to measure there, long-press the map to move the suggestion, or **Skip** a cell (outside the building, racks…). Skipped cells are saved with the floor and Undo restores the last one.
+- **Coverage**: every measurement (Stop-and-Go points and Continuous routes) shades a radius around it (default 5 m) with a gradient coloured by its strongest signal, red at −85 dBm through yellow to green at −55 dBm. Optionally only one SSID counts.
+
+All of this is drawn in the app only; nothing changes in the ESX or `wiprober-performance.json`.

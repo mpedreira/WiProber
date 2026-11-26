@@ -1,12 +1,17 @@
 package com.example.wiprober
 
 import android.content.Context
+import android.graphics.Bitmap
+import androidx.core.graphics.createBitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
 
@@ -78,6 +83,86 @@ class PointsOverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
+    // --- Survey guide: coverage gradient (pre-rendered in floor-plan space) and next point ---
+    private var coverageBitmap: Bitmap? = null
+    private var coverageKey: Any? = null
+    private var suggestion: PointF? = null
+    private var suggestionMoved = false
+    private val density = resources.displayMetrics.density
+    private val coveragePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val coverageMatrix = Matrix()
+    private val suggestionPaint = Paint().apply {
+        color = SUGGESTION_COLOR
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+        pathEffect = DashPathEffect(floatArrayOf(8f * density, 5f * density), 0f)
+        isAntiAlias = true
+    }
+    private val suggestionCrossPaint = Paint().apply {
+        color = SUGGESTION_COLOR
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        isAntiAlias = true
+    }
+    private val suggestionHaloPaint = Paint().apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 6f * density
+        isAntiAlias = true
+    }
+
+    /** Screen position (this view's coordinates) of a floor-plan point, or null before layout. */
+    fun screenPosition(x: Float, y: Float): PointF? {
+        val matrix = imageMatrix ?: return null
+        val t = transformPoint(x, y, matrix)
+        return PointF(t[0], t[1])
+    }
+
+    /**
+     * Coverage of each measurement: a radial gradient of [radiusPx] floor-plan pixels coloured by
+     * its strongest signal. Rendered once into a down-scaled bitmap so panning stays cheap.
+     */
+    fun setCoverage(samples: List<CoverageSample>, radiusPx: Float?, sourceWidth: Int, sourceHeight: Int) {
+        val key = listOf(samples, radiusPx, sourceWidth, sourceHeight)
+        if (key == coverageKey) return
+        coverageKey = key
+        coverageBitmap = null
+        if (radiusPx != null && radiusPx > 0f && samples.isNotEmpty() && sourceWidth > 0 && sourceHeight > 0) {
+            val scale = minOf(1f, MAX_COVERAGE_SIDE.toFloat() / maxOf(sourceWidth, sourceHeight))
+            val bitmap = createBitmap(
+                (sourceWidth * scale).toInt().coerceAtLeast(1),
+                (sourceHeight * scale).toInt().coerceAtLeast(1)
+            )
+            val canvas = Canvas(bitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            val radius = (radiusPx * scale).coerceAtLeast(1f)
+            // Weakest first, so the strongest reading at a spot is the one on top.
+            samples.sortedBy { it.bestRssi ?: Int.MIN_VALUE }.forEach { sample ->
+                val color = SurveyGuide.rssiColor(sample.bestRssi)
+                paint.shader = RadialGradient(
+                    sample.x * scale, sample.y * scale, radius,
+                    intArrayOf(withAlpha(color, 170), withAlpha(color, 120), withAlpha(color, 0)),
+                    floatArrayOf(0f, 0.6f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(sample.x * scale, sample.y * scale, radius, paint)
+            }
+            coverageBitmap = bitmap
+        }
+        invalidate()
+    }
+
+    /** Next suggested point (floor-plan pixels); [moved] when the user placed it by hand. */
+    fun setSuggestion(point: PointF?, moved: Boolean) {
+        if (point == suggestion && moved == suggestionMoved) return
+        suggestion = point
+        suggestionMoved = moved
+        suggestionPaint.pathEffect = if (moved) null else DashPathEffect(floatArrayOf(8f * density, 5f * density), 0f)
+        invalidate()
+    }
+
+    private fun withAlpha(color: Int, alpha: Int) = (color and 0x00FFFFFF) or (alpha shl 24)
+
     internal fun updateTransform(matrix: Matrix, coordinateMapper: ImageCoordinateMapper) {
         this.imageMatrix = Matrix(matrix)
         this.coordinateMapper = coordinateMapper
@@ -127,6 +212,9 @@ class PointsOverlayView @JvmOverloads constructor(
     }
 
     fun clearAll() {
+        coverageBitmap = null
+        coverageKey = null
+        suggestion = null
         pointsToDraw.clear()
         noteMarkers.clear()
         calibrationLinePoints.clear()
@@ -140,6 +228,16 @@ class PointsOverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val currentMatrix = imageMatrix ?: return
+
+        // 0. Coverage gradient under everything else
+        coverageBitmap?.let { bitmap ->
+            val mapper = coordinateMapper
+            val drawableWidth = mapper?.drawableWidth?.toFloat() ?: bitmap.width.toFloat()
+            val drawableHeight = mapper?.drawableHeight?.toFloat() ?: bitmap.height.toFloat()
+            coverageMatrix.setScale(drawableWidth / bitmap.width, drawableHeight / bitmap.height)
+            coverageMatrix.postConcat(currentMatrix)
+            canvas.drawBitmap(bitmap, coverageMatrix, coveragePaint)
+        }
 
         // 1. Рисуем ЗАВЕРШЕННЫЕ треки (Зеленые)
         for (track in completedTracks) {
@@ -181,6 +279,17 @@ class PointsOverlayView @JvmOverloads constructor(
                 canvas.drawLine(transformedPoints[0].x, transformedPoints[0].y, transformedPoints[1].x, transformedPoints[1].y, calibrationPaint)
             }
         }
+
+        // 6. Next suggested point: ring with a cross (dashed when computed, solid when moved by hand)
+        suggestion?.let { point ->
+            val t = transformPoint(point.x, point.y, currentMatrix)
+            val ring = SUGGESTION_RADIUS_DP * density
+            val arm = ring * 0.55f
+            canvas.drawCircle(t[0], t[1], ring, suggestionHaloPaint)
+            canvas.drawCircle(t[0], t[1], ring, suggestionPaint)
+            canvas.drawLine(t[0] - arm, t[1], t[0] + arm, t[1], suggestionCrossPaint)
+            canvas.drawLine(t[0], t[1] - arm, t[0], t[1] + arm, suggestionCrossPaint)
+        }
     }
 
     // Helper: Рисует линию по списку точек
@@ -210,5 +319,11 @@ class PointsOverlayView @JvmOverloads constructor(
         val arr = coordinateMapper?.sourceToDrawable(x, y) ?: floatArrayOf(x, y)
         matrix.mapPoints(arr)
         return arr
+    }
+
+    private companion object {
+        const val MAX_COVERAGE_SIDE = 1_024
+        const val SUGGESTION_RADIUS_DP = 18f
+        val SUGGESTION_COLOR = Color.rgb(21, 101, 192)
     }
 }

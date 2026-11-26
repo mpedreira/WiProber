@@ -67,6 +67,33 @@
         app:layout_constraintStart_toStartOf="@id/mapImageView"
         app:layout_constraintTop_toTopOf="@id/mapImageView" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/skipSuggestionButton"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="12dp"
+        android:text="@string/guide_skip"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="@id/mapImageView"
+        app:layout_constraintTop_toTopOf="@id/mapImageView" />
+
+    <TextView
+        android:id="@+id/surveyGuideHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="12dp"
+        android:background="?attr/colorSurfaceContainerHigh"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="6dp"
+        android:text="@string/guide_needs_scale"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="@id/mapImageView"
+        app:layout_constraintTop_toTopOf="@id/mapImageView" />
+
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/surveyDock"
         android:layout_width="0dp"

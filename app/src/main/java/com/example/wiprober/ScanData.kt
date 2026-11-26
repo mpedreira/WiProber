@@ -1,6 +1,10 @@
 package com.example.wiprober
 
-enum class LastAction { SCAN, NOTE, SCAN_SESSION }
+enum class LastAction { SCAN, NOTE, SCAN_SESSION, SUGGESTION_SKIP }
+
+/** A survey-guide grid cell the user marked "do not measure" (any point inside it, floor pixels). */
+@JsonModel
+data class SkippedSuggestion(val x: Float, val y: Float)
 
 // Этот класс будет представлять одну точку сканирования на карте
 @JsonModel

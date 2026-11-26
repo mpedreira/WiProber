@@ -188,6 +188,42 @@ class MainViewModelTest {
         )
     }
 
+    @Test
+    fun skippedGuideCellsAreUndoableAndSavedWithTheFloor() {
+        val vm = viewModel()
+        vm.loadProject(MapInfo("m.png", 100, 100), 0.1, emptyList(), emptyList(), emptyList(),
+            skippedSuggestions = listOf(SkippedSuggestion(1f, 2f)))
+
+        assertTrue(vm.skipSuggestion(SurveyCoordinate(50f, 50f)))
+        assertEquals(
+            listOf(SkippedSuggestion(1f, 2f), SkippedSuggestion(50f, 50f)),
+            vm.projectSnapshot()!!.skippedSuggestions
+        )
+
+        assertEquals(LastAction.SUGGESTION_SKIP, vm.undoLastAction())
+        assertEquals(listOf(SurveyCoordinate(1f, 2f)), vm.screenState.value.skippedSuggestions)
+        assertEquals(null, vm.undoLastAction()) // the loaded skip is not part of this session's undo
+    }
+
+    @Test
+    fun aMovedSuggestionIsKeptUntilThePointIsMeasuredOrSkipped() {
+        val vm = viewModel()
+        vm.loadProject(MapInfo("m.png", 100, 100), 0.1, emptyList(), emptyList(), emptyList())
+
+        assertTrue(vm.moveSuggestion(SurveyCoordinate(30f, 40f)))
+        assertEquals(SurveyCoordinate(30f, 40f), vm.screenState.value.movedSuggestion)
+
+        vm.requestStopAndGoScan(30f, 40f)
+        assertFalse(vm.moveSuggestion(SurveyCoordinate(1f, 1f))) // busy: not while scanning
+        vm.grantPendingScanAccess()
+        vm.completeStopAndGoScan(emptyList())
+        assertEquals(null, vm.screenState.value.movedSuggestion)
+
+        vm.moveSuggestion(SurveyCoordinate(60f, 60f))
+        vm.skipSuggestion(SurveyCoordinate(60f, 60f))
+        assertEquals(null, vm.screenState.value.movedSuggestion)
+    }
+
     private fun viewModel(
         clock: FakeClock = FakeClock(1L),
         ids: IdSource = SequenceIdSource("id")

@@ -57,6 +57,10 @@ data class SurveyScreenState(
     val continuousScanSessions: List<ContinuousScanSession> = emptyList(),
     val notes: List<AppNote> = emptyList(),
     val actionHistory: List<LastAction> = emptyList(),
+    /** Survey-guide cells the user skipped (persisted with the floor). */
+    val skippedSuggestions: List<SurveyCoordinate> = emptyList(),
+    /** Next point the user moved by hand; replaces the computed suggestion until used or skipped. */
+    val movedSuggestion: SurveyCoordinate? = null,
     val scanMode: SurveyScanMode = SurveyScanMode.STOP_AND_GO,
     val interaction: SurveyInteraction = SurveyInteraction.Idle,
     val lastUndoneAction: LastAction? = null
