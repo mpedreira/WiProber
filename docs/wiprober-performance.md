@@ -1,6 +1,6 @@
 # nimWifi performance export (`wiprober-performance.json`)
 
-Specification of the file produced by the [mpedreira/WiProber](https://github.com/mpedreira/WiProber) fork so that an external application (e.g. an analysis web app) can join it with the Ekahau `.esx`.
+Specification of the file produced by the [mpedreira/nimwifi](https://github.com/mpedreira/nimwifi) fork so that an external application (e.g. an analysis web app) can join it with the Ekahau `.esx`.
 
 Status: **format 2** (one row per active run, with run and phase statuses). Format 1 was produced by releases `v3.0.0-throughput.1` to `.4` (see [History](#7-history)).
 

@@ -1,6 +1,6 @@
 # WiProber Privacy Policy
 
-## Notice for the mpedreira/WiProber fork
+## Notice for the mpedreira/nimwifi fork
 
 This repository is a fork of [htechno/WiProber](https://github.com/htechno/WiProber). The policy below is an English translation of the original author's policy (the original Russian text is in the upstream repository). The fork changes the following:
 
@@ -8,7 +8,7 @@ This repository is a fork of [htechno/WiProber](https://github.com/htechno/WiPro
 - **Imported configuration.** Server names, URLs and credentials in an imported configuration or `.har` file are stored in the app's private storage on the device and are excluded from Android backups and device transfers. Credentials are kept in a separate file, never shown on screen and never written to exports; credentials found in a `.har` recording are removed on import.
 - **Additional data in projects and exports.** Test results stored in projects and exported to `wiprober-performance.json` include the associated access point (SSID, BSSID, signal, link rates, channel), the phone model and Android version, timings and the hosts/paths tested (without query strings).
 - The fork does not add advertising, accounts or analytics, and does not send projects to any developer server.
-- Questions about the fork: open an issue at https://github.com/mpedreira/WiProber/issues.
+- Questions about the fork: open an issue at https://github.com/mpedreira/nimwifi/issues.
 
 ## Original policy (translated)
 

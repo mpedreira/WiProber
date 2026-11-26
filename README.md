@@ -6,7 +6,7 @@ This project was born out of the need for a simple, mobile-first tool for networ
 
 Version **3.0.0** requires **Android 11 (API 30) or newer**. It adds a project hub, recent projects, multi-floor surveying, and ESX import that preserves original archive contents while adding new surveys.
 
-> **About this fork.** [mpedreira/WiProber](https://github.com/mpedreira/WiProber) extends the original [htechno/WiProber](https://github.com/htechno/WiProber) with **active survey** features: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe and a NetSpot-style survey guide. Results are exported next to the unchanged `.esx` in a ZIP, as documented in [docs/wiprober-performance.md](docs/wiprober-performance.md). Prebuilt APKs are on the [Releases](https://github.com/mpedreira/WiProber/releases) page; how field builds are versioned, identified and signed is in [docs/release-process.md](docs/release-process.md).
+> **About this fork.** [mpedreira/nimwifi](https://github.com/mpedreira/nimwifi) extends the original [htechno/WiProber](https://github.com/htechno/WiProber) with **active survey** features: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe and a NetSpot-style survey guide. Results are exported next to the unchanged `.esx` in a ZIP, as documented in [docs/wiprober-performance.md](docs/wiprober-performance.md). Prebuilt APKs are on the [Releases](https://github.com/mpedreira/nimwifi/releases) page; how field builds are versioned, identified and signed is in [docs/release-process.md](docs/release-process.md).
 
 ## Screenshots
 
@@ -71,14 +71,14 @@ This is a non-commercial, open-source project. Please be aware of the following 
 *   An Android device with Android 11 (API 30) or higher.
 
 ### Building and Running
-1.  Clone the repository: `git clone https://github.com/mpedreira/WiProber.git` (this fork) or `https://github.com/htechno/WiProber.git` (original).
+1.  Clone the repository: `git clone https://github.com/mpedreira/nimwifi.git` (this fork) or `https://github.com/htechno/WiProber.git` (original).
 2.  Open the project in Android Studio.
 3.  Let Gradle sync and download all dependencies.
 4.  Build and run the application on your device.
 
 ### Installing a prebuilt APK (fork)
 
-Each fork release on the [Releases](https://github.com/mpedreira/WiProber/releases) page attaches a debug-signed APK (`com.mpedreira.nimwifi.debug`) with its SHA-256 in the notes. Open the release on the phone, download the APK and install it. It installs next to the F-Droid build; export your projects before uninstalling any build.
+Each fork release on the [Releases](https://github.com/mpedreira/nimwifi/releases) page attaches a debug-signed APK (`com.mpedreira.nimwifi.debug`) with its SHA-256 in the notes. Open the release on the phone, download the APK and install it. It installs next to the F-Droid build; export your projects before uninstalling any build.
 
 ### Building an APK on GitHub
 
