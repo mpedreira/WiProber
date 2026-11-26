@@ -111,6 +111,21 @@ class PointsOverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
+    private var guideGrid: GuideGrid? = null
+    private val gridPaint = Paint().apply {
+        color = GRID_COLOR
+        style = Paint.Style.STROKE
+        strokeWidth = 1f * density
+        isAntiAlias = true
+    }
+
+    /** Survey-guide grid drawn over the plan; null hides it. */
+    fun setGuideGrid(grid: GuideGrid?) {
+        if (grid == guideGrid) return
+        guideGrid = grid
+        invalidate()
+    }
+
     /** Screen position (this view's coordinates) of a floor-plan point, or null before layout. */
     fun screenPosition(x: Float, y: Float): PointF? {
         val matrix = imageMatrix ?: return null
@@ -229,6 +244,7 @@ class PointsOverlayView @JvmOverloads constructor(
 
     fun clearAll() {
         coverageBitmap = null
+        guideGrid = null
         coverageKey = null
         suggestion = null
         pointsToDraw.clear()
@@ -255,6 +271,9 @@ class PointsOverlayView @JvmOverloads constructor(
             coverageMatrix.postConcat(currentMatrix)
             canvas.drawBitmap(bitmap, coverageMatrix, coveragePaint)
         }
+
+        // 0b. Survey-guide grid over the coverage, under points and routes
+        guideGrid?.let { drawGuideGrid(canvas, it, currentMatrix) }
 
         // 1. Рисуем ЗАВЕРШЕННЫЕ треки (Зеленые)
         for (track in completedTracks) {
@@ -337,6 +356,40 @@ class PointsOverlayView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Grid lines in floor-plan pixels through the PhotoView matrix. When zoomed out so far that
+     * cells would be closer than [MIN_GRID_SPACING_DP], only every n-th line is drawn.
+     */
+    private fun drawGuideGrid(canvas: Canvas, grid: GuideGrid, matrix: Matrix) {
+        val origin = transformPoint(0f, 0f, matrix)
+        val step = transformPoint(grid.cellPx, 0f, matrix)
+        val onScreen = kotlin.math.hypot(step[0] - origin[0], step[1] - origin[1])
+        if (!(onScreen > 0f)) return
+        val stride = kotlin.math.ceil(MIN_GRID_SPACING_DP * density / onScreen).toInt().coerceAtLeast(1)
+        val width = grid.mapWidth.toFloat()
+        val height = grid.mapHeight.toFloat()
+        var x = 0f
+        var column = 0
+        while (x <= width) {
+            if (column % stride == 0) drawSourceLine(canvas, x, 0f, x, height, matrix)
+            column++
+            x = column * grid.cellPx
+        }
+        var y = 0f
+        var row = 0
+        while (y <= height) {
+            if (row % stride == 0) drawSourceLine(canvas, 0f, y, width, y, matrix)
+            row++
+            y = row * grid.cellPx
+        }
+    }
+
+    private fun drawSourceLine(canvas: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, matrix: Matrix) {
+        val a = transformPoint(x0, y0, matrix)
+        val b = transformPoint(x1, y1, matrix)
+        canvas.drawLine(a[0], a[1], b[0], b[1], gridPaint)
+    }
+
     // Helper: Рисует линию по списку точек
     private fun drawPath(canvas: Canvas, points: List<PointF>, paint: Paint, matrix: Matrix) {
         if (points.size < 2) return
@@ -370,5 +423,7 @@ class PointsOverlayView @JvmOverloads constructor(
         const val MAX_COVERAGE_SIDE = 1_024
         const val SUGGESTION_RADIUS_DP = 18f
         val SUGGESTION_COLOR = Color.rgb(21, 101, 192)
+        const val MIN_GRID_SPACING_DP = 12f
+        val GRID_COLOR = Color.argb(120, 40, 40, 40)
     }
 }

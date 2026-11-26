@@ -26,6 +26,9 @@ data class SurveyGuideSettings(
     }
 }
 
+/** Survey-guide grid in original floor-plan pixels: square cells of [cellPx] from the top-left corner. */
+data class GuideGrid(val cellPx: Float, val mapWidth: Int, val mapHeight: Int)
+
 /** Where a measurement was taken (floor-plan pixels) and the strongest signal seen there. */
 data class CoverageSample(val x: Float, val y: Float, val bestRssi: Int?)
 
@@ -85,8 +88,8 @@ object SurveyGuide {
         skipped: List<SurveyCoordinate>
     ): SurveyCoordinate? {
         val config = settings.sanitized()
-        if (!config.enabled || metersPerUnit == null || !(metersPerUnit > 0.0) || measured.isEmpty()) return null
-        val cell = (config.spacingMeters / metersPerUnit).toFloat()
+        if (!config.enabled || metersPerUnit == null || measured.isEmpty()) return null
+        val cell = cellSizePx(metersPerUnit, config) ?: return null
         val radius = (config.coverageRadiusMeters / metersPerUnit).toFloat()
         val columns = ceil(mapWidth / cell).toInt()
         val rows = ceil(mapHeight / cell).toInt()
@@ -141,6 +144,27 @@ object SurveyGuide {
             }
         }
         return best
+    }
+
+    /**
+     * Side of one guide cell in floor-plan pixels (spacing in metres through the scale): the same
+     * grid [suggestNext] works on. Null without a finite positive scale.
+     */
+    fun cellSizePx(metersPerUnit: Double?, settings: SurveyGuideSettings): Float? {
+        if (metersPerUnit == null || !metersPerUnit.isFinite() || !(metersPerUnit > 0.0)) return null
+        return (settings.sanitized().spacingMeters / metersPerUnit).toFloat().takeIf { it.isFinite() && it > 0f }
+    }
+
+    /**
+     * Grid to draw over a [mapWidth] x [mapHeight] plan, or null when there is no scale or the
+     * grid would exceed the same cell limit as [suggestNext].
+     */
+    fun grid(mapWidth: Int, mapHeight: Int, metersPerUnit: Double?, settings: SurveyGuideSettings): GuideGrid? {
+        val cell = cellSizePx(metersPerUnit, settings) ?: return null
+        val columns = ceil(mapWidth / cell).toInt()
+        val rows = ceil(mapHeight / cell).toInt()
+        if (columns <= 0 || rows <= 0 || columns.toLong() * rows > MAX_GRID_CELLS) return null
+        return GuideGrid(cell, mapWidth, mapHeight)
     }
 
     /** Opaque ARGB colour from red (≤ [WEAK_RSSI]) through yellow to green (≥ [STRONG_RSSI]). */

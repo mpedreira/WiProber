@@ -103,5 +103,32 @@ class SurveyGuideTest {
         )
     }
 
+    @Test
+    fun gridUsesTheSpacingThroughTheScale() {
+        assertEquals(GuideGrid(100f, 1_000, 500), SurveyGuide.grid(1_000, 500, scale, settings))
+        assertEquals(40f, SurveyGuide.cellSizePx(0.025, SurveyGuideSettings(spacingMeters = 1.0))!!, 0.001f)
+    }
+
+    @Test
+    fun gridNeedsAFinitePositiveScale() {
+        assertNull(SurveyGuide.grid(1_000, 500, null, settings))
+        assertNull(SurveyGuide.grid(1_000, 500, 0.0, settings))
+        assertNull(SurveyGuide.grid(1_000, 500, Double.NaN, settings))
+    }
+
+    @Test
+    fun gridIsLimitedLikeTheSuggestion() {
+        // 1 m cells at 1 m per pixel (1 px cells) on a 1 000 x 1 000 px plan: 1 000 000 cells.
+        assertNull(SurveyGuide.grid(1_000, 1_000, 1.0, SurveyGuideSettings(spacingMeters = 1.0)))
+    }
+
+    @Test
+    fun suggestionIsTheCentreOfADrawnCell() {
+        val grid = SurveyGuide.grid(1_000, 500, scale, settings)!!
+        val next = suggest(listOf(SurveyCoordinate(50f, 50f)))!!
+        assertEquals(0.5f, (next.x / grid.cellPx) % 1f, 0.001f)
+        assertEquals(0.5f, (next.y / grid.cellPx) % 1f, 0.001f)
+    }
+
     private fun net(ssid: String, level: Int) = WifiNetworkInfo(ssid, "00:11:22:33:44:${level + 100}", level, 5_180, "WPA2", emptyList(), "")
 }
