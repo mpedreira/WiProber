@@ -56,7 +56,7 @@ class EsxExportService(
                 "Cannot open the selected export destination"
             }.use { output ->
                 if (bundleEsxName != null) {
-                    val performance = PerformanceExport.build(report, bundleEsxName, System.currentTimeMillis())
+                    val performance = PerformanceExport.build(report, bundleEsxName, System.currentTimeMillis(), snapshot)
                     PerformanceExport.writeBundle(
                         output,
                         bundleEsxName,

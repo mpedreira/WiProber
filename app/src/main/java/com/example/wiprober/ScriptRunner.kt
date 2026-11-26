@@ -49,7 +49,9 @@ data class ScriptStepResult(
     val downloadMs: Double? = null,
     val totalMs: Double? = null,
     val bytes: Long? = null,
-    val error: String? = null
+    val error: String? = null,
+    /** Structured cause ([ErrorCodes]); [error] never repeats secrets. */
+    val errorCode: String? = null
 )
 
 /**
@@ -64,7 +66,9 @@ class TimedHttpClient(
     private val sslSocketFactory: SSLSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory,
     private val hostnameVerifier: HostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier(),
     private val connectTimeoutMillis: Int = 5_000,
-    private val readTimeoutMillis: Int = 15_000
+    private val readTimeoutMillis: Int = 15_000,
+    /** Tracks sockets so cancelling or a deadline closes them. */
+    private val control: MeasurementControl = MeasurementControl()
 ) {
     class Response(val status: Int, val headers: List<Pair<String, String>>, val body: ByteArray, val bytes: Long)
 
@@ -87,7 +91,7 @@ class TimedHttpClient(
         timing.dnsMs = elapsed(mark)
 
         mark = System.nanoTime()
-        val plain = socketFactory.createSocket()
+        val plain = control.track(socketFactory.createSocket())
         var socket: Socket = plain
         try {
             plain.soTimeout = readTimeoutMillis
@@ -127,6 +131,7 @@ class TimedHttpClient(
             timing.downloadMs = elapsed(mark)
             return Response(status, responseHeaders, content, bytes)
         } finally {
+            control.untrack(plain)
             runCatching { socket.close() }
         }
     }
@@ -246,7 +251,9 @@ class ScriptRunner(private val http: TimedHttpClient) {
             ttfbMs = timing.ttfbMs, downloadMs = timing.downloadMs
         )
         try {
-            if (step.isWrite && !step.allowWrite) throw IOException("${step.method} not allowed (allowWrite is false)")
+            if (step.isWrite && !step.allowWrite) {
+                throw MeasurementException(ErrorCodes.WRITE_NOT_ALLOWED, "${step.method} not allowed (allowWrite is false)")
+            }
             val url = URI(substitute(step.url, variables))
             result = result.copy(host = url.host, path = url.rawPath?.ifEmpty { "/" } ?: "/")
             val headers = step.headers.mapValues { (_, value) -> substitute(value, variables) }.toMutableMap()
@@ -261,31 +268,37 @@ class ScriptRunner(private val http: TimedHttpClient) {
                 cookies.getOrPut(url.host) { mutableMapOf() }[pair.substringBefore('=').trim()] = pair.substringAfter('=', "").trim()
             }
             val text = String(response.body, StandardCharsets.UTF_8)
-            val problems = buildList {
-                val expected = step.expectStatus
-                if (expected != null && response.status != expected) add("status ${response.status}, expected $expected")
-                if (expected == null && response.status !in 200..399) add("status ${response.status}")
-                step.expectContains?.let { if (it !in text) add("response does not contain \"$it\"") }
-                step.extract.forEach { (name, path) ->
-                    val value = JsonPathLite.read(text, path)
-                    if (value == null) add("cannot extract $name from $path") else variables[name] = value
-                }
+            val problems = mutableListOf<Pair<String, String>>()
+            val expected = step.expectStatus
+            if (expected != null && response.status != expected) problems += ErrorCodes.HTTP_STATUS to "status ${response.status}, expected $expected"
+            if (expected == null && response.status !in 200..399) problems += ErrorCodes.HTTP_STATUS to "status ${response.status}"
+            step.expectContains?.let { if (it !in text) problems += ErrorCodes.EXPECTATION_FAILED to "expected text not found" }
+            step.extract.forEach { (name, path) ->
+                val value = JsonPathLite.read(text, path)
+                if (value == null) problems += ErrorCodes.EXTRACT_FAILED to "cannot extract $name from $path" else variables[name] = value
             }
             return withTiming(result).copy(
                 status = response.status,
                 ok = problems.isEmpty(),
                 totalMs = total(),
                 bytes = response.bytes,
-                error = problems.joinToString("; ").ifEmpty { null }
+                error = problems.joinToString("; ") { it.second }.ifEmpty { null },
+                errorCode = problems.firstOrNull()?.first
             )
+        } catch (e: MeasurementCancelled) {
+            throw e
         } catch (e: Exception) {
-            return withTiming(result).copy(ok = false, totalMs = total(), error = e.message ?: e.javaClass.simpleName)
+            return withTiming(result).copy(
+                ok = false, totalMs = total(),
+                error = ErrorClassifier.detail(e), errorCode = ErrorClassifier.code(e)
+            )
         }
     }
 
     private fun substitute(text: String, variables: Map<String, String>): String =
         VARIABLE.replace(text) { match ->
-            variables[match.groupValues[1]] ?: throw IOException("unknown variable ${match.groupValues[1]}")
+            variables[match.groupValues[1]]
+                ?: throw MeasurementException(ErrorCodes.UNKNOWN_VARIABLE, "unknown variable ${match.groupValues[1]}")
         }
 
     private companion object {

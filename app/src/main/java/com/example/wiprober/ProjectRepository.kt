@@ -47,7 +47,8 @@ data class LocalSurveyFloor(
     val scanPoints: List<ScanPoint>,
     val continuousScanSessions: List<ContinuousScanSession>,
     val notes: List<AppNote>,
-    val skippedSuggestions: List<SkippedSuggestion> = emptyList()
+    val skippedSuggestions: List<SkippedSuggestion> = emptyList(),
+    val activeRuns: List<ActiveRun> = emptyList()
 )
 
 data class LocalSurveyProject(
@@ -66,7 +67,9 @@ data class ProjectSnapshot(
     val continuousScanSessions: List<ContinuousScanSession>,
     val notes: List<AppNote>,
     /** Survey-guide cells marked "do not measure"; app-only, never exported. */
-    val skippedSuggestions: List<SkippedSuggestion> = emptyList()
+    val skippedSuggestions: List<SkippedSuggestion> = emptyList(),
+    /** Active test runs of this floor's points (exported to wiprober-performance.json). */
+    val activeRuns: List<ActiveRun> = emptyList()
 )
 
 data class ProjectExportSnapshot(
@@ -342,7 +345,8 @@ class ProjectRepository(
                         scanPoints = loaded.scanPoints,
                         continuousScanSessions = loaded.continuousScanSessions,
                         notes = loaded.notes,
-                        skippedSuggestions = loaded.skippedSuggestions
+                        skippedSuggestions = loaded.skippedSuggestions,
+                        activeRuns = loaded.activeRuns
                     )
                 )
             }
@@ -397,13 +401,17 @@ class ProjectRepository(
         ).validate(projectDirectory)
         val mapFile = resolveProjectFile(projectDirectory, floor.mapRelativePath)
         require(mapFile.isFile) { "Project map is missing" }
+        // Repeatable migration: ids derived from floor/time/position, old results become runs;
+        // runs left unfinished by a dead process are marked interrupted, never restarted.
+        val (points, migratedRuns) = SurveyIds.migrate(floor.id, survey.scanPoints, survey.activeRuns.orEmpty())
         return LocalSurveyFloor(
             id = floor.id,
             name = floor.name,
             mapFile = mapFile,
             mapInfo = MapInfo(floor.mapFileName, floor.mapWidth, floor.mapHeight),
             metersPerUnit = survey.metersPerUnit,
-            scanPoints = survey.scanPoints,
+            scanPoints = points,
+            activeRuns = SurveyIds.reconcile(migratedRuns, now()),
             continuousScanSessions = survey.continuousScanSessions,
             notes = survey.notes.map { note -> note.toAppNote(projectDirectory) },
             skippedSuggestions = survey.skippedSuggestions.orEmpty()
@@ -437,7 +445,8 @@ class ProjectRepository(
                 scanPoints = snapshot.scanPoints,
                 continuousScanSessions = snapshot.continuousScanSessions,
                 notes = storedNotes,
-                skippedSuggestions = snapshot.skippedSuggestions
+                skippedSuggestions = snapshot.skippedSuggestions,
+                activeRuns = snapshot.activeRuns
             ).validate(projectDirectory)
         writeJsonAtomically(
             resolveProjectFile(projectDirectory, floor.surveyRelativePath),
@@ -1029,7 +1038,9 @@ class ProjectRepository(
         val continuousScanSessions: List<ContinuousScanSession> = emptyList(),
         val notes: List<StoredNote> = emptyList(),
         /** Nullable: survey files written before the survey guide have no such field. */
-        val skippedSuggestions: List<SkippedSuggestion>? = emptyList()
+        val skippedSuggestions: List<SkippedSuggestion>? = emptyList(),
+        /** Nullable: survey files written before active runs have no such field. */
+        val activeRuns: List<ActiveRun>? = emptyList()
     )
 
     private fun StoredSurvey.validate(projectDirectory: File): StoredSurvey {
@@ -1041,6 +1052,7 @@ class ProjectRepository(
         require(skippedSuggestions.orEmpty().size <= MAX_SKIPPED_SUGGESTIONS) {
             "Project contains too many skipped guide cells"
         }
+        require(activeRuns.orEmpty().size <= MAX_ACTIVE_RUNS) { "Project contains too many active test runs" }
         val waypointCount = continuousScanSessions.sumOf { it.waypoints.size.toLong() }
         val scanResultCount = continuousScanSessions.sumOf { it.scanResults.size.toLong() }
         val networkCount = scanPoints.sumOf { it.wifiNetworks.size.toLong() } +
@@ -1078,6 +1090,7 @@ class ProjectRepository(
 
     companion object {
         private const val MAX_SKIPPED_SUGGESTIONS = 100_000
+        private const val MAX_ACTIVE_RUNS = 50_000
         private const val PROJECT_SCHEMA_VERSION = 3
         private const val PREVIOUS_PROJECT_SCHEMA_VERSION = 2
         private const val LEGACY_PROJECT_SCHEMA_VERSION = 1

@@ -22,23 +22,37 @@ import java.util.zip.ZipOutputStream
 object PerformanceExport {
     const val FILE_NAME = "wiprober-performance.json"
     const val FORMAT = "wiprober-performance"
-    const val VERSION = 1
+    /** 2: one row per active run (runId/pointId/scanId, run and phase statuses); see the spec history. */
+    const val VERSION = 2
 
     fun hasMeasurements(snapshot: ProjectExportSnapshot): Boolean = snapshot.floors.any { floor ->
-        floor.survey.scanPoints.any { it.throughput?.isEmpty == false } ||
+        floor.survey.activeRuns.isNotEmpty() ||
             floor.survey.continuousScanSessions.any { !it.importedFromEsx && it.roaming != null }
     }
 
-    fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long): JsonObject {
+    /** Where a run's point is: exact floor-plan pixels plus the survey of the run's scan in this ESX, if any. */
+    private class Position(val surveyId: String?, val floorPlanId: String, val floorName: String, val point: ScanPoint)
+
+    fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot? = null): JsonObject {
         val rows = JsonArray()
         val networkRows = JsonArray()
         val scriptRows = JsonArray()
-        report?.stopAndGoSurveys.orEmpty().forEach { ref ->
-            val throughput = ref.point.throughput ?: return@forEach
-            throughput.tests.forEach { test -> rows.add(row(ref, test)) }
-            throughput.networkTests.orEmpty().forEach { test -> networkRows.add(networkRow(ref, test)) }
-            throughput.scripts.orEmpty().forEach { run ->
-                run.steps.forEachIndexed { index, step -> scriptRows.add(scriptRow(ref, run, index, step)) }
+        val runRows = JsonArray()
+        val surveyByScan = report?.stopAndGoSurveys.orEmpty().mapNotNull { ref -> ref.point.scanId?.let { it to ref.surveyId } }.toMap()
+        snapshot?.floors.orEmpty().forEach { floor ->
+            val points = floor.survey.scanPoints
+            floor.survey.activeRuns.forEach { run ->
+                // The run's own scan, else any scan of the same physical point (same coordinates).
+                val point = points.firstOrNull { it.scanId == run.scanId } ?: points.firstOrNull { it.pointId == run.pointId }
+                    ?: return@forEach
+                val position = Position(run.scanId?.let(surveyByScan::get), floor.esxFloorPlanId, floor.name, point)
+                runRows.add(runRow(position, run))
+                val results = run.results ?: return@forEach
+                results.tests.forEach { test -> rows.add(row(position, run, test)) }
+                results.networkTests.orEmpty().forEach { test -> networkRows.add(networkRow(position, run, test)) }
+                results.scripts.orEmpty().forEach { script ->
+                    script.steps.forEachIndexed { index, step -> scriptRows.add(scriptRow(position, run, script, index, step)) }
+                }
             }
         }
         return JsonObject().apply {
@@ -46,6 +60,7 @@ object PerformanceExport {
             addProperty("version", VERSION)
             addProperty("generatedAt", isoUtc(generatedAt))
             addProperty("esxFile", esxFileName)
+            add("activeRuns", runRows)
             add("measurements", rows)
             add("networkTests", networkRows)
             add("scriptSteps", scriptRows)
@@ -112,18 +127,41 @@ object PerformanceExport {
         addProperty("duringScan", event.duringScan)
     }
 
-    /** Position fields shared by every row type. */
-    private fun JsonObject.position(ref: StopAndGoSurveyRef, measuredAt: Long) {
-        addProperty("surveyId", ref.surveyId)
-        addProperty("floorPlanId", ref.floorPlanId)
-        addProperty("floorName", ref.floorName)
-        addProperty("x", ref.point.x.toDouble())
-        addProperty("y", ref.point.y.toDouble())
+    /** Position and run fields shared by every row type. */
+    private fun JsonObject.position(position: Position, run: ActiveRun, measuredAt: Long) {
+        addProperty("surveyId", position.surveyId)
+        addProperty("floorPlanId", position.floorPlanId)
+        addProperty("floorName", position.floorName)
+        addProperty("pointId", run.pointId)
+        addProperty("scanId", run.scanId)
+        addProperty("runId", run.runId)
+        addProperty("x", position.point.x.toDouble())
+        addProperty("y", position.point.y.toDouble())
         addProperty("measuredAt", isoUtc(measuredAt))
     }
 
-    private fun networkRow(ref: StopAndGoSurveyRef, test: NetworkTestResult) = JsonObject().apply {
-        position(ref, test.measuredAt)
+    private fun runRow(position: Position, run: ActiveRun) = JsonObject().apply {
+        position(position, run, run.startedAt)
+        addProperty("startedAt", isoUtc(run.startedAt))
+        addProperty("endedAt", run.endedAt?.let(::isoUtc))
+        addProperty("status", run.status)
+        addProperty("statusReason", run.statusReason)
+        addProperty("profile", run.profile)
+        add("phases", JsonArray().apply {
+            run.phases.forEach { phase ->
+                add(JsonObject().apply {
+                    addProperty("key", phase.key)
+                    addProperty("label", phase.label)
+                    addProperty("status", phase.status)
+                    addProperty("errorCode", phase.errorCode)
+                    addProperty("endedAt", phase.endedAt?.let(::isoUtc))
+                })
+            }
+        })
+    }
+
+    private fun networkRow(position: Position, run: ActiveRun, test: NetworkTestResult) = JsonObject().apply {
+        position(position, run, test.measuredAt)
         addProperty("name", test.name)
         addProperty("alias", test.alias ?: test.name)
         addProperty("category", test.category ?: TargetCategory.INTERNAL)
@@ -151,6 +189,11 @@ object PerformanceExport {
         addProperty("sent", test.sent)
         addProperty("received", test.received)
         addProperty("lossPct", test.lossPct)
+        addProperty("rttKind", when (test.method) {
+            "icmp" -> "icmp-echo"
+            "tcp" -> "tcp-connect"
+            else -> null
+        })
         addProperty("rttMinMs", test.rttMinMs)
         addProperty("rttAvgMs", test.rttAvgMs)
         addProperty("rttMaxMs", test.rttMaxMs)
@@ -159,8 +202,8 @@ object PerformanceExport {
         addProperty("error", test.error)
     }
 
-    private fun scriptRow(ref: StopAndGoSurveyRef, run: ScriptRun, index: Int, step: ScriptStepResult) = JsonObject().apply {
-        position(ref, run.measuredAt)
+    private fun scriptRow(position: Position, activeRun: ActiveRun, run: ScriptRun, index: Int, step: ScriptStepResult) = JsonObject().apply {
+        position(position, activeRun, run.measuredAt)
         addProperty("script", run.name)
         addProperty("stepIndex", index + 1)
         addProperty("step", step.name)
@@ -180,11 +223,13 @@ object PerformanceExport {
         addProperty("downloadMs", step.downloadMs)
         addProperty("totalMs", step.totalMs)
         addProperty("bytes", step.bytes)
+        addProperty("errorCode", step.errorCode)
         addProperty("error", step.error ?: run.error)
     }
 
-    private fun row(ref: StopAndGoSurveyRef, test: ThroughputTestResult) = JsonObject().apply {
-        position(ref, test.measuredAt)
+    private fun row(position: Position, run: ActiveRun, test: ThroughputTestResult) = JsonObject().apply {
+        position(position, run, test.measuredAt)
+        addProperty("runStatus", run.status)
         addProperty("target", test.target)
         addProperty("targetId", test.targetId)
         addProperty("category", test.category)
@@ -216,6 +261,18 @@ object PerformanceExport {
         addProperty("latencyAvgMs", test.latencyAvgMs)
         addProperty("jitterMs", test.jitterMs)
         addProperty("latencySamples", test.latencySamples)
+        addProperty("latencyFailures", test.latencyFailures)
+        addProperty("latencyMethod", test.latencyMethod)
+        addProperty("latencyStatus", test.latencyStatus)
+        addProperty("latencyErrorCode", test.latencyErrorCode)
+        addProperty("downloadStatus", test.downloadStatus)
+        addProperty("downloadErrorCode", test.downloadErrorCode)
+        addProperty("downBytes", test.downBytes)
+        addProperty("downSeconds", test.downSeconds)
+        addProperty("uploadStatus", test.uploadStatus)
+        addProperty("uploadErrorCode", test.uploadErrorCode)
+        addProperty("upBytes", test.upBytes)
+        addProperty("upSeconds", test.upSeconds)
         addProperty("deviceModel", test.deviceModel)
         addProperty("androidVersion", test.androidVersion)
         addProperty("error", test.error)

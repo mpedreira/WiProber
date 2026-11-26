@@ -37,18 +37,19 @@ class HttpSpeedTestTest {
 
     @Test
     fun downloadsUntilTheDeadlineAndReplacesTheBytesPlaceholder() {
-        val bits = HttpSpeedTest().download("$base/__down?bytes={bytes}", 1)
+        val result = HttpSpeedTest().download("$base/__down?bytes={bytes}", 1)
 
-        assertTrue("download $bits bit/s", bits > 1_000_000.0)
+        assertTrue("download ${result.bitsPerSecond} bit/s", result.bitsPerSecond > 1_000_000.0)
+        assertTrue(result.bytes > 0 && result.seconds > 0.5)
         assertTrue(requestedSizes.isNotEmpty())
         assertTrue(requestedSizes.all { it == "25000000" })
     }
 
     @Test
     fun uploadsWholeRequestsAndCountsWhatTheServerReceived() {
-        val bits = HttpSpeedTest().upload("$base/__up", 1)
+        val result = HttpSpeedTest().upload("$base/__up", 1)
 
-        assertTrue("upload $bits bit/s", bits > 1_000_000.0)
+        assertTrue("upload ${result.bitsPerSecond} bit/s", result.bitsPerSecond > 1_000_000.0)
         assertTrue(uploaded.get() >= 256 * 1024)
     }
 
@@ -118,5 +119,45 @@ class HttpSpeedTestTest {
             if (c != '\r'.code) line.append(c.toChar())
         }
         return line.toString()
+    }
+
+    @Test
+    fun anEmptyDownloadBodyIsReportedAsSuchNeverAsZero() {
+        try {
+            HttpSpeedTest().download("$base/__down?bytes=0", 1)
+            throw AssertionError("expected EMPTY_BODY")
+        } catch (expected: MeasurementException) {
+            assertEquals(ErrorCodes.EMPTY_BODY, expected.code)
+        }
+    }
+
+    @Test
+    fun anOversizedUploadResponseIsRejected() {
+        MiniHttpServer { MiniHttpServer.Response(200, "x".repeat(100_000)) }.use { big ->
+            try {
+                HttpSpeedTest().upload("${big.base}/up", 1)
+                throw AssertionError("expected RESPONSE_TOO_LARGE")
+            } catch (expected: MeasurementException) {
+                assertEquals(ErrorCodes.RESPONSE_TOO_LARGE, expected.code)
+            }
+        }
+    }
+
+    @Test
+    fun aBlockedUploadStopsWhenTheRunIsCancelled() {
+        // Accepts connections but never reads the body nor answers.
+        ServerSocket(0).use { silent ->
+            thread(isDaemon = true) { while (!silent.isClosed) runCatching { silent.accept() } }
+            val control = MeasurementControl()
+            thread(isDaemon = true) { Thread.sleep(500); control.cancel() }
+            val started = System.nanoTime()
+            try {
+                HttpSpeedTest(control = control).upload("http://127.0.0.1:${silent.localPort}/up", 20)
+                throw AssertionError("expected cancellation")
+            } catch (expected: MeasurementCancelled) {
+                assertEquals(ErrorCodes.CANCELLED, expected.reason)
+            }
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 5_000)
+        }
     }
 }

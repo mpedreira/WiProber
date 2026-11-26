@@ -10,6 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import kotlin.concurrent.thread
 
 class ThroughputRunnerTest {
     private val closedPort = ServerSocket(0).use { it.localPort }
@@ -105,7 +106,9 @@ class ThroughputRunnerTest {
             ThroughputSettings(iperfEnabled = true, iperfHost = "missing.internal", iperfDurationSeconds = 1)
         ).tests.single()
         assertTrue(test.error!!, test.error!!.startsWith("latency: ${ErrorCodes.RESOLUTION_FAILED}"))
-        assertTrue(test.error!!.endsWith("download/upload skipped: server unreachable"))
+        assertEquals(ErrorCodes.RESOLUTION_FAILED, test.latencyErrorCode)
+        assertEquals(ErrorCodes.SKIPPED_UNREACHABLE, test.downloadErrorCode)
+        assertEquals(ErrorCodes.SKIPPED_UNREACHABLE, test.uploadErrorCode)
     }
 
     @Test
@@ -208,7 +211,9 @@ class ThroughputRunnerTest {
                 ))
             )
             val events = mutableListOf<ThroughputProgress>()
-            val result = runner(FakeMeasurementNetwork()).measure(ThroughputSettings(), tests, scripts) { events += it }
+            val result = runner(FakeMeasurementNetwork()).measure(ThroughputSettings(), tests, scripts, object : RunListener {
+                override fun onProgress(progress: ThroughputProgress) { events += progress }
+            })
 
             val web = result.networkTests!!.single()
             assertEquals("web", web.name)
@@ -231,5 +236,90 @@ class ThroughputRunnerTest {
         ).scripts!!.single()
         assertEquals(ThroughputRunner.NOT_ON_WIFI, run.error)
         assertTrue(run.steps.isEmpty())
+    }
+
+    @Test
+    fun partialProbeLossKeepsTheValidSamplesAndRunsTheTransfers() {
+        ServerSocket(0).use { server ->
+            thread(isDaemon = true) { while (!server.isClosed) runCatching { server.accept().close() } }
+            val network = FakeMeasurementNetwork(socketFactory = FlakySocketFactory(failEvery = 3))
+            val test = runner(network).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = server.localPort, iperfDurationSeconds = 1)
+            ).tests.single()
+            assertEquals(ThroughputRunner.LATENCY_METHOD, test.latencyMethod)
+            assertEquals(RunStatus.COMPLETED, test.latencyStatus)
+            assertEquals(ErrorCodes.PARTIAL_LOSS, test.latencyErrorCode)
+            assertEquals(3, test.latencyFailures) // probes 3, 6 and 9 of 10
+            assertEquals(7, test.latencySamples)
+            // The pre-check succeeded, so the transfers were attempted (and failed on their own merits).
+            assertEquals(RunStatus.FAILED, test.downloadStatus)
+            assertTrue(test.downloadErrorCode != ErrorCodes.SKIPPED_UNREACHABLE)
+        }
+    }
+
+    @Test
+    fun anUnreachableDownloadEndpointDoesNotSkipAnIndependentUploadEndpoint() {
+        MiniHttpServer { MiniHttpServer.Response(200, "ok") }.use { upload ->
+            val network = FakeMeasurementNetwork(hosts = mapOf("dl.internal" to listOf(FakeMeasurementNetwork.LOOPBACK)))
+            val test = runner(network).measure(
+                ThroughputSettings(
+                    internetEnabled = true,
+                    internetDownloadUrl = "http://dl.internal:$closedPort/__down?bytes={bytes}",
+                    internetUploadUrl = "${upload.base}/__up",
+                    internetDurationSeconds = 1
+                )
+            ).tests.single()
+            assertEquals(RunStatus.FAILED, test.latencyStatus)
+            assertEquals(RunStatus.SKIPPED, test.downloadStatus)
+            assertEquals(ErrorCodes.SKIPPED_UNREACHABLE, test.downloadErrorCode)
+            assertEquals(RunStatus.COMPLETED, test.uploadStatus)
+            assertTrue(test.upMbps != null && test.upBytes != null && test.upSeconds != null)
+            assertEquals("dl.internal", test.downloadEndpoint)
+            assertEquals("127.0.0.1", test.uploadEndpoint)
+        }
+    }
+
+    @Test
+    fun everyPlannedPhaseIsReportedWithItsStatusAndPartialResultsAreEmitted() {
+        val network = FakeMeasurementNetwork()
+        val settings = ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = closedPort, iperfDurationSeconds = 1)
+        val phases = mutableListOf<Triple<String, String, String?>>()
+        val partials = mutableListOf<PointThroughput>()
+        runner(network).measure(settings, listener = object : RunListener {
+            override fun onPhase(key: String, status: String, errorCode: String?) { phases += Triple(key, status, errorCode) }
+            override fun onPartial(results: PointThroughput) { partials += results }
+        })
+        assertEquals(ThroughputRunner.plan(settings, emptyList(), emptyList()).map { it.key }, phases.map { it.first })
+        assertEquals(listOf(RunStatus.FAILED, RunStatus.SKIPPED, RunStatus.SKIPPED), phases.map { it.second })
+        assertEquals(listOf(ErrorCodes.CONNECTION_REFUSED, ErrorCodes.SKIPPED_UNREACHABLE, ErrorCodes.SKIPPED_UNREACHABLE), phases.map { it.third })
+        assertEquals(1, partials.size)
+    }
+
+    @Test
+    fun theIperfBusyCodeIsKeptForTheDirection() {
+        ServerSocket(0).use { server ->
+            // Accepts the pre-check handshakes, then answers the iperf3 cookie with ACCESS_DENIED.
+            thread(isDaemon = true) {
+                while (!server.isClosed) runCatching {
+                    val s = server.accept()
+                    thread(isDaemon = true) {
+                        runCatching {
+                            s.use { c ->
+                                val buf = ByteArray(37)
+                                var read = 0
+                                while (read < 37) { val n = c.getInputStream().read(buf, read, 37 - read); if (n < 0) return@use; read += n }
+                                c.getOutputStream().apply { write(-1); flush() }
+                                Thread.sleep(100)
+                            }
+                        }
+                    }
+                }
+            }
+            val test = runner(FakeMeasurementNetwork()).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = server.localPort, iperfDurationSeconds = 1)
+            ).tests.single()
+            assertEquals(ErrorCodes.IPERF_BUSY, test.downloadErrorCode)
+            assertEquals(ErrorCodes.IPERF_BUSY, test.uploadErrorCode)
+        }
     }
 }

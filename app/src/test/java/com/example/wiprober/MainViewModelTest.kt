@@ -126,7 +126,7 @@ class MainViewModelTest {
     @Test
     fun noteIdsAndStopAndGoTimestampAreDeterministic() {
         val clock = FakeClock(9_000L)
-        val ids = SequenceIdSource("note-id", "photo-id", "picture-id")
+        val ids = SequenceIdSource("point-id", "scan-id", "note-id", "photo-id", "picture-id")
         val viewModel = viewModel(clock, ids)
 
         viewModel.requestStopAndGoScan(5f, 6f)
@@ -136,6 +136,8 @@ class MainViewModelTest {
         )
         val point = viewModel.completeStopAndGoScan(listOf(network()))!!
         assertEquals(9_000L, point.timestamp)
+        assertEquals("point-id", point.pointId)
+        assertEquals("scan-id", point.scanId)
 
         val note = viewModel.addNote(
             text = "Photo",
@@ -251,8 +253,10 @@ class MainViewModelTest {
         override fun now(): Long = now
     }
 
+    /** Given ids first, then generated ones (scans consume a point and a scan id). */
     private class SequenceIdSource(vararg ids: String) : IdSource {
         private val values = ArrayDeque(ids.toList())
-        override fun newId(): String = values.removeFirst()
+        private var generated = 0
+        override fun newId(): String = values.removeFirstOrNull() ?: "generated-${generated++}"
     }
 }

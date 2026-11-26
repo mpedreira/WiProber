@@ -1,6 +1,5 @@
 package com.example.wiprober
 
-import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,28 +17,36 @@ import java.util.concurrent.atomic.AtomicReference
 class HttpSpeedTest(
     private val open: (URL) -> HttpURLConnection = { url -> url.openConnection() as HttpURLConnection },
     private val streams: Int = DEFAULT_STREAMS,
-    private val nanoTime: () -> Long = System::nanoTime
+    private val nanoTime: () -> Long = System::nanoTime,
+    /** Tracks connections and workers so cancelling or a deadline closes them. */
+    private val control: MeasurementControl = MeasurementControl()
 ) {
-    /** Download speed in bits per second over [durationSeconds], summed over parallel streams. */
-    fun download(urlTemplate: String, durationSeconds: Int): Double {
+    /**
+     * Download rate over [durationSeconds], summed over parallel streams. A server that answers
+     * with empty bodies is reported as [ErrorCodes.EMPTY_BODY], never as 0 Mbit/s.
+     */
+    fun download(urlTemplate: String, durationSeconds: Int): TransferResult {
         val url = URL(urlTemplate.replace(BYTES_PLACEHOLDER, DOWNLOAD_CHUNK_BYTES.toString()))
-        return parallel(durationSeconds) { deadline, counted ->
+        val result = parallel(durationSeconds) { deadline, counted ->
             val buffer = ByteArray(BUFFER_SIZE)
             request(url, "GET") { input ->
-                while (nanoTime() < deadline) {
+                while (nanoTime() < deadline && !control.isCancelled) {
                     val read = input.read(buffer)
                     if (read < 0) break
                     counted.addAndGet(read.toLong())
                 }
             }
         }
+        if (result.bytes == 0L) throw MeasurementException(ErrorCodes.EMPTY_BODY, "download returned an empty body")
+        return result
     }
 
     /**
-     * Upload speed in bits per second, summed over parallel streams. Only whole requests the
-     * server acknowledged are counted, so the last one may overrun the duration slightly.
+     * Upload rate, summed over parallel streams. Only whole requests the server acknowledged are
+     * counted, so the last one may overrun the duration slightly. The server's answer to each
+     * upload is read up to [MAX_UPLOAD_RESPONSE_BYTES].
      */
-    fun upload(url: String, durationSeconds: Int): Double {
+    fun upload(url: String, durationSeconds: Int): TransferResult {
         val target = URL(url)
         val payload = ByteArray(MAX_UPLOAD_CHUNK_BYTES).also(SecureRandom()::nextBytes)
         return parallel(durationSeconds) { _, counted ->
@@ -50,7 +57,7 @@ class HttpSpeedTest(
                 connection.setFixedLengthStreamingMode(size)
                 connection.setRequestProperty("Content-Type", "application/octet-stream")
                 connection.outputStream.use { it.write(payload, 0, size) }
-            }) { it.readBytes() }
+            }) { input -> readBounded(input, MAX_UPLOAD_RESPONSE_BYTES) }
             counted.addAndGet(size.toLong())
             // Grow requests while they are short, so per-request overhead does not dominate.
             if (nanoTime() - requestStart < NANOS_PER_SECOND / 2) {
@@ -65,7 +72,7 @@ class HttpSpeedTest(
      * Runs [worker] repeatedly on [streams] threads until the deadline; one TCP connection
      * alone often cannot fill a fast or high-latency link. Fails only if no bytes got through.
      */
-    private fun parallel(durationSeconds: Int, worker: (deadline: Long, counted: AtomicLong) -> Unit): Double {
+    private fun parallel(durationSeconds: Int, worker: (deadline: Long, counted: AtomicLong) -> Unit): TransferResult {
         uploadChunk.set(MIN_UPLOAD_CHUNK_BYTES)
         val counted = AtomicLong()
         val firstError = AtomicReference<Exception>()
@@ -73,7 +80,7 @@ class HttpSpeedTest(
         val deadline = start + durationSeconds * NANOS_PER_SECOND
         val workers = (1..streams).map { index ->
             Thread {
-                while (nanoTime() < deadline) {
+                while (nanoTime() < deadline && !control.isCancelled) {
                     try {
                         worker(deadline, counted)
                     } catch (e: Exception) {
@@ -81,12 +88,13 @@ class HttpSpeedTest(
                         break
                     }
                 }
-            }.apply { isDaemon = true; name = "speedtest-$index"; start() }
+            }.apply { isDaemon = true; name = "speedtest-$index"; control.track(this); start() }
         }
         workers.forEach { it.join() }
+        control.checkActive()
         val elapsed = nanoTime() - start
         if (counted.get() == 0L) firstError.get()?.let { throw it }
-        return bitsPerSecond(counted.get(), elapsed)
+        return TransferResult(bitsPerSecond(counted.get(), elapsed), counted.get(), elapsed / NANOS_PER_SECOND.toDouble())
     }
 
     private fun request(
@@ -95,19 +103,32 @@ class HttpSpeedTest(
         send: ((HttpURLConnection) -> Unit)? = null,
         receive: (InputStream) -> Unit
     ) {
-        val connection = open(url)
+        val connection = control.track(open(url))
         try {
             connection.requestMethod = method
             connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
             connection.readTimeout = READ_TIMEOUT_MILLIS
             connection.useCaches = false
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("User-Agent", USER_AGENT)
             send?.invoke(connection)
             val code = connection.responseCode
-            if (code !in 200..299) throw IOException("HTTP $code from ${url.host}")
+            if (code !in 200..299) throw MeasurementException(ErrorCodes.HTTP_STATUS, "HTTP $code from ${url.host}")
             connection.inputStream.use(receive)
         } finally {
+            control.untrack(connection)
             connection.disconnect()
+        }
+    }
+
+    private fun readBounded(input: InputStream, limit: Int) {
+        val buffer = ByteArray(8 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) return
+            total += read
+            if (total > limit) throw MeasurementException(ErrorCodes.RESPONSE_TOO_LARGE, "upload response larger than $limit bytes")
         }
     }
 
@@ -125,5 +146,6 @@ class HttpSpeedTest(
         const val READ_TIMEOUT_MILLIS = 10_000
         const val NANOS_PER_SECOND = 1_000_000_000L
         const val USER_AGENT = "WiProber"
+        const val MAX_UPLOAD_RESPONSE_BYTES = 64 * 1024
     }
 }

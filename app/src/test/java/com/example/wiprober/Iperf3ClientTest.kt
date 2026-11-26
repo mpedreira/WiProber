@@ -32,13 +32,13 @@ class Iperf3ClientTest {
             .start()
         val client = Iperf3Client()
 
-        val download = retryUntilListening { client.run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.DOWNLOAD) }
+        val download = retryUntilListening { client.run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.DOWNLOAD).bitsPerSecond }
         assertTrue("download $download bit/s", download > 1_000_000.0)
 
         // "-1" makes the server exit after one test: start another one for the upload.
         server!!.waitFor(5, TimeUnit.SECONDS)
         server = ProcessBuilder(binary.path, "-s", "-1", "-p", port.toString()).redirectErrorStream(true).start()
-        val upload = retryUntilListening { client.run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.UPLOAD) }
+        val upload = retryUntilListening { client.run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.UPLOAD).bitsPerSecond }
         assertTrue("upload $upload bit/s", upload > 1_000_000.0)
     }
 

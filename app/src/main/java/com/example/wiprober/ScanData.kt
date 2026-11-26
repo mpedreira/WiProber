@@ -1,6 +1,6 @@
 package com.example.wiprober
 
-enum class LastAction { SCAN, NOTE, SCAN_SESSION, SUGGESTION_SKIP }
+enum class LastAction { SCAN, NOTE, SCAN_SESSION, SUGGESTION_SKIP, ACTIVE_RUN }
 
 /** A survey-guide grid cell the user marked "do not measure" (any point inside it, floor pixels). */
 @JsonModel
@@ -14,8 +14,12 @@ data class ScanPoint(
     val y: Float,        // Координата Y на карте
     val wifiNetworks: List<WifiNetworkInfo>, // Список сетей, найденных в этой точке
     val importedFromEsx: Boolean = false,
-    /** iPerf3 / Internet tests run at this point; exported as an Ekahau note pinned to it. */
-    val throughput: PointThroughput? = null
+    /** Legacy (fork releases 1–4): results of the tests at this point; migrated to [ActiveRun] on load. */
+    val throughput: PointThroughput? = null,
+    /** Physical point: the same for every scan and active run at these exact coordinates. */
+    val pointId: String? = null,
+    /** This passive scan. */
+    val scanId: String? = null
 )
 
 // Этот класс описывает информацию об одной Wi-Fi сети

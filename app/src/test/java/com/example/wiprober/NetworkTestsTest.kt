@@ -14,7 +14,7 @@ import org.junit.Test
 class NetworkTestsTest {
     private fun runner(
         network: MeasurementNetwork? = FakeMeasurementNetwork(),
-        ping: ((String, Int, String) -> String)? = null,
+        ping: ((String, Int, String, MeasurementControl) -> String)? = null,
         dnsPort: Int = 53
     ) = NetworkTestRunner(
         http = TimedHttpClient(resolve = { host -> network!!.resolve(host).toTypedArray() }),
@@ -50,7 +50,7 @@ class NetworkTestsTest {
     fun pingFallsBackToTcpAndCountsRefusedAsAReply() {
         val closedPort = ServerSocket(0).use { it.localPort }
         val network = FakeMeasurementNetwork(link = NetworkContext(interfaceName = "wlan0"))
-        val result = runner(network, ping = { _, _, _ -> "ping: socket: Operation not permitted" })
+        val result = runner(network, ping = { _, _, _, _ -> "ping: socket: Operation not permitted" })
             .run(NetworkTest(name = "gw", type = "ping", host = "127.0.0.1", port = closedPort, count = 3))
 
         assertEquals("tcp", result.method)
@@ -64,7 +64,7 @@ class NetworkTestsTest {
     fun pingWithoutAKnownWifiInterfaceNeverUsesTheSystemPing() {
         val result = runner(
             FakeMeasurementNetwork(link = NetworkContext(interfaceName = null)),
-            ping = { _, _, _ -> throw AssertionError("system ping must not run without the Wi-Fi interface") }
+            ping = { _, _, _, _ -> throw AssertionError("system ping must not run without the Wi-Fi interface") }
         ).run(NetworkTest(name = "gw", type = "ping", host = "127.0.0.1", port = ServerSocket(0).use { it.localPort }, count = 2))
         assertEquals("tcp", result.method)
     }
@@ -77,7 +77,7 @@ class NetworkTestsTest {
         )
         val result = runner(
             network,
-            ping = { ip, count, iface ->
+            ping = { ip, count, iface, _ ->
                 assertEquals("10.0.0.1", ip) // resolved on the Wi-Fi before pinging
                 assertEquals("wlan0", iface)
                 (1..count).joinToString("\n") { "64 bytes from $ip: icmp_seq=$it ttl=64 time=1.0 ms" } +

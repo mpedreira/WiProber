@@ -79,6 +79,7 @@ class SurveyActivity : AppCompatActivity() {
     private var stopAndGoScanJob: Job? = null
     private var continuousScanLoopJob: Job? = null
     private var roamingJob: Job? = null
+    private var progressDialog: ThroughputProgressDialog? = null
     /** True while a Continuous-mode Wi-Fi scan runs: probes then fail because the radio is off channel. */
     @Volatile private var continuousScanInFlight = false
 
@@ -155,6 +156,8 @@ class SurveyActivity : AppCompatActivity() {
         stopAndGoScanJob?.cancel()
         continuousScanLoopJob?.cancel()
         roamingJob?.cancel()
+        progressDialog?.dismiss()
+        progressDialog = null
         wifiScanner.close()
         androidCoordinator.close()
         super.onDestroy()
@@ -245,11 +248,13 @@ class SurveyActivity : AppCompatActivity() {
                         state.continuousScanSessions != previous.continuousScanSessions ||
                         state.notes != previous.notes ||
                         state.metersPerUnit != previous.metersPerUnit ||
-                        state.skippedSuggestions != previous.skippedSuggestions
+                        state.skippedSuggestions != previous.skippedSuggestions ||
+                        state.activeRuns != previous.activeRuns
 
                     binding.pointsOverlay.setScanPoints(state.scanPoints.map { Pair(it.x, it.y) })
                     binding.pointsOverlay.setCompletedTracks(state.continuousScanSessions)
                     renderSurveyGuide(state)
+                    renderActiveRun(state, previous)
                     binding.pointsOverlay.setActiveTrack(
                         state.activeTrackPoints.map { android.graphics.PointF(it.x, it.y) }
                     )
@@ -323,6 +328,7 @@ class SurveyActivity : AppCompatActivity() {
                             LastAction.NOTE -> R.string.last_note_undone
                             LastAction.SCAN_SESSION -> R.string.last_track_undone
                             LastAction.SUGGESTION_SKIP -> R.string.last_skip_undone
+                            LastAction.ACTIVE_RUN -> R.string.last_run_undone
                         }
                         Toast.makeText(this@SurveyActivity, message, Toast.LENGTH_SHORT).show()
                         viewModel.consumeLastUndoneAction()
@@ -493,6 +499,37 @@ class SurveyActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.guide_skipped, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    /**
+     * Runs the configured active tests on a saved point. The run lives in the ViewModel, so a
+     * rotation neither stops nor restarts it; the executor only captures application-level objects.
+     */
+    private fun startActiveTests(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>) {
+        val settings = throughputSettingsStore.load()
+        val imported = configStore.load()
+        val phases = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts)
+        if (phases.isEmpty()) return
+        val probe = throughputProbe
+        viewModel.startActiveRun(pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS) { control, listener ->
+            probe.measure(settings, imported, scanResults, control, listener)
+        }
+    }
+
+    /** Shows the progress dialog while a run is active (also after recreation) and its summary when it ends. */
+    private fun renderActiveRun(state: SurveyScreenState, previous: SurveyScreenState) {
+        val testing = state.interaction as? SurveyInteraction.ActiveTesting
+        if (testing == null) {
+            progressDialog?.dismiss()
+            progressDialog = null
+            val finished = (previous.interaction as? SurveyInteraction.ActiveTesting)?.runId
+                ?.let { id -> state.activeRuns.firstOrNull { it.runId == id } }
+            if (finished != null) binding.surveyStatusText.text = ActiveRunSummary.format(this, finished)
+            return
+        }
+        val dialog = progressDialog ?: ThroughputProgressDialog(this) { viewModel.cancelActiveRun() }
+            .also { it.show(); progressDialog = it }
+        state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
     }
 
     /** Imported tests/scripts/roaming at a glance, with Import and Remove. */
@@ -1049,30 +1086,13 @@ class SurveyActivity : AppCompatActivity() {
             when (val outcome = wifiScanner.scan()) {
                 is WifiScanOutcome.Success -> {
                     val wifiInfoList = mapScanResults(outcome.results)
-                    // The point stays pending (Stop-and-Go scanning) until its tests finish.
-                    val settings = throughputSettingsStore.load()
-                    val imported = configStore.load()
-                    val throughput = if (settings.anyEnabled || imported.enabledTests.isNotEmpty() ||
-                        imported.enabledScripts.isNotEmpty()
-                    ) {
-                        binding.surveyStatusText.setText(R.string.throughput_in_progress)
-                        val progressDialog = ThroughputProgressDialog(this@SurveyActivity)
-                        progressDialog.show()
-                        try {
-                            throughputProbe.measure(settings, imported, outcome.results, progressDialog::update)
-                        } finally {
-                            progressDialog.dismiss()
-                        }
-                    } else {
-                        null
-                    }
-                    viewModel.completeStopAndGoScan(wifiInfoList, throughput)
-                    val scanSummary = getString(
+                    // The passive scan is saved as a point first; active tests run on it afterwards.
+                    val point = viewModel.completeStopAndGoScan(wifiInfoList)
+                    binding.surveyStatusText.text = getString(
                         R.string.scan_completed,
                         quantityString(R.plurals.network_count, outcome.results.size)
                     )
-                    binding.surveyStatusText.text = throughput
-                        ?.let { "$scanSummary\n${ThroughputSummary.format(it)}" } ?: scanSummary
+                    if (point != null) startActiveTests(point.pointId!!, point.scanId, outcome.results)
                 }
 
                 is WifiScanOutcome.Failure -> {
@@ -1601,6 +1621,7 @@ class SurveyActivity : AppCompatActivity() {
         const val EXTRA_PROJECT_ID = "project_id"
         private const val SAVE_DEBOUNCE_MILLIS = 750L
         private const val SUGGESTION_TOUCH_RADIUS_DP = 32f
+        private const val PROFILE_DEVICE_SETTINGS = "device-settings"
         private const val SCAN_RETRY_DELAY_MILLIS = 1_000L
         private const val STATE_LAST_TOUCH_X = "last_touch_x"
         private const val STATE_LAST_TOUCH_Y = "last_touch_y"

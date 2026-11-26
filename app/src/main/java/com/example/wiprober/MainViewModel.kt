@@ -1,6 +1,11 @@
 package com.example.wiprober
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,8 +15,11 @@ import kotlin.math.sqrt
 /** Owns immutable survey data and the single active interaction on the survey screen. */
 class MainViewModel @JvmOverloads constructor(
     private val clock: MillisClock = SystemMillisClock,
-    private val idSource: IdSource = UuidIdSource
+    private val idSource: IdSource = UuidIdSource,
+    /** Scope of active runs; tests pass their own, the app uses [viewModelScope] (survives rotation). */
+    private val runScope: CoroutineScope? = null
 ) : ViewModel() {
+    private var activeRunJob: Job? = null
 
     private val _screenState = MutableStateFlow(SurveyScreenState())
     val screenState: StateFlow<SurveyScreenState> = _screenState.asStateFlow()
@@ -43,8 +51,11 @@ class MainViewModel @JvmOverloads constructor(
         scanPoints: List<ScanPoint>,
         continuousSessions: List<ContinuousScanSession>,
         notes: List<AppNote>,
-        skippedSuggestions: List<SkippedSuggestion> = emptyList()
+        skippedSuggestions: List<SkippedSuggestion> = emptyList(),
+        activeRuns: List<ActiveRun> = emptyList()
     ) {
+        activeRunJob?.cancel()
+        activeRunJob = null
         val selectedScanMode = _screenState.value.scanMode
         clearActiveSession()
         recentScanTimestamps.clear()
@@ -55,11 +66,14 @@ class MainViewModel @JvmOverloads constructor(
             continuousScanSessions = continuousSessions.map { it.immutableCopy() },
             notes = notes.toList(),
             skippedSuggestions = skippedSuggestions.map { SurveyCoordinate(it.x, it.y) },
+            // Nothing runs right after a load: anything unfinished was interrupted.
+            activeRuns = SurveyIds.reconcile(activeRuns, clock.now()),
             scanMode = selectedScanMode,
             actionHistory = buildList {
                 repeat(scanPoints.count { !it.importedFromEsx }) { add(LastAction.SCAN) }
                 repeat(continuousSessions.count { !it.importedFromEsx }) { add(LastAction.SCAN_SESSION) }
                 repeat(notes.count { !it.importedFromEsx }) { add(LastAction.NOTE) }
+                repeat(activeRuns.size) { add(LastAction.ACTIVE_RUN) }
             }
         )
     }
@@ -201,10 +215,11 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun completeStopAndGoScan(
-        wifiNetworks: List<WifiNetworkInfo>,
-        throughput: PointThroughput? = null
-    ): ScanPoint? {
+    /**
+     * Saves the passive scan as a point right away (before any active test), with its own
+     * [ScanPoint.scanId]; [pointId] reuses an existing physical point, else a new one is created.
+     */
+    fun completeStopAndGoScan(wifiNetworks: List<WifiNetworkInfo>, pointId: String? = null): ScanPoint? {
         val scan = _screenState.value.interaction as? SurveyInteraction.StopAndGoScanning ?: return null
         val timestamp = clock.now()
         val point = ScanPoint(
@@ -212,7 +227,8 @@ class MainViewModel @JvmOverloads constructor(
             x = scan.coordinate.x,
             y = scan.coordinate.y,
             wifiNetworks = wifiNetworks.toList(),
-            throughput = throughput
+            pointId = pointId ?: idSource.newId(),
+            scanId = idSource.newId()
         )
         recentScanTimestamps.addLast(timestamp)
         _screenState.update {
@@ -332,6 +348,10 @@ class MainViewModel @JvmOverloads constructor(
         _screenState.value = when (action) {
             LastAction.SCAN -> state.copy(
                 scanPoints = state.scanPoints.dropLastLocal(),
+                // A removed scan takes the runs that followed it along.
+                activeRuns = state.scanPoints.lastOrNull { !it.importedFromEsx }?.scanId?.let { removed ->
+                    state.activeRuns.filterNot { it.scanId == removed }
+                } ?: state.activeRuns,
                 actionHistory = state.actionHistory.dropLast(1),
                 lastUndoneAction = action
             )
@@ -347,6 +367,11 @@ class MainViewModel @JvmOverloads constructor(
             )
             LastAction.SUGGESTION_SKIP -> state.copy(
                 skippedSuggestions = state.skippedSuggestions.dropLast(1),
+                actionHistory = state.actionHistory.dropLast(1),
+                lastUndoneAction = action
+            )
+            LastAction.ACTIVE_RUN -> state.copy(
+                activeRuns = state.activeRuns.dropLast(1),
                 actionHistory = state.actionHistory.dropLast(1),
                 lastUndoneAction = action
             )
@@ -410,9 +435,114 @@ class MainViewModel @JvmOverloads constructor(
             scanPoints = state.scanPoints.toList(),
             continuousScanSessions = state.continuousScanSessions.map { it.immutableCopy() },
             notes = state.notes.toList(),
-            skippedSuggestions = state.skippedSuggestions.map { SkippedSuggestion(it.x, it.y) }
+            skippedSuggestions = state.skippedSuggestions.map { SkippedSuggestion(it.x, it.y) },
+            activeRuns = state.activeRuns.toList()
         )
     }
+
+    /**
+     * Starts the active tests of an existing point. The run is recorded (all phases pending)
+     * before anything is measured; [executor] measures off the main thread, reporting finished
+     * phases and partial results, which are saved as they arrive. Returns the run id, or null
+     * when the screen is busy or the point does not exist.
+     */
+    fun startActiveRun(
+        pointId: String,
+        scanId: String?,
+        phases: List<PhaseRecord>,
+        profile: String?,
+        executor: suspend (MeasurementControl, RunListener) -> PointThroughput
+    ): String? {
+        val state = _screenState.value
+        if (state.interaction !is SurveyInteraction.Idle || phases.isEmpty()) return null
+        if (state.scanPoints.none { it.pointId == pointId }) return null
+        val runId = idSource.newId()
+        val run = ActiveRun(
+            runId = runId, pointId = pointId, scanId = scanId, startedAt = clock.now(),
+            status = RunStatus.RUNNING, profile = profile, phases = phases
+        )
+        _screenState.value = state.copy(
+            activeRuns = state.activeRuns + run,
+            actionHistory = state.actionHistory + LastAction.ACTIVE_RUN,
+            interaction = SurveyInteraction.ActiveTesting(runId, pointId),
+            activeRunProgress = null
+        )
+        val control = MeasurementControl()
+        activeRunJob = (runScope ?: viewModelScope).launch {
+            try {
+                executor(control, runListener(runId))
+                finishRun(runId, RunStatus.COMPLETED, null)
+            } catch (e: MeasurementCancelled) {
+                // Raised inside the run: its deadline expired (or it was cancelled from within).
+                finishRun(runId, if (e.reason == ErrorCodes.TIMEOUT) RunStatus.FAILED else RunStatus.CANCELLED, e.reason)
+            } catch (e: CancellationException) {
+                finishRun(runId, RunStatus.CANCELLED, ErrorCodes.CANCELLED)
+                throw e
+            } catch (e: Exception) {
+                finishRun(runId, RunStatus.FAILED, ErrorClassifier.code(e))
+            }
+        }
+        return runId
+    }
+
+    /** "Cancel tests": stops the active run; the point and the finished phases are kept. */
+    fun cancelActiveRun() {
+        activeRunJob?.cancel()
+    }
+
+    /** Callbacks of [runId] only: late callbacks of another run, point or floor are ignored. */
+    private fun runListener(runId: String) = object : RunListener {
+        override fun onProgress(progress: ThroughputProgress) = updateRun(runId) { state, _ ->
+            state.copy(activeRunProgress = progress)
+        }
+
+        override fun onPhase(key: String, status: String, errorCode: String?) = updateRun(runId) { state, run ->
+            val now = clock.now()
+            state.replaceRun(run.copy(phases = run.phases.map { phase ->
+                if (phase.key == key) phase.copy(status = status, errorCode = errorCode, endedAt = now) else phase
+            }))
+        }
+
+        override fun onPartial(results: PointThroughput) = updateRun(runId) { state, run ->
+            state.replaceRun(run.copy(results = results))
+        }
+    }
+
+    private fun updateRun(runId: String, change: (SurveyScreenState, ActiveRun) -> SurveyScreenState) {
+        _screenState.update { state ->
+            val run = state.activeRuns.firstOrNull { it.runId == runId }
+            val point = run?.let { r -> state.scanPoints.firstOrNull { it.pointId == r.pointId } }
+            if (run == null || point == null || run.isFinished) state else change(state, run)
+        }
+    }
+
+    private fun finishRun(runId: String, status: String, reason: String?) {
+        _screenState.update { state ->
+            val run = state.activeRuns.firstOrNull { it.runId == runId } ?: return@update state
+            val now = clock.now()
+            val ended = if (status == RunStatus.COMPLETED) {
+                run.copy(
+                    status = RunStatus.COMPLETED, endedAt = now,
+                    phases = run.phases.map { if (it.status in RunStatus.UNFINISHED) it.copy(status = RunStatus.SKIPPED, endedAt = now) else it }
+                )
+            } else {
+                run.end(status, reason, now)
+            }
+            val interaction = state.interaction
+            state.replaceRun(ended).copy(
+                activeRunProgress = null,
+                interaction = if (interaction is SurveyInteraction.ActiveTesting && interaction.runId == runId) {
+                    SurveyInteraction.Idle
+                } else {
+                    interaction
+                }
+            )
+        }
+        activeRunJob = null
+    }
+
+    private fun SurveyScreenState.replaceRun(run: ActiveRun) =
+        copy(activeRuns = activeRuns.map { if (it.runId == run.runId) run else it })
 
     /** Marks the cell containing [coordinate] as "do not measure"; undoable. */
     fun skipSuggestion(coordinate: SurveyCoordinate): Boolean {

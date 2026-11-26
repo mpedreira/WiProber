@@ -18,12 +18,11 @@ class FakeMeasurementNetwork(
     var associationProvider: () -> Association = { DEFAULT_AP },
     var available: () -> Boolean = { true },
     override val id: String = "wifi-1",
-    override val selection: String = "only"
+    override val selection: String = "only",
+    override val socketFactory: SocketFactory = SocketFactory.getDefault()
 ) : MeasurementNetwork {
     val resolved: MutableList<String> = Collections.synchronizedList(mutableListOf())
     val boundDatagrams = Collections.synchronizedList(mutableListOf<DatagramSocket>())
-
-    override val socketFactory: SocketFactory = SocketFactory.getDefault()
 
     override fun resolve(host: String): List<InetAddress> {
         resolved += host
@@ -46,4 +45,19 @@ class FakeMeasurementNetwork(
             rxLinkSpeedMbps = 649, frequencyMhz = 5_500, wifiStandard = "802.11ax (Wi-Fi 6/6E)"
         )
     }
+}
+
+/** Socket factory whose every [failEvery]-th connect fails, to simulate lost probes. */
+class FlakySocketFactory(private val failEvery: Int) : SocketFactory() {
+    private val count = java.util.concurrent.atomic.AtomicInteger()
+    override fun createSocket(): java.net.Socket = object : java.net.Socket() {
+        override fun connect(endpoint: java.net.SocketAddress?, timeout: Int) {
+            if (count.incrementAndGet() % failEvery == 0) throw java.net.SocketTimeoutException("lost probe")
+            super.connect(endpoint, timeout)
+        }
+    }
+    override fun createSocket(host: String?, port: Int) = throw UnsupportedOperationException()
+    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int) = throw UnsupportedOperationException()
+    override fun createSocket(host: InetAddress?, port: Int) = throw UnsupportedOperationException()
+    override fun createSocket(address: InetAddress?, port: Int, localAddress: InetAddress?, localPort: Int) = throw UnsupportedOperationException()
 }

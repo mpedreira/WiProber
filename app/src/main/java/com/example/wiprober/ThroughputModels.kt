@@ -62,6 +62,22 @@ data class ThroughputTestResult(
     val latencyAvgMs: Double? = null,
     val jitterMs: Double? = null,
     val latencySamples: Int? = null,
+    /** Failed handshakes among the latency samples (the valid ones are kept). */
+    val latencyFailures: Int? = null,
+    /** How latency was measured: `tcp-connect` (TCP handshake), never ICMP. */
+    val latencyMethod: String? = null,
+    /** Per-phase [RunStatus] and error code ([ErrorCodes]). */
+    val latencyStatus: String? = null,
+    val latencyErrorCode: String? = null,
+    val downloadStatus: String? = null,
+    val downloadErrorCode: String? = null,
+    val uploadStatus: String? = null,
+    val uploadErrorCode: String? = null,
+    /** Bytes and real seconds of each transfer. */
+    val downBytes: Long? = null,
+    val downSeconds: Double? = null,
+    val upBytes: Long? = null,
+    val upSeconds: Double? = null,
     val deviceModel: String? = null,
     val androidVersion: String? = null,
     val error: String? = null
@@ -72,6 +88,9 @@ data class ThroughputTestResult(
         const val TARGET_INTERNET = "internet"
     }
 }
+
+/** One finished transfer: rate, bytes actually counted and real duration. */
+data class TransferResult(val bitsPerSecond: Double, val bytes: Long, val seconds: Double)
 
 /** Stable identifiers of the built-in throughput targets. */
 object TargetIds {

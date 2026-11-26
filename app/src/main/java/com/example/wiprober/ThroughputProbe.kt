@@ -3,8 +3,6 @@ package com.example.wiprober
 import android.content.Context
 import android.net.wifi.ScanResult
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import java.net.ConnectException
 import java.net.InetSocketAddress
@@ -29,32 +27,39 @@ import kotlinx.coroutines.withContext
 class ThroughputProbe(context: Context, private val clock: MillisClock = SystemMillisClock) {
     private val appContext = context.applicationContext
     private val wifiNetworks = AndroidWifiNetworks(appContext)
-    private val mainThread = Handler(Looper.getMainLooper())
 
     /**
-     * [scanResults] is the scan just taken at this point: it supplies the connected AP's channel
-     * width and BSS Load. [onProgress] is delivered on the main thread as each phase starts.
+     * Runs the configured tests of one point on a dedicated thread. [scanResults] is the scan
+     * just taken at this point (channel width and BSS Load of the connected AP; empty for
+     * "active tests only"). [control] bounds the run with a monotonic deadline and closes every
+     * socket/process on cancel; cancelling the calling coroutine cancels it at once.
+     * [listener] is called on the measuring thread.
      */
     suspend fun measure(
         settings: ThroughputSettings,
         imported: WiproberConfigStore.Imported,
         scanResults: List<ScanResult>,
-        onProgress: (ThroughputProgress) -> Unit = {}
-    ): PointThroughput = withContext(Dispatchers.IO) {
+        control: MeasurementControl,
+        listener: RunListener
+    ): PointThroughput = runCancellable(control, "active-tests") {
         val network = wifiNetworks.select()
         try {
+            control.startRunDeadline(ThroughputRunner.runDeadlineMillis(settings, imported.enabledTests, imported.enabledScripts))
             val beacons = scanResults.mapNotNull { result ->
                 result.BSSID?.lowercase(Locale.ROOT)?.let { it to BeaconInfo(WifiChannels.widthMhz(result.channelWidth), bssLoad(result)) }
             }.toMap()
+            val socketFactory = network?.socketFactory ?: NoNetworkSocketFactory
             val timedHttp = TimedHttpClient(
-                socketFactory = network?.socketFactory ?: NoNetworkSocketFactory,
-                resolve = { host -> network?.resolve(host)?.toTypedArray() ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI) }
+                socketFactory = socketFactory,
+                resolve = { host -> network?.resolve(host)?.toTypedArray() ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI) },
+                control = control
             )
             val runner = ThroughputRunner(
-                iperf = Iperf3Client(socketFactory = network?.socketFactory ?: NoNetworkSocketFactory),
-                http = HttpSpeedTest(open = { url ->
-                    network?.openHttp(url) ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI)
-                }),
+                iperf = Iperf3Client(socketFactory = socketFactory, control = control),
+                http = HttpSpeedTest(
+                    open = { url -> network?.openHttp(url) ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI) },
+                    control = control
+                ),
                 network = network,
                 beacons = beacons,
                 device = DeviceInfo(
@@ -65,15 +70,16 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                     http = timedHttp,
                     network = network,
                     systemPing = NetworkTestRunner::runSystemPing,
-                    clock = clock
+                    clock = clock,
+                    control = control
                 ),
                 scriptRunner = ScriptRunner(timedHttp),
-                clock = clock
+                clock = clock,
+                control = control
             )
-            runner.measure(settings, imported.enabledTests, imported.enabledScripts) { progress ->
-                mainThread.post { onProgress(progress) }
-            }
+            runner.measure(settings, imported.enabledTests, imported.enabledScripts, listener)
         } finally {
+            control.clearRunDeadline()
             network?.close()
         }
     }

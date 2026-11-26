@@ -25,21 +25,34 @@ class PerformanceExportTest {
     )
     private val corporate = internet.copy(target = "corporate", method = "iperf3-tcp", upMbps = 148.0, error = null)
 
+    private val floorPlanId = "11111111-1111-4111-8111-111111111111"
+    private val imageId = "22222222-2222-4222-8222-222222222222"
+
+    private fun run(runId: String, point: ScanPoint, results: PointThroughput?, status: String = RunStatus.COMPLETED) =
+        ActiveRun(runId, point.pointId!!, point.scanId, 1_700_000_000_000L, 1_700_000_001_000L, status, results = results)
+
+    /** Builds the ESX report and the export of one floor holding [points] and [runs]. */
+    private fun export(points: List<ScanPoint>, runs: List<ActiveRun>): Pair<EkahauReport, com.google.gson.JsonObject> {
+        val map = MapInfo("g.png", 1000, 800)
+        val report = EkahauReportBuilder().build(
+            "Site", listOf(EkahauFloorInput("Ground", map, 0.1, points, emptyList(), emptyList(), floorPlanId, imageId))
+        )
+        val snapshot = ProjectExportSnapshot("p", "Site", null, listOf(
+            FloorExportSnapshot("f", "Ground", File("g.png"), floorPlanId, imageId, false, null,
+                ProjectSnapshot(map, 0.1, points, emptyList(), emptyList(), activeRuns = runs))
+        ))
+        return report to PerformanceExport.build(report, "Site.esx", 0L, snapshot)
+    }
+
     @Test
     fun rowsPointAtTheSurveyAndCoordinatesOfTheirPoint() {
-        val measured = ScanPoint(1L, 812.5f, 433.25f, listOf(network),
-            throughput = PointThroughput(1L, listOf(corporate, internet)))
-        val plain = ScanPoint(2L, 10f, 20f, listOf(network))
-        val report = EkahauReportBuilder().build(
-            "Site",
-            listOf(EkahauFloorInput("Ground", MapInfo("g.png", 1000, 800), 0.1, listOf(plain, measured), emptyList(), emptyList()))
-        )
-
-        val json = PerformanceExport.build(report, "Site.esx", 0L)
+        val measured = ScanPoint(1L, 812.5f, 433.25f, listOf(network), pointId = "point-1", scanId = "scan-1")
+        val plain = ScanPoint(2L, 10f, 20f, listOf(network), pointId = "point-2", scanId = "scan-2")
+        val (report, json) = export(listOf(plain, measured), listOf(run("run-1", measured, PointThroughput(1L, listOf(corporate, internet)))))
         val rows = json.getAsJsonArray("measurements").map { it.asJsonObject }
 
         assertEquals("wiprober-performance", json["format"].asString)
-        assertEquals(1, json["version"].asInt)
+        assertEquals(2, json["version"].asInt)
         assertEquals("Site.esx", json["esxFile"].asString)
         assertEquals(listOf("corporate", "internet"), rows.map { it["target"].asString })
         rows.forEach { row ->
@@ -49,26 +62,49 @@ class PerformanceExportTest {
             assertEquals(location.x, row["x"].asDouble, 0.0)
             assertEquals(location.y, row["y"].asDouble, 0.0)
             assertEquals("Ground", row["floorName"].asString)
+            assertEquals("point-1", row["pointId"].asString)
+            assertEquals("scan-1", row["scanId"].asString)
+            assertEquals("run-1", row["runId"].asString)
+            assertEquals(RunStatus.COMPLETED, row["runStatus"].asString)
             assertEquals("2023-11-14T22:13:20.000Z", row["measuredAt"].asString)
         }
     }
 
     @Test
     fun unmeasuredValuesAreWrittenAsExplicitNulls() {
-        val point = ScanPoint(1L, 1f, 2f, listOf(network), throughput = PointThroughput(1L, listOf(internet)))
-        val report = EkahauReportBuilder().build(
-            "Site",
-            listOf(EkahauFloorInput("Ground", MapInfo("g.png", 100, 80), 0.1, listOf(point), emptyList(), emptyList()))
-        )
-
-        val text = String(PerformanceExport.toBytes(PerformanceExport.build(report, "Site.esx", 0L)), StandardCharsets.UTF_8)
+        val point = ScanPoint(1L, 1f, 2f, listOf(network), pointId = "p", scanId = "s")
+        val (_, json) = export(listOf(point), listOf(run("r", point, PointThroughput(1L, listOf(internet)))))
+        val text = String(PerformanceExport.toBytes(json), StandardCharsets.UTF_8)
         val row = JsonParser.parseString(text).asJsonObject.getAsJsonArray("measurements")[0].asJsonObject
 
         assertTrue(row.has("upMbps") && row["upMbps"].isJsonNull)
-        listOf("rxLinkMbps", "channel", "channelWidthMhz", "bssChannelUtilizationPct", "jitterMs", "deviceModel")
-            .forEach { field -> assertTrue(field, row.has(field) && row[field].isJsonNull) }
         assertEquals(95.3, row["downMbps"].asDouble, 0.0)
         assertEquals("upload: HTTP 403 from speed.cloudflare.com", row["error"].asString)
+        listOf("rxLinkMbps", "channel", "channelWidthMhz", "bssChannelUtilizationPct", "jitterMs", "deviceModel",
+            "downloadStatus", "upBytes", "latencyFailures")
+            .forEach { field -> assertTrue(field, row.has(field) && row[field].isJsonNull) }
+    }
+
+    @Test
+    fun theSamePointMeasuredTwiceKeepsItsIdAndCoordinatesWithDistinctRuns() {
+        val point = ScanPoint(1L, 300f, 200f, listOf(network), pointId = "dock-3", scanId = "scan-a")
+        val second = point.copy(timestamp = 2L, scanId = "scan-b")
+        val cancelled = run("run-c", second, null, RunStatus.CANCELLED).copy(scanId = "scan-b", statusReason = ErrorCodes.CANCELLED)
+        val (_, json) = export(listOf(point, second), listOf(
+            run("run-a", point, PointThroughput(1L, listOf(corporate))),
+            run("run-b", second, PointThroughput(2L, listOf(corporate.copy(downMbps = 50.0)))).copy(scanId = "scan-b"),
+            cancelled
+        ))
+
+        val rows = json.getAsJsonArray("measurements").map { it.asJsonObject }
+        assertEquals(listOf("run-a", "run-b"), rows.map { it["runId"].asString })
+        assertEquals(setOf("dock-3"), rows.map { it["pointId"].asString }.toSet())
+        assertEquals(setOf(300.0), rows.map { it["x"].asDouble }.toSet())
+        assertTrue(rows[0]["surveyId"].asString != rows[1]["surveyId"].asString) // one ESX survey per scan
+        val runs = json.getAsJsonArray("activeRuns").map { it.asJsonObject }
+        assertEquals(listOf("run-a", "run-b", "run-c"), runs.map { it["runId"].asString })
+        assertEquals(RunStatus.CANCELLED, runs[2]["status"].asString)
+        assertEquals(ErrorCodes.CANCELLED, runs[2]["statusReason"].asString)
     }
 
     @Test
@@ -97,38 +133,28 @@ class PerformanceExportTest {
 
     @Test
     fun networkTestsAndScriptStepsGetTheirOwnArraysWithPosition() {
-        val point = ScanPoint(
-            1L, 7f, 9f, listOf(network),
-            throughput = PointThroughput(
-                1L, emptyList(),
-                networkTests = listOf(NetworkTestResult("gw", "ping", "10.0.0.1", "icmp", 1L, ok = true, rttAvgMs = 2.5)),
-                scripts = listOf(ScriptRun("flow", 1L, steps = listOf(
-                    ScriptStepResult("login", "POST", "app.example.com", "/login", status = 200, ok = true, totalMs = 80.0),
-                    ScriptStepResult("item", "GET", "app.example.com", "/items", error = "status 500")
-                )))
-            )
+        val point = ScanPoint(1L, 7f, 9f, listOf(network), pointId = "p", scanId = "s")
+        val results = PointThroughput(
+            1L, emptyList(),
+            networkTests = listOf(NetworkTestResult("gw", "ping", "10.0.0.1", "icmp", 1L, ok = true, rttAvgMs = 2.5)),
+            scripts = listOf(ScriptRun("flow", 1L, steps = listOf(
+                ScriptStepResult("login", "POST", "app.example.com", "/login", status = 200, ok = true, totalMs = 80.0),
+                ScriptStepResult("item", "GET", "app.example.com", "/items", error = "status 500", errorCode = ErrorCodes.HTTP_STATUS)
+            )))
         )
-        val report = EkahauReportBuilder().build(
-            "Site", listOf(EkahauFloorInput("G", MapInfo("g.png", 100, 80), 0.1, listOf(point), emptyList(), emptyList()))
-        )
-
-        val json = PerformanceExport.build(report, "Site.esx", 0L)
+        val (_, json) = export(listOf(point), listOf(run("r", point, results)))
 
         assertEquals(0, json.getAsJsonArray("measurements").size())
         val test = json.getAsJsonArray("networkTests").single().asJsonObject
         assertEquals("gw", test["name"].asString)
+        assertEquals("icmp-echo", test["rttKind"].asString)
         assertEquals(2.5, test["rttAvgMs"].asDouble, 0.0)
         assertEquals(7.0, test["x"].asDouble, 0.0)
+        assertEquals("r", test["runId"].asString)
         val steps = json.getAsJsonArray("scriptSteps").map { it.asJsonObject }
         assertEquals(listOf(1, 2), steps.map { it["stepIndex"].asInt })
-        assertEquals("status 500", steps[1]["error"].asString)
+        assertEquals(ErrorCodes.HTTP_STATUS, steps[1]["errorCode"].asString)
         assertTrue(steps[1]["status"].isJsonNull)
-        assertTrue(PerformanceExport.hasMeasurements(
-            ProjectExportSnapshot("p", "Site", null, listOf(
-                FloorExportSnapshot("f", "G", java.io.File("g.png"), "a", "b", false, null,
-                    ProjectSnapshot(MapInfo("g.png", 100, 80), 0.1, listOf(point), emptyList(), emptyList()))
-            ))
-        ))
     }
 
     @Test

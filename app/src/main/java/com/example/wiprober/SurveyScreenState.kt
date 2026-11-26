@@ -43,6 +43,8 @@ sealed interface SurveyInteraction {
         val scanCount: Int
     ) : SurveyInteraction
     data class ProjectBusy(val operation: ProjectOperation) : SurveyInteraction
+    /** Active tests of [pointId] are running ([runId]); survives Activity recreation. */
+    data class ActiveTesting(val runId: String, val pointId: String) : SurveyInteraction
 }
 
 sealed interface StartedScanAction {
@@ -61,6 +63,10 @@ data class SurveyScreenState(
     val skippedSuggestions: List<SurveyCoordinate> = emptyList(),
     /** Next point the user moved by hand; replaces the computed suggestion until used or skipped. */
     val movedSuggestion: SurveyCoordinate? = null,
+    /** Active test runs of this floor, saved progressively. */
+    val activeRuns: List<ActiveRun> = emptyList(),
+    /** Phase currently running in the active run, for the progress dialog. */
+    val activeRunProgress: ThroughputProgress? = null,
     val scanMode: SurveyScanMode = SurveyScanMode.STOP_AND_GO,
     val interaction: SurveyInteraction = SurveyInteraction.Idle,
     val lastUndoneAction: LastAction? = null

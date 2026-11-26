@@ -223,7 +223,6 @@
     <string name="throughput_duration_seconds">Seconds per direction</string>
     <string name="throughput_restore_defaults">Defaults</string>
     <string name="throughput_settings_saved">Throughput test settings saved</string>
-    <string name="throughput_in_progress">Scan done. Running throughput tests…</string>
     <string name="throughput_progress_title">Measuring throughput</string>
     <string name="throughput_progress_starting">Starting…</string>
     <string name="throughput_progress_step">Step %1$d of %2$d · %3$s · %4$s</string>
@@ -232,6 +231,13 @@
     <string name="throughput_progress_latency_hint">Connecting to the server…</string>
     <string name="throughput_progress_failed">failed</string>
     <string name="throughput_progress_running">Running…</string>
+    <string name="throughput_cancel_tests">Cancel tests</string>
+    <string name="throughput_cancelling">Cancelling… finished phases are kept</string>
+    <string name="last_run_undone">Last test run removed (the point is kept)</string>
+    <string name="run_summary_completed">Tests finished</string>
+    <string name="run_summary_cancelled">Tests cancelled; finished phases kept</string>
+    <string name="run_summary_failed">Tests stopped (%1$s); finished phases kept</string>
+    <string name="run_summary_interrupted">Tests interrupted; finished phases kept</string>
     <string name="throughput_phase_latency">latency</string>
     <string name="throughput_phase_download">download</string>
     <string name="throughput_phase_upload">upload</string>

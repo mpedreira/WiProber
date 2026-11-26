@@ -2,7 +2,7 @@
 
 Specification of the file produced by the [mpedreira/WiProber](https://github.com/mpedreira/WiProber) fork so that an external application (e.g. an analysis web app) can join it with the Ekahau `.esx`.
 
-Status: **format 1**, implemented since release `v3.0.0-throughput.1` and extended without breaking changes up to `v3.0.0-throughput.4` (see [History](#7-history)).
+Status: **format 2** (one row per active run, with run and phase statuses). Format 1 was produced by releases `v3.0.0-throughput.1` to `.4` (see [History](#7-history)).
 
 ## 1. What is exported
 
@@ -29,6 +29,7 @@ Nothing from WiProber is written inside the `.esx`, and Ekahau's native `through
   "version": 1,
   "generatedAt": "2026-11-26T10:41:03.512Z",
   "esxFile": "Project.esx",
+  "activeRuns":      [ { …row… }, … ],
   "measurements":    [ { …row… }, … ],
   "networkTests":    [ { …row… }, … ],
   "scriptSteps":     [ { …row… }, … ],
@@ -40,16 +41,32 @@ Nothing from WiProber is written inside the `.esx`, and Ekahau's native `through
 | Field | Type | Description |
 |---|---|---|
 | `format` | string | Always `"wiprober-performance"` |
-| `version` | int | `1`. Only changes on a breaking change; new fields are added without bumping it |
+| `version` | int | `2`. Changes on a semantic change; new fields are added without bumping it |
 | `generatedAt` | ISO-8601 UTC string | Export time |
 | `esxFile` | string | Name of the `.esx` next to the JSON in the ZIP |
-| `measurements` | array | One row per **Stop-and-Go point × throughput target** (iPerf3 / Internet) — section 3 |
+| `activeRuns` | array | One row per **active run** (every run, also cancelled, failed, interrupted or without Wi-Fi) with its phases — section 2b |
+| `measurements` | array | One row per **active run × throughput target** (iPerf3 / Internet) — section 3 |
 | `networkTests` | array | One row per **point × imported network test** — section 3b |
 | `scriptSteps` | array | One row per **point × imported HTTP script step** — section 3c |
 | `roamingSessions` | array | One row per **Continuous track with a roaming probe** — section 3d |
 | `roamingEvents` | array | One row per **roam or outage** found in those tracks — section 3d |
 
 Every array is always present (empty when there is no data).
+
+## 2b. Points, scans and runs (`activeRuns`)
+
+A **point** (`pointId`) is a physical position on a floor; each passive Wi-Fi **scan** at it has a `scanId` (one ESX survey), and each set of **active tests** is a **run** (`runId`). The point is saved as soon as the passive scan finishes; the run is recorded with every phase `pending` before anything is measured and is saved progressively, so finished phases survive a later failure, a cancel ("Cancel tests"), a rotation or a process death. Points and results saved by format-1 releases are migrated repeatably (ids derived from floor, time and position).
+
+| Field | Type | Description |
+|---|---|---|
+| position fields | | As in section 3 (`surveyId` of the run's scan in this ESX, `floorPlanId`, `floorName`, `pointId`, `scanId`, `runId`, `x`, `y`, `measuredAt`) |
+| `startedAt`, `endedAt` | ISO-8601 UTC string | Run start and end |
+| `status` | string | `completed`, `failed`, `cancelled` (user), `interrupted` (app closed/killed mid-run; never restarted automatically) |
+| `statusReason` | string \| null | Error code of the end, e.g. `cancelled`, `timeout` (whole-point deadline), `interrupted` |
+| `profile` | string \| null | Configuration used (`device-settings`, `legacy` for migrated results) |
+| `phases` | array | Every planned phase: `key` (`target:<targetId>:latency\|download\|upload`, `test:<name>`, `script:<name>:<step>`), `label`, `status` (`pending`, `completed`, `failed`, `skipped`, `cancelled`, `interrupted`), `errorCode`, `endedAt` |
+
+Every phase has a monotonic deadline (latency 15 s, transfers duration + 10 s, network tests by type, script steps 20 s) and the point has one more (all phases plus 15 s). On a deadline or cancel the run's sockets, HTTP connections, worker threads and ping processes are closed, so a blocked transfer ends at once.
 
 ## 3. Throughput rows (`measurements`)
 
@@ -61,7 +78,11 @@ Shared by `measurements`, `networkTests` and `scriptSteps`.
 
 | Field | Type | Description |
 |---|---|---|
-| `surveyId` | UUID string | ID of the point's `survey-<surveyId>.json` **in the `.esx` of the same ZIP** |
+| `surveyId` | UUID string \| null | ID of the run's scan `survey-<surveyId>.json` **in the `.esx` of the same ZIP** |
+| `pointId` | string | Physical point; the same across scans, runs and exports |
+| `scanId` | string \| null | Passive scan the run followed |
+| `runId` | string | Active run |
+| `runStatus` | string | Status of the run (section 2b) |
 | `floorPlanId` | UUID string | Floor (`floorPlans.json`). Stable across exports |
 | `floorName` | string | Floor name |
 | `x`, `y` | number | Position in **original floor-plan image pixels**, origin top-left. Same value as the survey's `surveys[0].routePoints[0][0].location` |
@@ -83,7 +104,12 @@ Shared by `measurements`, `networkTests` and `scriptSteps`.
 | `latencyMs` | number \| null | Latency = **minimum** of 10 TCP handshakes with the server, ms |
 | `latencyAvgMs` | number \| null | Mean of those 10 samples, ms |
 | `jitterMs` | number \| null | Mean difference between consecutive samples, ms |
-| `latencySamples` | int \| null | Samples taken (10) |
+| `latencySamples` | int \| null | Successful handshakes |
+| `latencyFailures` | int \| null | Failed handshakes among the 10; the valid ones are kept (`latencyErrorCode` = `partial_loss`) |
+| `latencyMethod` | string \| null | `tcp-connect`: TCP handshake round trip, not ICMP |
+| `latencyStatus`, `downloadStatus`, `uploadStatus` | string \| null | Phase status: `completed`, `failed`, `skipped` |
+| `latencyErrorCode`, `downloadErrorCode`, `uploadErrorCode` | string \| null | Cause per phase: `resolution_failed`, `connect_failed`, `connection_refused`, `timeout`, `iperf_busy`, `iperf_protocol`, `http_status`, `empty_body` (server answered with no body: never reported as 0), `response_too_large`, `skipped_unreachable`, `not_configured`, `not_on_wifi`, `wifi_lost`… |
+| `downBytes`, `downSeconds`, `upBytes`, `upSeconds` | number \| null | Bytes counted and real duration of each transfer |
 | `error` | string \| null | What failed; `null` when everything was measured |
 
 ### Measured network and associated AP
@@ -123,7 +149,7 @@ Every test of a run uses one Wi-Fi network (`networkId`): names resolve with its
 |---|---|
 | `not connected to a Wi-Fi network` | No Wi-Fi: nothing was sent; every value is `null` |
 | `iPerf3 server not configured` / `download URL not configured` | Target enabled without a server/URL |
-| `latency: <reason>; download/upload skipped: server unreachable` | Could not even connect: transfers were skipped |
+| `latency: <code> (<detail>); download skipped: server unreachable` | Could not even connect to the pre-checked endpoint: its transfers were skipped. An upload to a different host is still attempted and evaluated on its own |
 | `download: <reason>` / `upload: <reason>` | That direction failed (e.g. `iperf3 server is busy`, `HTTP 403 from speed.cloudflare.com`) |
 | `upload: not configured` | Internet test without an upload URL |
 
@@ -159,6 +185,7 @@ Configured in the imported file (`tests` section, see the [example](wiprober-con
 | `lossPct` | number \| null | Loss 0–100 % |
 | `rttMinMs`, `rttAvgMs`, `rttMaxMs` | number \| null | Round trip min/avg/max |
 | `jitterMs` | number \| null | Mean difference between consecutive answers |
+| `rttKind` | string \| null | `icmp-echo` or `tcp-connect`: ICMP and TCP round trips are different metrics and must not be mixed |
 | `error` | string \| null | Why it failed: `no reply`, `2 of 10 lost`, `NXDOMAIN`, `SERVFAIL`, `status 500, expected 200`, `no default gateway`… |
 
 `${gateway}` and `${dns}` in the configuration are replaced with the default gateway and first DNS server the Wi-Fi network assigned.
@@ -176,6 +203,7 @@ Scripts from the `scripts` section (or imported from a `.har`): chained requests
 | `ssid`, `bssidStart`, `bssidEnd`, `rssi` | | Connected AP when the script started/ended |
 | `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`, `downloadMs`, `totalMs` | number \| null | Timing breakdown of the step, ms |
 | `bytes` | int \| null | Body size |
+| `errorCode` | string \| null | Structured cause |
 | `error` | string \| null | E.g. `status 401`, `response does not contain "A-01"`, `cannot extract token from $.data.token`, `unknown variable token` |
 
 ## 3d. Continuous-mode roaming (`roamingSessions`, `roamingEvents`)
@@ -241,3 +269,4 @@ Data your app can derive from the `.esx` with no WiProber change: APs on the sam
 | `v3.0.0-throughput.2` | Added `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latency from 10 samples |
 | `v3.0.0-throughput.3` | No export changes (survey guide in the app) |
 | `v3.0.0-throughput.4` | Added `networkTests` and `scriptSteps` (imported configuration) and `roamingSessions`/`roamingEvents` (Continuous-mode roaming) |
+| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |

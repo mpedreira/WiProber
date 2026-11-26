@@ -22,12 +22,14 @@ import javax.net.SocketFactory
  */
 class Iperf3Client(
     private val socketFactory: SocketFactory = SocketFactory.getDefault(),
-    private val connectTimeoutMillis: Int = 5_000
+    private val connectTimeoutMillis: Int = 5_000,
+    /** Tracks sockets and threads so cancelling or a deadline closes them. */
+    private val control: MeasurementControl = MeasurementControl()
 ) {
     enum class Direction { DOWNLOAD, UPLOAD }
 
-    /** Bits per second seen by the receiving side, or an [IOException] describing the failure. */
-    fun run(address: InetAddress, port: Int, durationSeconds: Int, direction: Direction): Double {
+    /** Rate seen by the receiving side plus the bytes/seconds the client counted, or an exception. */
+    fun run(address: InetAddress, port: Int, durationSeconds: Int, direction: Direction): TransferResult {
         val cookie = newCookie()
         val reverse = direction == Direction.DOWNLOAD
         openSocket(address, port, durationSeconds).use { control ->
@@ -68,7 +70,7 @@ class Iperf3Client(
                             output.writeByte(IPERF_DONE)
                             output.flush()
                             val done = transfer ?: throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 test finished without data")
-                            return (done.receiverBytesPerSecond ?: done.bytesPerSecond) * 8.0
+                            return TransferResult((done.receiverBytesPerSecond ?: done.bytesPerSecond) * 8.0, done.bytes, done.seconds)
                         }
                         ACCESS_DENIED -> throw MeasurementException(ErrorCodes.IPERF_BUSY, "iperf3 server is busy")
                         SERVER_ERROR -> throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 server error ${readServerError(input)}")
@@ -84,7 +86,7 @@ class Iperf3Client(
     }
 
     private fun openSocket(address: InetAddress, port: Int, durationSeconds: Int): Socket =
-        socketFactory.createSocket().apply {
+        control.track(socketFactory.createSocket()).apply {
             tcpNoDelay = true
             soTimeout = (durationSeconds + CONTROL_GRACE_SECONDS) * 1_000
             connect(InetSocketAddress(address, port), connectTimeoutMillis)
@@ -105,7 +107,7 @@ class Iperf3Client(
                     if (System.nanoTime() < deadline) counted.addAndGet(read.toLong())
                 }
             }
-        }.apply { isDaemon = true; name = "iperf3-drain"; start() }
+        }.apply { isDaemon = true; name = "iperf3-drain"; control.track(this); start() }
         sleepUntil(deadline)
         return Transfer(counted.get(), (deadline - start) / NANOS_PER_SECOND.toDouble()) {
             runCatching { stream.close() }
@@ -120,6 +122,7 @@ class Iperf3Client(
         val deadline = start + durationSeconds * NANOS_PER_SECOND
         var sent = 0L
         while (System.nanoTime() < deadline) {
+            control.checkActive()
             output.write(block)
             sent += block.size
         }
@@ -192,9 +195,10 @@ class Iperf3Client(
 
     private fun sleepUntil(deadline: Long) {
         while (true) {
+            control.checkActive()
             val remaining = deadline - System.nanoTime()
             if (remaining <= 0) return
-            Thread.sleep((remaining / 1_000_000L).coerceAtLeast(1L))
+            Thread.sleep((remaining / 1_000_000L).coerceIn(1L, 200L))
         }
     }
 
@@ -209,7 +213,7 @@ class Iperf3Client(
         const val COOKIE_SIZE = 37
         const val BLOCK_SIZE = 128 * 1024
         const val MAX_JSON_BYTES = 1_000_000
-        const val CONTROL_GRACE_SECONDS = 15
+        const val CONTROL_GRACE_SECONDS = 10
         const val NANOS_PER_SECOND = 1_000_000_000L
         const val CLIENT_VERSION = "3.12"
 

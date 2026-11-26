@@ -15,7 +15,10 @@ import java.util.Locale
  * and phase with a countdown, and the values already measured. Not cancellable: the point is
  * saved when the tests finish.
  */
-class ThroughputProgressDialog(private val activity: AppCompatActivity) {
+class ThroughputProgressDialog(
+    private val activity: AppCompatActivity,
+    private val onCancel: () -> Unit
+) {
     @SuppressLint("InflateParams") // dialog content has no parent until the dialog attaches it
     private val view = activity.layoutInflater.inflate(R.layout.dialog_throughput_progress, null)
     private val stepText = view.findViewById<TextView>(R.id.throughputStep)
@@ -25,6 +28,9 @@ class ThroughputProgressDialog(private val activity: AppCompatActivity) {
     private var dialog: AlertDialog? = null
     private var current: ThroughputProgress? = null
     private var phaseStartedAt = 0L
+
+    /** True until the first progress was shown (a recreated dialog must render the current phase). */
+    val isFresh: Boolean get() = current == null
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -42,7 +48,14 @@ class ThroughputProgressDialog(private val activity: AppCompatActivity) {
             .setTitle(R.string.throughput_progress_title)
             .setView(view)
             .setCancelable(false)
+            // The point and the finished phases are kept; the dialog closes when the run ends.
+            .setNegativeButton(R.string.throughput_cancel_tests, null)
             .show()
+        dialog?.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE)?.setOnClickListener { button ->
+            button.isEnabled = false
+            stepText.setText(R.string.throughput_cancelling)
+            onCancel()
+        }
         view.post(ticker)
     }
 
@@ -106,5 +119,19 @@ class ThroughputProgressDialog(private val activity: AppCompatActivity) {
 
     private companion object {
         const val TICK_MILLIS = 200L
+    }
+}
+
+/** Status line shown when a run ends: its outcome plus the results that were finished. */
+object ActiveRunSummary {
+    fun format(context: android.content.Context, run: ActiveRun): String {
+        val status = when (run.status) {
+            RunStatus.COMPLETED -> context.getString(R.string.run_summary_completed)
+            RunStatus.CANCELLED -> context.getString(R.string.run_summary_cancelled)
+            RunStatus.INTERRUPTED -> context.getString(R.string.run_summary_interrupted)
+            else -> context.getString(R.string.run_summary_failed, run.statusReason ?: run.status)
+        }
+        val results = run.results?.takeIf { it.tests.isNotEmpty() }?.let(ThroughputSummary::format)
+        return listOfNotNull(status, results).joinToString("\n")
     }
 }

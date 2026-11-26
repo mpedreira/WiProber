@@ -159,10 +159,12 @@ class NetworkTestRunner(
      * ICMP ping through the system `ping`, given an already resolved IP and the Wi-Fi interface
      * name; null where unavailable (a TCP probe bound to the Wi-Fi network is used instead).
      */
-    private val systemPing: ((ip: String, count: Int, interfaceName: String) -> String)? = null,
+    private val systemPing: ((ip: String, count: Int, interfaceName: String, control: MeasurementControl) -> String)? = null,
     private val clock: MillisClock = SystemMillisClock,
     /** DNS server port; tests point it at a local fake server. */
-    private val dnsPort: Int = 53
+    private val dnsPort: Int = 53,
+    /** Tracks sockets and ping processes so cancelling or a deadline closes them. */
+    private val control: MeasurementControl = MeasurementControl()
 ) {
     fun run(test: NetworkTest): NetworkTestResult {
         val start = network?.association()
@@ -205,7 +207,7 @@ class NetworkTestRunner(
         }
         val id = SecureRandom().nextInt(0x10000)
         val request = DnsWire.query(id, host)
-        DatagramSocket().use { socket ->
+        control.using(DatagramSocket()) { socket ->
             net.bind(socket)
             socket.soTimeout = DNS_TIMEOUT_MILLIS
             val start = System.nanoTime()
@@ -233,7 +235,7 @@ class NetworkTestRunner(
         val iface = link.interfaceName
         val pinger = systemPing
         val icmp = if (pinger != null && iface != null) {
-            runCatching { PingOutputParser.parse(pinger(address.hostAddress!!, count, iface)) }.getOrNull()
+            runCatching { PingOutputParser.parse(pinger(address.hostAddress!!, count, iface, control)) }.getOrNull()
         } else {
             null
         }
@@ -298,7 +300,7 @@ class NetworkTestRunner(
         ProbeStats((1..count).map {
             val start = System.nanoTime()
             try {
-                net.socketFactory.createSocket().use { it.connect(InetSocketAddress(address, port), PROBE_TIMEOUT_MILLIS) }
+                control.using(net.socketFactory.createSocket()) { it.connect(InetSocketAddress(address, port), PROBE_TIMEOUT_MILLIS) }
                 elapsed(start)
             } catch (e: ConnectException) {
                 if (refusedCounts && "refused" in e.message.orEmpty().lowercase()) elapsed(start) else null
@@ -351,15 +353,20 @@ class NetworkTestRunner(
             listOf("ping", "-n", "-c", count.toString(), "-i", "0.2", "-W", "2", "-I", interfaceName, ip)
 
         /** Runs [systemPingCommand] on an IP literal; returns its output (also when probes were lost). */
-        fun runSystemPing(ip: String, count: Int, interfaceName: String): String {
+        fun runSystemPing(ip: String, count: Int, interfaceName: String, control: MeasurementControl): String {
             require(ip.matches(Regex("[0-9a-fA-F.:]+"))) { "ping target must be an IP address" }
             require(interfaceName.matches(Regex("[A-Za-z0-9_.-]+"))) { "invalid interface name" }
-            val process = ProcessBuilder(systemPingCommand(ip, count, interfaceName)).redirectErrorStream(true).start()
-            if (!process.waitFor(count * 1L + 5L, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                throw MeasurementException(ErrorCodes.TIMEOUT, "ping timed out")
+            val process = control.track(ProcessBuilder(systemPingCommand(ip, count, interfaceName)).redirectErrorStream(true).start())
+            try {
+                if (!process.waitFor(count * 1L + 5L, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                    throw MeasurementException(ErrorCodes.TIMEOUT, "ping timed out")
+                }
+                control.checkActive()
+                return process.inputStream.bufferedReader().readText()
+            } finally {
+                control.untrack(process)
             }
-            return process.inputStream.bufferedReader().readText()
         }
     }
 }
