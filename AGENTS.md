@@ -151,6 +151,12 @@ For Wi-Fi, URI, camera/gallery, and lifecycle work, also perform targeted device
 
 The current external compatibility fixture is archive format `2.0`, project schema `1.8.0`, with Ekahau AI Pro `11.6.0.1`/`11.6.3.1` history. Keep customer ESX fixtures outside the repository and select them through `WIPROBER_ESX_FIXTURE`.
 
+## Builds and releases
+
+- Field builds come from tags `vX.Y.Z-throughput.N`; `versionCode = X·1 000 000 + Y·10 000 + Z·100 + N` and must keep increasing. See `docs/release-process.md`.
+- `field-build.yml` records tag, source SHA, versionName/versionCode, APK SHA-256 and signer certificate; it never publishes a release.
+- Never commit keystores or signing passwords; the field key comes from repository secrets.
+
 ## Git hygiene
 
 - The worktree may already contain user changes. Inspect `git status`, preserve unrelated edits, and never reset or overwrite them.

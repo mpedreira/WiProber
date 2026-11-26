@@ -1060,7 +1060,12 @@ class SurveyActivity : AppCompatActivity() {
 
     private fun showAboutDialog() {
         val versionName = try {
-            packageManager.getPackageInfo(packageName, 0).versionName
+            val info = packageManager.getPackageInfo(packageName, 0)
+            // Identifies the exact APK: visible version, versionCode, source commit and channel.
+            getString(
+                R.string.about_build, info.versionName, info.longVersionCode,
+                BuildConfig.GIT_SHA.take(12), BuildConfig.BUILD_CHANNEL
+            )
         } catch (e: PackageManager.NameNotFoundException) {
             getString(R.string.version_unavailable)
         }

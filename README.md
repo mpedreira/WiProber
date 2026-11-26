@@ -6,7 +6,7 @@ This project was born out of the need for a simple, mobile-first tool for networ
 
 Version **3.0.0** requires **Android 11 (API 30) or newer**. It adds a project hub, recent projects, multi-floor surveying, and ESX import that preserves original archive contents while adding new surveys.
 
-> **About this fork.** [mpedreira/WiProber](https://github.com/mpedreira/WiProber) extends the original [htechno/WiProber](https://github.com/htechno/WiProber) with **active survey** features: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe and a NetSpot-style survey guide. Results are exported next to the unchanged `.esx` in a ZIP, as documented in [docs/wiprober-performance.md](docs/wiprober-performance.md). Prebuilt APKs are on the [Releases](https://github.com/mpedreira/WiProber/releases) page.
+> **About this fork.** [mpedreira/WiProber](https://github.com/mpedreira/WiProber) extends the original [htechno/WiProber](https://github.com/htechno/WiProber) with **active survey** features: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe and a NetSpot-style survey guide. Results are exported next to the unchanged `.esx` in a ZIP, as documented in [docs/wiprober-performance.md](docs/wiprober-performance.md). Prebuilt APKs are on the [Releases](https://github.com/mpedreira/WiProber/releases) page; how field builds are versioned, identified and signed is in [docs/release-process.md](docs/release-process.md).
 
 ## Screenshots
 
