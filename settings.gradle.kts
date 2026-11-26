@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WiProber"
+rootProject.name = "nimWifi"
 include(":app")

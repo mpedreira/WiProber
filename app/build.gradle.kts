@@ -5,7 +5,7 @@ plugins {
 
 /*
  * Build identity (docs/release-process.md). The field channel is the debug build type
- * (applicationId com.example.wiprober.debug) published from tags `vX.Y.Z-throughput.N`:
+ * (applicationId com.mpedreira.nimwifi.debug) published from tags `vX.Y.Z-throughput.N`:
  *   versionName = the tag without "v"          e.g. 3.0.0-throughput.5 (+ "-debug")
  *   versionCode = X*1_000_000 + Y*10_000 + Z*100 + N   e.g. 3_000_005 (> 5 used by .1-.4)
  * -PappVersionName / -PappVersionCode override both; local builds without them are
@@ -28,11 +28,11 @@ val gitSha: String = providers.gradleProperty("gitSha").orNull
 val buildChannel: String = providers.gradleProperty("buildChannel").orNull ?: "local"
 
 android {
-    namespace = "com.example.wiprober"
+    namespace = "com.mpedreira.nimwifi"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.wiprober"
+        applicationId = "com.mpedreira.nimwifi"
         minSdk = 30
         targetSdk = 36
         versionCode = appVersionCode

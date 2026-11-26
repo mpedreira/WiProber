@@ -1,12 +1,12 @@
-# WiProber contributor guide
+# nimWifi contributor guide
 
 ## Scope and product
 
 This file applies to the whole repository.
 
-WiProber is a single-module Android application for on-site Wi-Fi surveys. A project owns one or more floors. Each floor has its own map, scale, Stop-and-Go points, Continuous routes, and positioned notes; export produces one Ekahau-compatible ESX archive for the complete project.
+nimWifi is a single-module Android application for on-site Wi-Fi surveys. A project owns one or more floors. Each floor has its own map, scale, Stop-and-Go points, Continuous routes, and positioned notes; export produces one Ekahau-compatible ESX archive for the complete project.
 
-New projects are generated as a supported Ekahau subset. Imported projects use a different contract: keep the complete source archive immutable, index only UI geometry, and overlay WiProber additions during export. Do not decode or regenerate imported Wi-Fi/spectrum measurements. Every untouched source entry must keep the same name and uncompressed bytes; JSON catalogues may be patched only when required for a local addition or supported edit.
+New projects are generated as a supported Ekahau subset. Imported projects use a different contract: keep the complete source archive immutable, index only UI geometry, and overlay nimWifi additions during export. Do not decode or regenerate imported Wi-Fi/spectrum measurements. Every untouched source entry must keep the same name and uncompressed bytes; JSON catalogues may be patched only when required for a local addition or supported edit.
 
 ## Current code map
 
@@ -75,20 +75,20 @@ Do not add more business logic to `SurveyActivity`. Prefer extracting a small, t
 - `metersPerUnit` is metres per original-image pixel.
 - Application timestamps and durations are milliseconds. ESX route points, scanning intervals, and survey duration are nanoseconds. Binary track timestamps are relative milliseconds stored as signed 32-bit integers.
 - Binary track files begin with `02 01`, use big-endian values, and address AP measurements by their index in the matching `accessPointMeasurementIds` list.
-- Every ESX entity ID written by WiProber must be a canonical UUID string. IDs referenced across `project.json`, `floorPlans.json`, `surveyLookups.json`, `survey-*.json`, image payloads, notes, AP measurements, radios, and binary files must remain referentially consistent.
+- Every ESX entity ID written by nimWifi must be a canonical UUID string. IDs referenced across `project.json`, `floorPlans.json`, `surveyLookups.json`, `survey-*.json`, image payloads, notes, AP measurements, radios, and binary files must remain referentially consistent.
 - `PROJECT_CONFIG_ID` must continue to match the ID in `app/src/main/assets/projectConfiguration.json`. The Wi-Fi adapter ID in every `WifiTrack` must match the generated `wifiAdapterInformations.json` entry.
 - Image metadata must describe the bytes actually copied into `image-<id>` payloads. Do not infer a format solely from an untrusted display name.
 - Normalize and validate BSSIDs at boundaries. Do not silently merge different radios; the current product deliberately treats each BSSID as a separate measured AP.
 - Never discard an entry from an imported source ESX. A changed export may recompress entries, but the uncompressed bytes of every untouched original entry—including all Wi-Fi and spectrum binaries—must remain byte-for-byte identical.
 - Persist the bounded `EsxSourceCompatibility` inventory beside imported `base.esx`. It records archive/schema versions and unsupported opaque tracks, spectrum data, unindexed JSON catalogues, and unknown payloads; verify it again before export.
-- Keep imported route/note geometry distinguishable from local survey data. Imported survey JSON/BIN is read-only; Undo and report generation affect only WiProber additions.
+- Keep imported route/note geometry distinguishable from local survey data. Imported survey JSON/BIN is read-only; Undo and report generation affect only nimWifi additions.
 - A schema-v2 imported workspace has already lost its original archive and remains a documented legacy lossy project. Re-import the source ESX before claiming the schema-v3 preservation guarantee.
 
 When changing ESX handling, add fixture-based tests that validate JSON relationships, ZIP entries, time-unit conversions, binary reader/writer compatibility, and malformed/truncated input. A writer test that is read only by the project's own reader is necessary but not sufficient for Ekahau compatibility.
 
 ## Throughput export
 
-- Projects with throughput results export a ZIP holding the ESX exactly as a plain export would produce it plus `wiprober-performance.json`. Never add WiProber files inside the ESX and never fill `throughputSessions`/`pingSessions` without a real Ekahau reference fixture.
+- Projects with throughput results export a ZIP holding the ESX exactly as a plain export would produce it plus `wiprober-performance.json`. Never add nimWifi files inside the ESX and never fill `throughputSessions`/`pingSessions` without a real Ekahau reference fixture.
 - Rows join the ESX of the same ZIP by `surveyId` and across exports by `pointId`/`runId` (and `floorPlanId` + `x`/`y`, original floor-plan pixels, identical to the survey route point). Local survey IDs are regenerated on every export.
 - Active runs and planned points never change the ESX: an imported project with only those additions exports its source archive byte for byte.
 - Judge each SSID on its own in maps and reports; never let another SSID's signal fill gaps of the selected one.

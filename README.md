@@ -1,6 +1,6 @@
-# WiProber
+# nimWifi
 
-**WiProber** is an open-source Android application for conducting Wi-Fi site surveys. It allows users to load a floor plan, perform Wi-Fi scans using different modes (Stop-and-Go or Continuous), and export the collected data into the `.esx` format, compatible with Ekahau Pro™.
+**nimWifi** is an open-source Android application for conducting Wi-Fi site surveys. It allows users to load a floor plan, perform Wi-Fi scans using different modes (Stop-and-Go or Continuous), and export the collected data into the `.esx` format, compatible with Ekahau Pro™.
 
 This project was born out of the need for a simple, mobile-first tool for network engineers and enthusiasts to perform quick on-site surveys without expensive, proprietary hardware.
 
@@ -12,7 +12,7 @@ Version **3.0.0** requires **Android 11 (API 30) or newer**. It adds a project h
 
 | Project hub | Multi-floor survey |
 | :---: | :---: |
-| [<img src="docs/screenshots/v3-project-hub.png" width="320" alt="WiProber v3 project hub with New project, Open ESX project, and a recent two-floor project">](docs/screenshots/v3-project-hub.png) | [<img src="docs/screenshots/v3-continuous-survey.png" width="320" alt="WiProber v3 survey screen with floor selector, survey points, a route, and Continuous mode controls">](docs/screenshots/v3-continuous-survey.png) |
+| [<img src="docs/screenshots/v3-project-hub.png" width="320" alt="nimWifi v3 project hub with New project, Open ESX project, and a recent two-floor project">](docs/screenshots/v3-project-hub.png) | [<img src="docs/screenshots/v3-continuous-survey.png" width="320" alt="nimWifi v3 survey screen with floor selector, survey points, a route, and Continuous mode controls">](docs/screenshots/v3-continuous-survey.png) |
 | Create a project, import an ESX file, or resume recent work. | Switch floors and continue surveying with points, routes, notes, and scale calibration. |
 
 Select a screenshot to view it at full resolution.
@@ -30,7 +30,7 @@ Select a screenshot to view it at full resolution.
 *   **Dynamic Adapter Info:** Automatically detects your device model (e.g., "Samsung S23") and injects this metadata into the project file.
 *   **Note-Taking:** Add text and photo annotations directly onto the map to document access point locations, obstacles, or other points of interest.
 *   **Scale Calibration:** Set the physical scale of the map for accurate-to-reality measurements.
-*   **Ekahau-compatible `.esx` Export:** New projects are generated from scratch with the required JSON files, binary Wi-Fi tracks, floor plans, and attached note images. Imported projects keep the complete source archive and append WiProber surveys without regenerating the original measurements.
+*   **Ekahau-compatible `.esx` Export:** New projects are generated from scratch with the required JSON files, binary Wi-Fi tracks, floor plans, and attached note images. Imported projects keep the complete source archive and append nimWifi surveys without regenerating the original measurements.
 *   **`.esx` Import:** Imports floor plans, route geometry, scale, and map-positioned picture notes for display. Original Wi-Fi tracks, spectrum data, and unknown payloads remain opaque and are preserved for the next export.
 
 Added in this fork:
@@ -51,18 +51,18 @@ This is a non-commercial, open-source project. Please be aware of the following 
 
 *   **Wi-Fi Scan Throttling:**
     *   **The Issue:** Android limits third-party apps to **4 scans per 2 minutes**.
-    *   **Stop-and-Go Mode:** WiProber enforces a countdown to prevent errors if you scan too fast.
-    *   **Continuous Mode:** **REQUIRED:** You MUST disable "Wi-Fi scan throttling" in Developer Options. WiProber will check this setting and warn you if it's enabled.
+    *   **Stop-and-Go Mode:** nimWifi enforces a countdown to prevent errors if you scan too fast.
+    *   **Continuous Mode:** **REQUIRED:** You MUST disable "Wi-Fi scan throttling" in Developer Options. nimWifi will check this setting and warn you if it's enabled.
 *   **Location Services (GPS):** Android requires Location Services to be enabled to see Wi-Fi networks. The app will prompt you to turn it on.
 *   **No "My Networks" Detection:** The app currently does not automatically identify or flag your own networks ("My Networks"). This must be done manually within Ekahau Pro after import.
-*   **No AP Merging:** WiProber creates a new, separate access point (`accessPoints.json`) for every unique BSSID found. It does not attempt to group multiple radios (e.g., 2.4-GHz and 5-GHz radios) under a single physical access point device. This grouping should be performed manually in Ekahau.
-*   **ESX Editing Scope:** WiProber does not display or edit imported RSSI/frequency/spectrum measurements, walls, requirements, or AP grouping. Schema-v3 projects preserve those source entries unchanged and add new WiProber survey data alongside them. New projects still contain the supported WiProber-generated subset. Projects imported by older schema-v2 builds must be re-imported from their original ESX to gain source-preservation guarantees.
+*   **No AP Merging:** nimWifi creates a new, separate access point (`accessPoints.json`) for every unique BSSID found. It does not attempt to group multiple radios (e.g., 2.4-GHz and 5-GHz radios) under a single physical access point device. This grouping should be performed manually in Ekahau.
+*   **ESX Editing Scope:** nimWifi does not display or edit imported RSSI/frequency/spectrum measurements, walls, requirements, or AP grouping. Schema-v3 projects preserve those source entries unchanged and add new nimWifi survey data alongside them. New projects still contain the supported nimWifi-generated subset. Projects imported by older schema-v2 builds must be re-imported from their original ESX to gain source-preservation guarantees.
 *   **No noise floor / SNR:** Android does not expose the noise floor, so neither the scans nor the throughput tests report noise or SNR.
 *   **Network access (fork):** this fork requests the `INTERNET` permission for the optional tests. Nothing is sent unless you enable a test or import a configuration, and then only to the servers you configure (and `speed.cloudflare.com` for the default Internet test). Trusts user/MDM-installed CAs so corporate HTTPS servers can be tested.
 *   **ICMP ping:** Android apps cannot send ICMP directly; the system `ping` bound to the Wi-Fi interface is used and, where a device does not allow it, a TCP ping (reported as `method: "tcp"`).
 *   **Association and DHCP timing:** apps cannot disconnect and reconnect Wi-Fi on Android 10+, so association/authentication/DHCP times are not measured.
 *   **Roaming probe and scans:** while Continuous mode scans, the radio leaves the channel; outages that overlap a scan are flagged (`duringScan`).
-*   **Android Version:** WiProber v3 requires Android 11 (API 30) or newer. Android 10 and older devices cannot install or update to v3. Public beacon Information Elements and `wifiStandard` are part of the v3 scan baseline, although the exact IE set still depends on the device chipset and driver.
+*   **Android Version:** nimWifi v3 requires Android 11 (API 30) or newer. Android 10 and older devices cannot install or update to v3. Public beacon Information Elements and `wifiStandard` are part of the v3 scan baseline, although the exact IE set still depends on the device chipset and driver.
 
 ## Getting Started
 
@@ -78,15 +78,15 @@ This is a non-commercial, open-source project. Please be aware of the following 
 
 ### Installing a prebuilt APK (fork)
 
-Each fork release on the [Releases](https://github.com/mpedreira/WiProber/releases) page attaches a debug-signed APK (`com.example.wiprober.debug`) with its SHA-256 in the notes. Open the release on the phone, download the APK and install it. It installs next to the F-Droid build; export your projects before uninstalling any build.
+Each fork release on the [Releases](https://github.com/mpedreira/WiProber/releases) page attaches a debug-signed APK (`com.mpedreira.nimwifi.debug`) with its SHA-256 in the notes. Open the release on the phone, download the APK and install it. It installs next to the F-Droid build; export your projects before uninstalling any build.
 
 ### Building an APK on GitHub
 
 Open **Actions → Build APK → Run workflow**, select the branch, and start the build. Pull requests targeting `main` also run this workflow; ordinary pushes and tags do not automatically build or publish a release.
 
-The workflow runs JVM tests and Android lint, builds the app and instrumentation-test APKs, and uploads the app as the **wiprober-debug-apk** artifact. Download that artifact from the successful run and extract **WiProber-debug.apk**. It includes the source commit, APK metadata, and a SHA-256 checksum. Artifacts are retained for 30 days; device tests and the external customer ESX fixture are not run on GitHub.
+The workflow runs JVM tests and Android lint, builds the app and instrumentation-test APKs, and uploads the app as the **nimwifi-debug-apk** artifact. Download that artifact from the successful run and extract **nimWifi-debug.apk**. It includes the source commit, APK metadata, and a SHA-256 checksum. Artifacts are retained for 30 days; device tests and the external customer ESX fixture are not run on GitHub.
 
-This is a debug-signed APK (`com.example.wiprober.debug`), not a production-signed release. GitHub runners may generate different debug keys between builds, so an existing debug installation may not accept an update. Export your projects before uninstalling: uninstalling removes app-owned projects and their source archives.
+This is a debug-signed APK (`com.mpedreira.nimwifi.debug`), not a production-signed release. GitHub runners may generate different debug keys between builds, so an existing debug installation may not accept an update. Export your projects before uninstalling: uninstalling removes app-owned projects and their source archives.
 
 ## How to Use
 
@@ -127,7 +127,7 @@ This is a debug-signed APK (`com.example.wiprober.debug`), not a production-sign
 4.  Use a read-only test account in scripts: credentials in the file are stored in clear text on the phone.
 
 ### Export
-Tap **"Export ESX"** to generate one `.esx` containing every floor currently stored in the local project. In this fork, a project with performance results (throughput, network tests, scripts or roaming) is exported as a **ZIP** with that same `.esx` plus `wiprober-performance.json` ([specification](docs/wiprober-performance.md)). A new project is generated from scratch; an imported project preserves all original archive entries and overlays only WiProber additions or supported edits. Export runs behind a labelled progress state and reports the number of floors, points, routes, and notes written.
+Tap **"Export ESX"** to generate one `.esx` containing every floor currently stored in the local project. In this fork, a project with performance results (throughput, network tests, scripts or roaming) is exported as a **ZIP** with that same `.esx` plus `wiprober-performance.json` ([specification](docs/wiprober-performance.md)). A new project is generated from scratch; an imported project preserves all original archive entries and overlays only nimWifi additions or supported edits. Export runs behind a labelled progress state and reports the number of floors, points, routes, and notes written.
 
 ### Import
 On the start screen, tap **"Open ESX project"** and select a project. All supported floor plans are imported together; use the selector in the survey screen to move between them.
@@ -147,11 +147,11 @@ Gson models whose field names and generic types must remain compatible with save
 projects and ESX catalogues. Apply it to any new model serialized through Gson.
 
 Run the minified storage and export tests on a connected device in a separate
-`com.example.wiprober.r8validation` package (does not replace the installed app):
+`com.mpedreira.nimwifi.r8validation` package (does not replace the installed app):
 
 ```sh
 ./gradlew connectedR8ValidationAndroidTest -Pr8Validation \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.example.wiprober.ProjectRepositoryInstrumentedTest,com.example.wiprober.EsxExportServiceInstrumentedTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.mpedreira.nimwifi.ProjectRepositoryInstrumentedTest,com.mpedreira.nimwifi.EsxExportServiceInstrumentedTest
 ```
 
 This opt-in variant inherits release optimization settings and uses the debug
@@ -162,7 +162,7 @@ these instrumentation rules. Run normal debug checks without `-Pr8Validation`.
 
 ## Contributing
 
-**WiProber** is a community-driven project, and your contributions are welcome!
+**nimWifi** is a community-driven project, and your contributions are welcome!
 
 *   **Have an idea or a bug fix?** The best way to get it into the project is to implement it yourself and submit a PR.
 *   **Want to request a feature?** You are welcome to open an issue to discuss it.
