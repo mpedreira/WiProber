@@ -762,9 +762,31 @@ class SurveyActivity : AppCompatActivity() {
             moved = state.movedSuggestion != null
         )
         binding.skipSuggestionButton.isVisible = suggestion != null && state.interaction is SurveyInteraction.Idle
+        renderGuideGrid(state, settings, showGuide && state.scanMode == SurveyScanMode.STOP_AND_GO)
         binding.surveyGuideHint.isVisible = settings.enabled && map != null && scale == null &&
             state.scanMode == SurveyScanMode.STOP_AND_GO
     }
+
+    /** Grid of the guide's cells over the plan and a legend with the guide settings and the scale. */
+    private fun renderGuideGrid(state: SurveyScreenState, settings: SurveyGuideSettings, visible: Boolean) {
+        val map = state.mapInfo
+        val scale = state.metersPerUnit
+        val grid = if (visible && map != null) SurveyGuide.grid(map.width, map.height, scale, settings) else null
+        binding.pointsOverlay.setGuideGrid(grid)
+        binding.surveyGuideLegend.isVisible = grid != null
+        if (grid == null || scale == null) return
+        val config = settings.sanitized()
+        binding.surveyGuideLegend.text = getString(
+            R.string.guide_legend,
+            formatGuideNumber(config.spacingMeters),
+            formatGuideNumber(config.coverageRadiusMeters),
+            mapSsid(state) ?: getString(R.string.guide_legend_no_ssid),
+            formatGuideNumber(1.0 / scale)
+        )
+    }
+
+    private fun formatGuideNumber(value: Double): String =
+        java.text.DecimalFormat("0.#").format(value)
 
     /** The suggestion if the tap ([x], [y] in map view coordinates) landed on its marker. */
     private fun suggestionAt(x: Float, y: Float): SurveyCoordinate? {

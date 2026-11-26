@@ -269,6 +269,8 @@
     <string name="guide_skipped">Cell skipped. Use Undo to bring it back.</string>
     <string name="guide_moved">Next point moved here</string>
     <string name="guide_needs_scale">Calibrate the scale to see the survey guide</string>
+    <string name="guide_legend">Grid %1$s m · radius %2$s m · SSID: %3$s\nScale: 1 m = %4$s px</string>
+    <string name="guide_legend_no_ssid">none yet</string>
     <string name="last_skip_undone">Skipped cell restored</string>
     <!-- Imported configuration (network tests, scripts, roaming) -->
     <string name="action_configuration">Configuration…</string>
