@@ -1,0 +1,271 @@
+.github/workflows/build-apk.yml
+  s_162f368a1e379c::t_abae53d0ae2f12 47,51,56
+AGENTS.md
+  s_162f368a1e379c::t_bf2aefa44e877e 1,7,9,78,84,91
+README.md
+  s_162f368a1e379c::t_9a6a4f7242b4b9 1,3,15,33,54-55,58-59,65,81,87,89,130,150,154,165
+app/build.gradle.kts
+  s_162f368a1e379c::t_6ca75c7a89dc7b 8,31,35
+app/proguard-rules.pro
+  s_162f368a1e379c::t_3329225a92cf01 5
+app/r8-validation-rules.pro
+  s_162f368a1e379c::t_92925c86dcf528 8,15,18-20
+app/src/androidTest/java/com/mpedreira/nimwifi/EsxExportServiceInstrumentedTest.kt
+  s_162f368a1e379c::t_d519e5b7e9df4d 1
+app/src/androidTest/java/com/mpedreira/nimwifi/ExampleInstrumentedTest.kt
+  s_162f368a1e379c::t_547dc46b992155 1,22
+app/src/androidTest/java/com/mpedreira/nimwifi/ExternalEsxImportInstrumentedTest.kt
+  s_162f368a1e379c::t_bf863fd72a99bb 1
+app/src/androidTest/java/com/mpedreira/nimwifi/FdroidReviewInstrumentedTest.kt
+  s_162f368a1e379c::t_e66f76ba55c685 1,144
+app/src/androidTest/java/com/mpedreira/nimwifi/ProjectRepositoryInstrumentedTest.kt
+  s_162f368a1e379c::t_7941da0b9d7f88 1
+app/src/androidTest/java/com/mpedreira/nimwifi/ScanPermissionRecoveryInstrumentedTest.kt
+  s_162f368a1e379c::t_365e63131ab72f 1,44,123
+app/src/androidTest/java/com/mpedreira/nimwifi/StageFourUxInstrumentedTest.kt
+  s_162f368a1e379c::t_a8374fe7c17fbe 1,23
+app/src/androidTest/java/com/mpedreira/nimwifi/StageZeroUxInstrumentedTest.kt
+  s_162f368a1e379c::t_7073ccb42f9ff7 1,32
+app/src/androidTest/java/com/mpedreira/nimwifi/WifiScannerInstrumentedTest.kt
+  s_162f368a1e379c::t_758f0ee3b47202 1
+app/src/main/AndroidManifest.xml
+  s_162f368a1e379c::t_f133d10a701c99 28
+app/src/main/java/com/mpedreira/nimwifi/ActiveRuns.kt
+  s_162f368a1e379c::t_2da57a4a84ed72 1
+app/src/main/java/com/mpedreira/nimwifi/AndroidWifiNetwork.kt
+  s_162f368a1e379c::t_f77c2b7ec66f0c 1
+app/src/main/java/com/mpedreira/nimwifi/AppCacheMaintenance.kt
+  s_162f368a1e379c::t_745a90b97b2b03 1,10
+app/src/main/java/com/mpedreira/nimwifi/BinaryDataSerializer.kt
+  s_162f368a1e379c::t_e1cc89ac9bc769 1
+app/src/main/java/com/mpedreira/nimwifi/BinaryTrackReader.kt
+  s_162f368a1e379c::t_40c7ab695204a4 1
+app/src/main/java/com/mpedreira/nimwifi/BoundedIO.kt
+  s_162f368a1e379c::t_fa5b9bfb922d71 1
+app/src/main/java/com/mpedreira/nimwifi/ConfigImportDialogs.kt
+  s_162f368a1e379c::t_1a4e1e097b4eb6 1
+app/src/main/java/com/mpedreira/nimwifi/ConfigSecurity.kt
+  s_162f368a1e379c::t_f9f812685591f4 1
+app/src/main/java/com/mpedreira/nimwifi/CreateProjectActivity.kt
+  s_162f368a1e379c::t_3cdc1ec0df9dca 1,17
+app/src/main/java/com/mpedreira/nimwifi/EkahauModels.kt
+  s_162f368a1e379c::t_f77f328903172a 1,45,47,143
+app/src/main/java/com/mpedreira/nimwifi/EkahauReportBuilder.kt
+  s_162f368a1e379c::t_62c033eed88589 1
+app/src/main/java/com/mpedreira/nimwifi/EsxArchiveIO.kt
+  s_162f368a1e379c::t_e0389d359791a8 1
+app/src/main/java/com/mpedreira/nimwifi/EsxArchiveOverlayWriter.kt
+  s_162f368a1e379c::t_8cb3efb03d7d00 1,9
+app/src/main/java/com/mpedreira/nimwifi/EsxExportService.kt
+  s_162f368a1e379c::t_74d4c6ec4be2eb 1
+app/src/main/java/com/mpedreira/nimwifi/EsxIdFactory.kt
+  s_162f368a1e379c::t_a7df7392aa9d07 1
+app/src/main/java/com/mpedreira/nimwifi/EsxImportService.kt
+  s_162f368a1e379c::t_fd922c16128f30 1
+app/src/main/java/com/mpedreira/nimwifi/EsxProjectImporter.kt
+  s_162f368a1e379c::t_56be4412b39348 1
+app/src/main/java/com/mpedreira/nimwifi/EsxReportValidator.kt
+  s_162f368a1e379c::t_55e6d19c1ed144 1
+app/src/main/java/com/mpedreira/nimwifi/FloorScalePolicy.kt
+  s_162f368a1e379c::t_5da3e98ef40a9d 1
+app/src/main/java/com/mpedreira/nimwifi/GeneratedEsxArchiveWriter.kt
+  s_162f368a1e379c::t_48808cc4b6b9ae 1,7
+app/src/main/java/com/mpedreira/nimwifi/HttpSpeedTest.kt
+  s_162f368a1e379c::t_95f963640a16cb 1,148
+app/src/main/java/com/mpedreira/nimwifi/ImageCoordinateMapper.kt
+  s_162f368a1e379c::t_20ff63f2f6d19a 1
+app/src/main/java/com/mpedreira/nimwifi/Iperf3Client.kt
+  s_162f368a1e379c::t_c427c15007eca0 1
+app/src/main/java/com/mpedreira/nimwifi/JsonFileIO.kt
+  s_162f368a1e379c::t_1f4df090f47463 1
+app/src/main/java/com/mpedreira/nimwifi/JsonModel.kt
+  s_162f368a1e379c::t_5b42306b5da1c3 1
+app/src/main/java/com/mpedreira/nimwifi/MainViewModel.kt
+  s_162f368a1e379c::t_32ed4ab2fba501 1
+app/src/main/java/com/mpedreira/nimwifi/MeasurementControl.kt
+  s_162f368a1e379c::t_06f8be2b1e6e37 1
+app/src/main/java/com/mpedreira/nimwifi/MeasurementNetwork.kt
+  s_162f368a1e379c::t_7c51cf8a71b553 1
+app/src/main/java/com/mpedreira/nimwifi/NetworkTests.kt
+  s_162f368a1e379c::t_5e6d2a1a0ada46 1
+app/src/main/java/com/mpedreira/nimwifi/NoteImageMetadataReader.kt
+  s_162f368a1e379c::t_9289f4fcc6ff5f 1
+app/src/main/java/com/mpedreira/nimwifi/PerformanceExport.kt
+  s_162f368a1e379c::t_2d55afd0b8911c 1
+app/src/main/java/com/mpedreira/nimwifi/PointActionsDialogs.kt
+  s_162f368a1e379c::t_7a6cab60b2dcbd 1
+app/src/main/java/com/mpedreira/nimwifi/PointTemplate.kt
+  s_162f368a1e379c::t_5b8591160d1778 1
+app/src/main/java/com/mpedreira/nimwifi/PointsOverlayView.kt
+  s_162f368a1e379c::t_7df0c2fe3aea77 1
+app/src/main/java/com/mpedreira/nimwifi/ProjectHubActivity.kt
+  s_162f368a1e379c::t_d69f3de32938bc 1,19-20
+app/src/main/java/com/mpedreira/nimwifi/ProjectRepository.kt
+  s_162f368a1e379c::t_ca43b3fcbf8df3 1,165
+app/src/main/java/com/mpedreira/nimwifi/Roaming.kt
+  s_162f368a1e379c::t_eaafb55b1ad487 1
+app/src/main/java/com/mpedreira/nimwifi/ScanData.kt
+  s_162f368a1e379c::t_5d51ebe4a65cfd 1
+app/src/main/java/com/mpedreira/nimwifi/ScriptRunner.kt
+  s_162f368a1e379c::t_8f787565eefa89 1,163
+app/src/main/java/com/mpedreira/nimwifi/SsidCoverage.kt
+  s_162f368a1e379c::t_1fa938a51f3c5f 1
+app/src/main/java/com/mpedreira/nimwifi/SurveyActivity.kt
+  s_162f368a1e379c::t_8acad5dd86f4a0 1,35-36,863,1019
+app/src/main/java/com/mpedreira/nimwifi/SurveyAndroidCoordinator.kt
+  s_162f368a1e379c::t_f13c09d34130ab 1
+app/src/main/java/com/mpedreira/nimwifi/SurveyControlsPresenter.kt
+  s_162f368a1e379c::t_6e35992ea21ea8 1
+app/src/main/java/com/mpedreira/nimwifi/SurveyGuide.kt
+  s_162f368a1e379c::t_452825f4c6aa25 1
+app/src/main/java/com/mpedreira/nimwifi/SurveyGuideSettingsDialog.kt
+  s_162f368a1e379c::t_fd26a631ed756c 1
+app/src/main/java/com/mpedreira/nimwifi/SurveyReport.kt
+  s_162f368a1e379c::t_e5d9748d82e76f 1,7
+app/src/main/java/com/mpedreira/nimwifi/SurveyRuntimeSources.kt
+  s_162f368a1e379c::t_536a402cf47bae 1
+app/src/main/java/com/mpedreira/nimwifi/SurveyScreenState.kt
+  s_162f368a1e379c::t_720826f03ded5b 1
+app/src/main/java/com/mpedreira/nimwifi/SurveySummary.kt
+  s_162f368a1e379c::t_6ea0c57ffd722f 1
+app/src/main/java/com/mpedreira/nimwifi/ThroughputModels.kt
+  s_162f368a1e379c::t_c25284e8ac3ca0 1
+app/src/main/java/com/mpedreira/nimwifi/ThroughputProbe.kt
+  s_162f368a1e379c::t_a690dc1f91b695 1
+app/src/main/java/com/mpedreira/nimwifi/ThroughputProgressDialog.kt
+  s_162f368a1e379c::t_9fd5fef6465cdf 1
+app/src/main/java/com/mpedreira/nimwifi/ThroughputRunner.kt
+  s_162f368a1e379c::t_f0ce27ba276c4d 1
+app/src/main/java/com/mpedreira/nimwifi/ThroughputSettingsDialog.kt
+  s_162f368a1e379c::t_a3fdd8cf4c24ae 1
+app/src/main/java/com/mpedreira/nimwifi/WifiChannels.kt
+  s_162f368a1e379c::t_a6ec1b3b273853 1
+app/src/main/java/com/mpedreira/nimwifi/WifiScanOperation.kt
+  s_162f368a1e379c::t_7f640ab7a5f5fb 1
+app/src/main/java/com/mpedreira/nimwifi/WifiScanner.kt
+  s_162f368a1e379c::t_9eef496083c019 1
+app/src/main/java/com/mpedreira/nimwifi/WifiTechnologyMapper.kt
+  s_162f368a1e379c::t_97ea43395db1df 1
+app/src/main/java/com/mpedreira/nimwifi/WiproberConfig.kt
+  s_162f368a1e379c::t_42117af0c552e7 1
+app/src/main/java/com/mpedreira/nimwifi/WiproberConfigStore.kt
+  s_162f368a1e379c::t_2359ad96c53476 1
+app/src/main/res/layout-land/activity_survey.xml
+  s_162f368a1e379c::t_36979c3e65fb41 67
+app/src/main/res/layout/activity_survey.xml
+  s_162f368a1e379c::t_9bb9f9fb3284c2 61
+app/src/main/res/values-night/themes.xml
+  s_162f368a1e379c::t_ba37c75dc35508 3
+app/src/main/res/values-ru/strings.xml
+  s_162f368a1e379c::t_994a611089d78e 9,11
+app/src/main/res/values/strings.xml
+  s_162f368a1e379c::t_d007469d3ae4e2 4,25,139,184,205,207
+app/src/main/res/values/themes.xml
+  s_162f368a1e379c::t_7d7217ffced0a3 3,8
+app/src/test/java/com/mpedreira/nimwifi/ActiveRunsTest.kt
+  s_162f368a1e379c::t_b0a709d8cafd62 1
+app/src/test/java/com/mpedreira/nimwifi/AppCacheMaintenanceTest.kt
+  s_162f368a1e379c::t_ccd01e8c2b4f1e 1
+app/src/test/java/com/mpedreira/nimwifi/BinaryTrackReaderTest.kt
+  s_162f368a1e379c::t_f8575a23559b39 1
+app/src/test/java/com/mpedreira/nimwifi/ConfigSecurityTest.kt
+  s_162f368a1e379c::t_5dc707f24f4157 1
+app/src/test/java/com/mpedreira/nimwifi/EkahauReportBuilderTest.kt
+  s_162f368a1e379c::t_d83cc94166af61 1
+app/src/test/java/com/mpedreira/nimwifi/EsxArchiveIOTest.kt
+  s_162f368a1e379c::t_6c9abe55b3a969 1
+app/src/test/java/com/mpedreira/nimwifi/EsxArchiveOverlayWriterTest.kt
+  s_162f368a1e379c::t_221b43ee1f1e69 1
+app/src/test/java/com/mpedreira/nimwifi/EsxIdFactoryTest.kt
+  s_162f368a1e379c::t_d3d847cf6e633e 1
+app/src/test/java/com/mpedreira/nimwifi/EsxProjectImporterTest.kt
+  s_162f368a1e379c::t_aaae95ab0c96fb 1
+app/src/test/java/com/mpedreira/nimwifi/EsxRoundTripTest.kt
+  s_162f368a1e379c::t_d9b83debb0e0d4 1
+app/src/test/java/com/mpedreira/nimwifi/ExampleConfigTest.kt
+  s_162f368a1e379c::t_e97145f2df482b 1
+app/src/test/java/com/mpedreira/nimwifi/ExampleUnitTest.kt
+  s_162f368a1e379c::t_b4684bb867c4a6 1
+app/src/test/java/com/mpedreira/nimwifi/ExternalEsxFixtureTest.kt
+  s_162f368a1e379c::t_6d10af7e57ef14 1
+app/src/test/java/com/mpedreira/nimwifi/FakeMeasurementNetwork.kt
+  s_162f368a1e379c::t_d710c4d4afd858 1
+app/src/test/java/com/mpedreira/nimwifi/FloorScalePolicyTest.kt
+  s_162f368a1e379c::t_c75d115a6b5fbe 1
+app/src/test/java/com/mpedreira/nimwifi/GeneratedEsxCompatibilityTest.kt
+  s_162f368a1e379c::t_a40af686271266 1,18
+app/src/test/java/com/mpedreira/nimwifi/HttpSpeedTestTest.kt
+  s_162f368a1e379c::t_ae53b6c2a18b9a 1
+app/src/test/java/com/mpedreira/nimwifi/ImageCoordinateMapperTest.kt
+  s_162f368a1e379c::t_2118169d46da9f 1
+app/src/test/java/com/mpedreira/nimwifi/Iperf3ClientTest.kt
+  s_162f368a1e379c::t_3223d979b50769 1
+app/src/test/java/com/mpedreira/nimwifi/MainViewModelTest.kt
+  s_162f368a1e379c::t_f3e98f71c14d13 1
+app/src/test/java/com/mpedreira/nimwifi/MeasurementControlTest.kt
+  s_162f368a1e379c::t_a56fa638fbf4ba 1
+app/src/test/java/com/mpedreira/nimwifi/MiniHttpServer.kt
+  s_162f368a1e379c::t_b31060c81c89f2 1
+app/src/test/java/com/mpedreira/nimwifi/NetworkTestsTest.kt
+  s_162f368a1e379c::t_f064676fbe445c 1
+app/src/test/java/com/mpedreira/nimwifi/PerformanceExportTest.kt
+  s_162f368a1e379c::t_9bb2d53b50cf3d 1
+app/src/test/java/com/mpedreira/nimwifi/PointReuseTest.kt
+  s_162f368a1e379c::t_311832c6274c1f 1
+app/src/test/java/com/mpedreira/nimwifi/RoamingTrackerTest.kt
+  s_162f368a1e379c::t_e8d60877005798 1
+app/src/test/java/com/mpedreira/nimwifi/ScanPointPersistenceTest.kt
+  s_162f368a1e379c::t_6597145e08a13d 1
+app/src/test/java/com/mpedreira/nimwifi/ScriptRunnerTest.kt
+  s_162f368a1e379c::t_ba8784fce04dcf 1
+app/src/test/java/com/mpedreira/nimwifi/SurveyControlsPresenterTest.kt
+  s_162f368a1e379c::t_a34e1254365afd 1
+app/src/test/java/com/mpedreira/nimwifi/SurveyGuideTest.kt
+  s_162f368a1e379c::t_2a19675ca29ca3 1
+app/src/test/java/com/mpedreira/nimwifi/SurveyReportTest.kt
+  s_162f368a1e379c::t_f20409ae075675 1
+app/src/test/java/com/mpedreira/nimwifi/SurveySummaryTest.kt
+  s_162f368a1e379c::t_be3165969bbe1c 1
+app/src/test/java/com/mpedreira/nimwifi/ThroughputRunnerTest.kt
+  s_162f368a1e379c::t_f0d233b5a6fdda 1
+app/src/test/java/com/mpedreira/nimwifi/TimedHttpClientTlsTest.kt
+  s_162f368a1e379c::t_74f561f43770eb 1
+app/src/test/java/com/mpedreira/nimwifi/WifiChannelsTest.kt
+  s_162f368a1e379c::t_0f226833978910 1
+app/src/test/java/com/mpedreira/nimwifi/WifiScanOperationTrackerTest.kt
+  s_162f368a1e379c::t_2d5e7776f75678 1
+app/src/test/java/com/mpedreira/nimwifi/WifiTechnologyMapperTest.kt
+  s_162f368a1e379c::t_b82c1c65afb09e 1
+app/src/test/java/com/mpedreira/nimwifi/WiproberConfigParserTest.kt
+  s_162f368a1e379c::t_15cdd4bc5cbaa1 1
+docs/release-process.md
+  s_162f368a1e379c::t_74624c9bf6b82d 5,20,52
+docs/wiprober-performance.md
+  s_162f368a1e379c::t_8935f668f917ff 1,25,310
+fastlane/metadata/android/en-US/full_description.txt
+  s_162f368a1e379c::t_4bdc648cbc5b0e 14,18,20
+fastlane/metadata/android/en-US/title.txt
+  s_162f368a1e379c::t_53f1cdb0c19cd7 1
+fastlane/metadata/android/ru-RU/full_description.txt
+  s_162f368a1e379c::t_a24b0ca5e1619d 1,10,16
+fastlane/metadata/android/ru-RU/title.txt
+  s_162f368a1e379c::t_9c4cb1de477512 1
+settings.gradle.kts
+  s_162f368a1e379c::t_3c66b265d1f7a0 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8bca6e5269f44f1129101f67c8b6600b24b5ed03",
+  "prompts": {},
+  "sessions": {
+    "s_162f368a1e379c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7f44c00-a64c-44bc-8421-7f4be6c34441",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel Pedreira Antón <manuelpa@inditex.com>"
+    }
+  }
+}
