@@ -1,17 +1,12 @@
 package com.example.wiprober
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import android.net.wifi.ScanResult
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import java.net.ConnectException
-import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.UnknownHostException
 import kotlinx.coroutines.CoroutineScope
@@ -19,7 +14,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.net.HttpURLConnection
 import java.net.InetAddress
 import javax.net.SocketFactory
 import java.util.Locale
@@ -27,14 +21,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Android boundary of the per-point throughput tests. Every socket and HTTP connection is bound
- * to the Wi-Fi network, so a weak Wi-Fi never silently falls back to mobile data; without Wi-Fi
- * nothing is sent and each target reports [ThroughputRunner.NOT_ON_WIFI].
+ * Android boundary of the per-point throughput tests. One Wi-Fi [Network] is selected per run
+ * ([AndroidWifiNetworks]) and every resolution, socket, HTTP connection and association read goes
+ * through it, so a weak Wi-Fi never silently falls back to mobile data; without Wi-Fi nothing is
+ * sent and each target reports [ThroughputRunner.NOT_ON_WIFI].
  */
 class ThroughputProbe(context: Context, private val clock: MillisClock = SystemMillisClock) {
     private val appContext = context.applicationContext
-    private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
-    private val wifiManager = appContext.getSystemService(WifiManager::class.java)
+    private val wifiNetworks = AndroidWifiNetworks(appContext)
     private val mainThread = Handler(Looper.getMainLooper())
 
     /**
@@ -47,45 +41,48 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         scanResults: List<ScanResult>,
         onProgress: (ThroughputProgress) -> Unit = {}
     ): PointThroughput = withContext(Dispatchers.IO) {
-        val network = wifiNetwork()
-        val beacons = scanResults.associateBy { it.BSSID?.lowercase(Locale.ROOT) }
-        val socketFactory = network?.socketFactory ?: SocketFactory.getDefault()
-        val resolve: (String) -> Array<InetAddress> = { host -> network?.getAllByName(host) ?: InetAddress.getAllByName(host) }
-        val connection = { if (network == null) null else connectionInfo(beacons) }
-        val timedHttp = TimedHttpClient(socketFactory = socketFactory, resolve = resolve)
-        val runner = ThroughputRunner(
-            iperf = Iperf3Client(socketFactory = socketFactory),
-            http = HttpSpeedTest(open = { url ->
-                (network?.openConnection(url) ?: url.openConnection()) as HttpURLConnection
-            }),
-            socketFactory = socketFactory,
-            connection = connection,
-            device = DeviceInfo(
-                model = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
-                androidVersion = Build.VERSION.RELEASE
-            ),
-            networkTests = NetworkTestRunner(
-                http = timedHttp,
-                socketFactory = socketFactory,
-                resolve = resolve,
-                datagramSocket = { DatagramSocket().also { socket -> network?.bindSocket(socket) } },
-                context = networkContext(network),
-                connection = connection,
-                systemPing = NetworkTestRunner::runSystemPing,
+        val network = wifiNetworks.select()
+        try {
+            val beacons = scanResults.mapNotNull { result ->
+                result.BSSID?.lowercase(Locale.ROOT)?.let { it to BeaconInfo(WifiChannels.widthMhz(result.channelWidth), bssLoad(result)) }
+            }.toMap()
+            val timedHttp = TimedHttpClient(
+                socketFactory = network?.socketFactory ?: NoNetworkSocketFactory,
+                resolve = { host -> network?.resolve(host)?.toTypedArray() ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI) }
+            )
+            val runner = ThroughputRunner(
+                iperf = Iperf3Client(socketFactory = network?.socketFactory ?: NoNetworkSocketFactory),
+                http = HttpSpeedTest(open = { url ->
+                    network?.openHttp(url) ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI)
+                }),
+                network = network,
+                beacons = beacons,
+                device = DeviceInfo(
+                    model = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+                    androidVersion = Build.VERSION.RELEASE
+                ),
+                networkTests = NetworkTestRunner(
+                    http = timedHttp,
+                    network = network,
+                    systemPing = NetworkTestRunner::runSystemPing,
+                    clock = clock
+                ),
+                scriptRunner = ScriptRunner(timedHttp),
                 clock = clock
-            ),
-            scriptRunner = ScriptRunner(timedHttp),
-            clock = clock
-        )
-        runner.measure(settings, imported.enabledTests, imported.enabledScripts) { progress ->
-            mainThread.post { onProgress(progress) }
+            )
+            runner.measure(settings, imported.enabledTests, imported.enabledScripts) { progress ->
+                mainThread.post { onProgress(progress) }
+            }
+        } finally {
+            network?.close()
         }
     }
 
     /**
      * Continuous-mode roaming probe: every [RoamingSettings.intervalMillis] reads the associated AP
-     * and tries a TCP connect to the target over Wi-Fi (a refused connection still proves
-     * connectivity). [onSample] runs on the main thread with the wall-clock time of the probe.
+     * of the selected Wi-Fi network and tries a TCP connect to the target over it (a refused
+     * connection still proves connectivity). [onSample] runs on the main thread with the
+     * wall-clock time of the probe.
      */
     fun launchRoamingProbe(
         scope: CoroutineScope,
@@ -94,78 +91,56 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         onSample: (atMillis: Long, bssid: String?, rssi: Int?, ok: Boolean, rttMs: Double?, scanning: Boolean) -> Unit
     ): Job = scope.launch(Dispatchers.IO) {
         val config = settings.sanitized()
+        var network: AndroidMeasurementNetwork? = null
         var address: InetAddress? = null
-        while (isActive) {
-            val wall = System.currentTimeMillis()
-            val started = SystemClock.elapsedRealtime()
-            val network = wifiNetwork()
-            val info = if (network != null) connectionInfo(emptyMap()) else null
-            var ok = false
-            var rtt: Double? = null
-            if (network != null) {
-                try {
-                    val target = address ?: network.getAllByName(roamingHost(config.host, network)).first().also { address = it }
-                    val start = System.nanoTime()
-                    try {
-                        network.socketFactory.createSocket().use {
-                            it.connect(InetSocketAddress(target, config.port), ROAMING_CONNECT_TIMEOUT_MILLIS)
-                        }
-                        ok = true
-                    } catch (e: ConnectException) {
-                        ok = "refused" in e.message.orEmpty().lowercase()
-                    }
-                    if (ok) rtt = round1((System.nanoTime() - start) / 1_000_000.0)
-                } catch (e: Exception) {
-                    if (e is UnknownHostException) address = null
+        try {
+            while (isActive) {
+                val wall = System.currentTimeMillis()
+                val started = SystemClock.elapsedRealtime()
+                if (network?.isAvailable() != true) {
+                    network?.close()
+                    network = wifiNetworks.select()
+                    address = null
                 }
+                val net = network
+                val info = net?.association()?.takeIf { it.known }
+                var ok = false
+                var rtt: Double? = null
+                if (net != null) {
+                    try {
+                        val target = address ?: AddressPolicy.candidates(net.resolve(roamingHost(config.host, net))).first()
+                            .also { address = it }
+                        val start = System.nanoTime()
+                        try {
+                            net.socketFactory.createSocket().use {
+                                it.connect(InetSocketAddress(target, config.port), ROAMING_CONNECT_TIMEOUT_MILLIS)
+                            }
+                            ok = true
+                        } catch (e: ConnectException) {
+                            ok = "refused" in e.message.orEmpty().lowercase()
+                        }
+                        if (ok) rtt = round1((System.nanoTime() - start) / 1_000_000.0)
+                    } catch (e: Exception) {
+                        if (e is UnknownHostException || e is MeasurementException) address = null
+                    }
+                }
+                val scanning = isScanning()
+                withContext(Dispatchers.Main) { onSample(wall, info?.bssid, info?.rssi, ok, rtt, scanning) }
+                delay((config.intervalMillis - (SystemClock.elapsedRealtime() - started)).coerceAtLeast(0L))
             }
-            val scanning = isScanning()
-            withContext(Dispatchers.Main) { onSample(wall, info?.bssid, info?.rssi, ok, rtt, scanning) }
-            delay((config.intervalMillis - (SystemClock.elapsedRealtime() - started)).coerceAtLeast(0L))
+        } finally {
+            network?.close()
         }
     }
 
-    private fun roamingHost(template: String, network: Network): String {
-        val context = networkContext(network)
-        return template
-            .replace("\${gateway}", context.gateway ?: throw UnknownHostException("no default gateway"))
-            .replace("\${dns}", context.dnsServers.firstOrNull()?.hostAddress ?: throw UnknownHostException("no DNS server"))
-    }
-
-    /** Default gateway, DNS servers and interface name the Wi-Fi network got from DHCP. */
-    private fun networkContext(network: Network?): NetworkContext {
-        val link = network?.let { connectivity?.getLinkProperties(it) } ?: return NetworkContext()
-        return NetworkContext(
-            gateway = link.routes.firstOrNull { it.isDefaultRoute && it.gateway != null && !it.gateway!!.isAnyLocalAddress }
-                ?.gateway?.hostAddress,
-            dnsServers = link.dnsServers,
-            interfaceName = link.interfaceName
-        )
-    }
-
-    @Suppress("DEPRECATION") // allNetworks: the active network may be cellular while Wi-Fi is up
-    private fun wifiNetwork(): Network? = connectivity?.allNetworks?.firstOrNull { network ->
-        connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-    }
-
-    @Suppress("DEPRECATION") // connectionInfo still reports the associated AP with location access
-    private fun connectionInfo(beacons: Map<String?, ScanResult>): WifiConnectionInfo? {
-        val info = wifiManager?.connectionInfo ?: return null
-        val bssid = info.bssid?.lowercase(Locale.ROOT)?.takeUnless { it == HIDDEN_BSSID }
-        val ssid = info.ssid?.removeSurrounding("\"")?.takeUnless { it == WifiManager.UNKNOWN_SSID || it.isEmpty() }
-        if (bssid == null && ssid == null) return null
-        val beacon = bssid?.let(beacons::get)
-        return WifiConnectionInfo(
-            ssid = ssid,
-            bssid = bssid,
-            rssi = info.rssi.takeIf { it in -126..0 },
-            linkSpeedMbps = info.linkSpeed.takeIf { it > 0 },
-            rxLinkSpeedMbps = info.rxLinkSpeedMbps.takeIf { it > 0 },
-            frequencyMhz = info.frequency.takeIf { it > 0 },
-            channelWidthMhz = beacon?.let { WifiChannels.widthMhz(it.channelWidth) },
-            wifiStandard = WifiChannels.standardName(info.wifiStandard),
-            bssLoad = beacon?.let(::bssLoad)
-        )
+    /** Placeholders are only evaluated when the configured host contains them. */
+    private fun roamingHost(template: String, network: MeasurementNetwork): String {
+        if ("\${" !in template) return template
+        val link = network.link()
+        var host = template
+        if ("\${gateway}" in host) host = host.replace("\${gateway}", link.gateway ?: throw UnknownHostException("no default gateway"))
+        if ("\${dns}" in host) host = host.replace("\${dns}", link.dnsServers.firstOrNull()?.hostAddress ?: throw UnknownHostException("no DNS server"))
+        return host
     }
 
     private fun bssLoad(beacon: ScanResult): BssLoad? = beacon.informationElements
@@ -174,7 +149,16 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         ?.let { buffer -> BssLoad.parse(ByteArray(buffer.remaining()).also(buffer::get)) }
 
     private companion object {
-        const val HIDDEN_BSSID = "02:00:00:00:00:00"
         const val ROAMING_CONNECT_TIMEOUT_MILLIS = 1_000
     }
+}
+
+/** Socket factory for "no Wi-Fi": refuses to create sockets instead of using the default network. */
+internal object NoNetworkSocketFactory : SocketFactory() {
+    private fun refuse(): Nothing = throw MeasurementException(ErrorCodes.NOT_ON_WIFI)
+    override fun createSocket(): java.net.Socket = refuse()
+    override fun createSocket(host: String?, port: Int): java.net.Socket = refuse()
+    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): java.net.Socket = refuse()
+    override fun createSocket(host: InetAddress?, port: Int): java.net.Socket = refuse()
+    override fun createSocket(address: InetAddress?, port: Int, localAddress: InetAddress?, localPort: Int): java.net.Socket = refuse()
 }

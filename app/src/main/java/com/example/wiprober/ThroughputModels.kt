@@ -24,13 +24,29 @@ data class PointThroughput(
  */
 @JsonModel
 data class ThroughputTestResult(
+    /** Exported alias of the target (configurable label). */
     val target: String,
     val method: String,
     val durationSeconds: Int,
     val measuredAt: Long,
+    /** Stable target identifier ([TargetIds]) and its category ([TargetCategory]). */
+    val targetId: String? = null,
+    val category: String? = null,
+    /** Android network handle of the measured Wi-Fi and how it was chosen. */
+    val networkId: String? = null,
+    val networkSelection: String? = null,
+    /** Where SSID/BSSID came from ([Association] sources); `unknown` = could not be attributed. */
+    val associationSource: String? = null,
     val ssid: String? = null,
+    val ssidEnd: String? = null,
     val bssidStart: String? = null,
     val bssidEnd: String? = null,
+    /** [AssociationChange] between start and end of the test. */
+    val associationChange: String? = null,
+    /** Address the target resolved to on the measured network (used for every connection of the run). */
+    val resolvedAddress: String? = null,
+    val downloadEndpoint: String? = null,
+    val uploadEndpoint: String? = null,
     val rssi: Int? = null,
     val linkMbps: Int? = null,
     val rxLinkMbps: Int? = null,
@@ -55,6 +71,19 @@ data class ThroughputTestResult(
         const val METHOD_HTTP = "http"
         const val TARGET_INTERNET = "internet"
     }
+}
+
+/** Stable identifiers of the built-in throughput targets. */
+object TargetIds {
+    const val IPERF = "iperf3-private"
+    const val INTERNET = "internet-http"
+}
+
+/** Kinds of destination, kept apart in the app and the export. */
+object TargetCategory {
+    const val PRIVATE_IPERF = "private-iperf"
+    const val INTERNET = "internet"
+    const val INTERNAL = "internal-service"
 }
 
 /** The AP the device is associated with, as Android reports it (plus its beacon from the last scan). */

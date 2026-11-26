@@ -38,8 +38,12 @@ data class NetworkTest(
     val count: Int? = null,
     val expectStatus: Int? = null,
     val expectContains: String? = null,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    /** Exported alias; the stable identifier is [name]. */
+    val alias: String? = null
 ) {
+    val displayAlias: String get() = alias?.takeIf { it.isNotBlank() } ?: name
+
     companion object {
         const val DNS = "dns"
         const val PING = "ping"
@@ -166,7 +170,8 @@ object WiproberConfigParser {
             count = json.int("count"),
             expectStatus = json.int("expectStatus"),
             expectContains = json.string("expectContains"),
-            enabled = json.bool("enabled") ?: true
+            enabled = json.bool("enabled") ?: true,
+            alias = json.string("alias")?.trim()?.take(60)
         )
         when (type) {
             NetworkTest.HTTP -> checkUrl(test.url ?: throw ConfigException("Test \"$name\" needs \"url\""), "Test \"$name\"")

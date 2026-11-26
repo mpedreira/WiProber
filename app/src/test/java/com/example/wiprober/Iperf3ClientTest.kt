@@ -32,13 +32,13 @@ class Iperf3ClientTest {
             .start()
         val client = Iperf3Client()
 
-        val download = retryUntilListening { client.run("127.0.0.1", port, 1, Iperf3Client.Direction.DOWNLOAD) }
+        val download = retryUntilListening { client.run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.DOWNLOAD) }
         assertTrue("download $download bit/s", download > 1_000_000.0)
 
         // "-1" makes the server exit after one test: start another one for the upload.
         server!!.waitFor(5, TimeUnit.SECONDS)
         server = ProcessBuilder(binary.path, "-s", "-1", "-p", port.toString()).redirectErrorStream(true).start()
-        val upload = retryUntilListening { client.run("127.0.0.1", port, 1, Iperf3Client.Direction.UPLOAD) }
+        val upload = retryUntilListening { client.run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.UPLOAD) }
         assertTrue("upload $upload bit/s", upload > 1_000_000.0)
     }
 
@@ -53,10 +53,11 @@ class Iperf3ClientTest {
                 }
             }
             try {
-                Iperf3Client().run("127.0.0.1", socket.localPort, 1, Iperf3Client.Direction.DOWNLOAD)
+                Iperf3Client().run(java.net.InetAddress.getByName("127.0.0.1"), socket.localPort, 1, Iperf3Client.Direction.DOWNLOAD)
                 fail("expected IOException")
             } catch (expected: IOException) {
                 assertEquals("iperf3 server is busy", expected.message)
+                assertEquals(ErrorCodes.IPERF_BUSY, (expected as MeasurementException).code)
             }
         }
     }
@@ -64,7 +65,7 @@ class Iperf3ClientTest {
     @Test(expected = IOException::class)
     fun failsWhenNothingListens() {
         val port = ServerSocket(0).use { it.localPort }
-        Iperf3Client(connectTimeoutMillis = 1_000).run("127.0.0.1", port, 1, Iperf3Client.Direction.UPLOAD)
+        Iperf3Client(connectTimeoutMillis = 1_000).run(java.net.InetAddress.getByName("127.0.0.1"), port, 1, Iperf3Client.Direction.UPLOAD)
     }
 
     private fun retryUntilListening(block: () -> Double): Double {

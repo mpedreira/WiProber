@@ -71,7 +71,11 @@ Shared by `measurements`, `networkTests` and `scriptSteps`.
 
 | Field | Type | Description |
 |---|---|---|
-| `target` | string | `internet`, or the label set on the phone for the iPerf3 server (default `corporate`) |
+| `target` | string | Exported alias: `internet`, or the label set on the phone for the iPerf3 server (default `corporate`) |
+| `targetId` | string \| null | Stable identifier: `iperf3-private` or `internet-http` |
+| `category` | string \| null | `private-iperf` or `internet` (network tests and scripts are `internal-service`) |
+| `resolvedAddress` | string \| null | Address the target resolved to **on the measured Wi-Fi**; the pre-check and every transfer of the target use it. IPv4 first, at most two addresses tried |
+| `downloadEndpoint`, `uploadEndpoint` | string \| null | Host (and port for iPerf3) of each direction; they may differ for HTTP |
 | `method` | string | `iperf3-tcp` (iPerf3 server) or `http` (Internet speed test) |
 | `durationSeconds` | int | Seconds per direction (default 5) |
 | `downMbps` | number \| null | Download in Mbit/s (10⁶ bit/s), 1 decimal |
@@ -82,13 +86,18 @@ Shared by `measurements`, `networkTests` and `scriptSteps`.
 | `latencySamples` | int \| null | Samples taken (10) |
 | `error` | string \| null | What failed; `null` when everything was measured |
 
-### Associated AP during the test
+### Measured network and associated AP
 
-Read when the test **started**, except `bssidEnd`.
+Every test of a run uses one Wi-Fi network (`networkId`): names resolve with its resolver and all sockets and HTTP connections are bound to it, so nothing goes over mobile data, and a local Wi-Fi without Internet is measured while mobile data is the default network. If that network disappears, the remaining phases end with `wifi_lost` instead of using another network. SSID/BSSID are read from **that** network (Android 12+: per-network callback; Android 11: only when it is the only Wi-Fi network). When Android does not allow attributing them, they are `null` and `associationSource` is `unknown`: that means "unknown", not "not connected".
 
 | Field | Type | Description |
 |---|---|---|
-| `ssid` | string \| null | Connected SSID |
+| `networkId` | string \| null | Android handle of the measured Wi-Fi network |
+| `networkSelection` | string \| null | Why it was chosen among several Wi-Fi networks: `only`, `default`, `validated`, `lowest-handle` |
+| `associationSource` | string \| null | `network-capabilities`, `wifi-manager` or `unknown` |
+| `ssid` | string \| null | SSID at the start |
+| `ssidEnd` | string \| null | SSID at the end |
+| `associationChange` | string \| null | `same` (both ends observed with the same SSID and BSSID — says nothing about what happened in between), `bssid_changed` (AP change within the SSID), `ssid_changed`, `unknown` |
 | `bssidStart` | string \| null | BSSID (lower case) at the start |
 | `bssidEnd` | string \| null | BSSID at the end. **Different from `bssidStart` ⇒ the phone roamed during the test** |
 | `rssi` | int \| null | Signal of the connected AP, dBm |
@@ -129,9 +138,13 @@ Configured in the imported file (`tests` section, see the [example](wiprober-con
 | `name` | string | Test name in the configuration |
 | `type` | string | `dns`, `ping`, `tcp` or `http` |
 | `target` | string \| null | Queried host (`dns`/`ping`), `host:port` (`tcp`) or `host/path` without query (`http`) |
-| `method` | string \| null | `udp` (query sent straight to the Wi-Fi's DNS server) or `system` (Android resolver, may answer from cache); `icmp` (system ping) or `tcp` (TCP ping when ICMP is unavailable); `tcp`; `http`/`https` |
+| `method` | string \| null | `udp` (query sent straight to the Wi-Fi's DNS server on a socket bound to it) or `system` (that network's resolver, may answer from cache); `icmp` (system ping on the identified Wi-Fi interface to an address resolved on it) or `tcp` (TCP probe bound to the Wi-Fi when ICMP cannot be guaranteed); `tcp`; `http`/`https` |
 | `ok` | bool | The test passed: DNS answer, no loss, open port, expected status and text |
+| `alias`, `category` | string | Exported alias (`alias` in the configuration, default the name) and `internal-service` |
+| `networkId`, `associationSource` | string \| null | Measured Wi-Fi network and where SSID/BSSID came from (see section 3) |
 | `ssid`, `bssid`, `rssi` | | Connected AP when the test started |
+| `bssidEnd`, `associationChange` | string \| null | AP at the end and the change between both ends |
+| `errorCode` | string \| null | Structured cause: `resolution_failed`, `connect_failed`, `connection_refused`, `timeout`, `no_reply`, `partial_loss`, `port_not_configured`, `no_gateway`, `no_dns_server`, `dns_error`, `http_status`, `expectation_failed`, `wifi_lost`, `not_on_wifi`… |
 | `dnsServer` | string \| null | DNS server queried (`dns`) |
 | `resolvedAddress` | string \| null | First IPv4 address returned (`dns`) |
 | `dnsMs` | number \| null | DNS query time (`dns`, `http`) |

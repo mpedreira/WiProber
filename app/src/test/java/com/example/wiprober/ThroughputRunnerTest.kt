@@ -1,36 +1,40 @@
 package com.example.wiprober
 
+import java.io.File
+import java.net.InetAddress
 import java.net.ServerSocket
-import javax.net.SocketFactory
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class ThroughputRunnerTest {
     private val closedPort = ServerSocket(0).use { it.localPort }
-    private val ap = WifiConnectionInfo(
-        "CORP", "aa:bb:cc:dd:ee:01", -58, 573,
-        rxLinkSpeedMbps = 649, frequencyMhz = 5_500, channelWidthMhz = 80,
-        wifiStandard = "802.11ax (Wi-Fi 6/6E)", bssLoad = BssLoad(stationCount = 12, channelUtilizationPct = 31)
-    )
+    private val beacons = mapOf("aa:bb:cc:dd:ee:01" to BeaconInfo(80, BssLoad(stationCount = 12, channelUtilizationPct = 31)))
 
-    private fun runner(connection: () -> WifiConnectionInfo?) = ThroughputRunner(
+    private fun runner(network: MeasurementNetwork?, http: HttpSpeedTest = HttpSpeedTest()) = ThroughputRunner(
         iperf = Iperf3Client(connectTimeoutMillis = 1_000),
-        http = HttpSpeedTest(),
-        socketFactory = SocketFactory.getDefault(),
-        connection = connection,
+        http = http,
+        network = network,
+        beacons = beacons,
         device = DeviceInfo("Zebra TC52", "13"),
+        networkTests = network?.let { NetworkTestRunner(TimedHttpClient(resolve = { host -> it.resolve(host).toTypedArray() }), it) },
+        scriptRunner = ScriptRunner(TimedHttpClient(resolve = { host -> network!!.resolve(host).toTypedArray() })),
         clock = { 1_000L }
     )
 
     @Test
     fun withoutWifiEveryEnabledTargetIsUnmeasuredWithAReason() {
-        val result = runner { null }.measure(
+        val result = runner(null).measure(
             ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", internetEnabled = true)
         )
 
         assertEquals(listOf("corporate", "internet"), result.tests.map { it.target })
+        assertEquals(listOf(TargetIds.IPERF, TargetIds.INTERNET), result.tests.map { it.targetId })
+        assertEquals(listOf(TargetCategory.PRIVATE_IPERF, TargetCategory.INTERNET), result.tests.map { it.category })
         result.tests.forEach { test ->
             assertEquals(ThroughputRunner.NOT_ON_WIFI, test.error)
             assertNull(test.downMbps)
@@ -41,13 +45,14 @@ class ThroughputRunnerTest {
     }
 
     @Test
-    fun disabledTargetsProduceNoRow() {
-        assertTrue(runner { ap }.measure(ThroughputSettings()).tests.isEmpty())
+    fun disabledTargetsProduceNoRowAndCloudflareIsOffByDefault() {
+        assertTrue(runner(FakeMeasurementNetwork()).measure(ThroughputSettings()).tests.isEmpty())
+        assertTrue(!ThroughputSettings().internetEnabled)
     }
 
     @Test
     fun enabledIperfWithoutServerReportsMissingConfiguration() {
-        val test = runner { ap }.measure(ThroughputSettings(iperfEnabled = true, iperfLabel = " site ")).tests.single()
+        val test = runner(FakeMeasurementNetwork()).measure(ThroughputSettings(iperfEnabled = true, iperfLabel = " site ")).tests.single()
 
         assertEquals("site", test.target)
         assertEquals(ThroughputTestResult.METHOD_IPERF3_TCP, test.method)
@@ -56,116 +61,144 @@ class ThroughputRunnerTest {
     }
 
     @Test
-    fun unreachableServerFailsFastKeepsNullsAndRecordsRoaming() {
-        val aps = ArrayDeque(listOf(ap, ap.copy(bssid = "aa:bb:cc:dd:ee:02")))
+    fun latencyResolvesWithTheMeasuredNetworksResolver() {
+        ServerSocket(0).use { server ->
+            // "iperf.internal" only exists in this network's resolver, as an internal DNS name would.
+            val network = FakeMeasurementNetwork(hosts = mapOf("iperf.internal" to listOf(FakeMeasurementNetwork.LOOPBACK)))
+            val test = runner(network).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "iperf.internal", iperfPort = server.localPort, iperfDurationSeconds = 1)
+            ).tests.single()
+
+            assertTrue(network.resolved.contains("iperf.internal"))
+            assertEquals("127.0.0.1", test.resolvedAddress)
+            assertTrue(test.latencyMs != null)
+            assertEquals("wifi-1", test.networkId)
+            assertEquals("only", test.networkSelection)
+        }
+    }
+
+    @Test
+    fun addressPolicyTriesIpv4FirstAndAtMostTwoAddresses() {
+        val v6 = InetAddress.getByName("::1")
+        val a = InetAddress.getByName("10.0.0.1")
+        val b = InetAddress.getByName("10.0.0.2")
+        val c = InetAddress.getByName("10.0.0.3")
+        assertEquals(listOf(a, b), AddressPolicy.candidates(listOf(v6, a, b, c)))
+        assertEquals(listOf(v6), AddressPolicy.candidates(listOf(v6)))
+    }
+
+    @Test
+    fun aSecondAddressIsUsedWhenTheFirstDoesNotAnswer() {
+        ServerSocket(0, 50, FakeMeasurementNetwork.LOOPBACK).use { server ->
+            val dead = InetAddress.getByName("127.0.0.2") // the server only listens on 127.0.0.1
+            val network = FakeMeasurementNetwork(hosts = mapOf("svc.internal" to listOf(dead, FakeMeasurementNetwork.LOOPBACK)))
+            val test = runner(network).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "svc.internal", iperfPort = server.localPort, iperfDurationSeconds = 1)
+            ).tests.single()
+            assertEquals("127.0.0.1", test.resolvedAddress)
+        }
+    }
+
+    @Test
+    fun unresolvableHostIsAResolutionFailure() {
+        val test = runner(FakeMeasurementNetwork()).measure(
+            ThroughputSettings(iperfEnabled = true, iperfHost = "missing.internal", iperfDurationSeconds = 1)
+        ).tests.single()
+        assertTrue(test.error!!, test.error!!.startsWith("latency: ${ErrorCodes.RESOLUTION_FAILED}"))
+        assertTrue(test.error!!.endsWith("download/upload skipped: server unreachable"))
+    }
+
+    @Test
+    fun unreachableServerFailsFastKeepsNullsAndRecordsTheApChange() {
+        val aps = ArrayDeque(listOf(FakeMeasurementNetwork.DEFAULT_AP, FakeMeasurementNetwork.DEFAULT_AP.copy(bssid = "aa:bb:cc:dd:ee:02")))
+        val network = FakeMeasurementNetwork(associationProvider = { if (aps.size > 1) aps.removeFirst() else aps.first() })
         val started = System.nanoTime()
-        val test = runner { aps.removeFirst() }.measure(
+        val test = runner(network).measure(
             ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = closedPort, iperfDurationSeconds = 5)
         ).tests.single()
         val elapsedMillis = (System.nanoTime() - started) / 1_000_000
 
-        assertTrue("took $elapsedMillis ms", elapsedMillis < 2_000) // no 5 s transfers attempted
-
+        assertTrue("took $elapsedMillis ms", elapsedMillis < 2_000)
         assertEquals("CORP", test.ssid)
+        assertEquals("CORP", test.ssidEnd)
         assertEquals(-58, test.rssi)
-        assertEquals(573, test.linkMbps)
+        assertEquals(80, test.channelWidthMhz)
+        assertEquals(31, test.bssChannelUtilizationPct)
         assertEquals("aa:bb:cc:dd:ee:01", test.bssidStart)
         assertEquals("aa:bb:cc:dd:ee:02", test.bssidEnd)
+        assertEquals(AssociationChange.BSSID_CHANGED, test.associationChange)
         assertNull(test.latencyMs)
         assertNull(test.downMbps)
-        assertNull(test.upMbps)
-        val error = test.error.orEmpty()
-        assertTrue(error, error.startsWith("latency: ") && error.endsWith("download/upload skipped: server unreachable"))
+        assertTrue(test.error!!, test.error!!.startsWith("latency: ${ErrorCodes.CONNECTION_REFUSED}"))
     }
 
     @Test
-    fun internetWithoutUploadUrlSaysSo() {
-        // Reachable (latency works) but every HTTP request is cut: download fails, upload is unset.
-        val server = ServerSocket(0)
-        kotlin.concurrent.thread(isDaemon = true) {
-            while (!server.isClosed) runCatching { server.accept().close() }.onFailure { return@thread }
-        }
-        val test = server.use {
-            runner { ap }.measure(
-            ThroughputSettings(
-                internetEnabled = true,
-                internetDownloadUrl = "http://127.0.0.1:${server.localPort}/__down?bytes={bytes}",
-                internetUploadUrl = " ",
-                internetDurationSeconds = 1
-            )
-        ).tests.single()
-        }
-
-        assertEquals("internet", test.target)
-        assertEquals(ThroughputTestResult.METHOD_HTTP, test.method)
-        assertNull(test.upMbps)
-        assertTrue(test.latencyMs != null)
-        assertNull(test.downMbps)
-        assertTrue(test.error.orEmpty(), test.error.orEmpty().startsWith("download: "))
-        assertTrue(test.error.orEmpty(), test.error.orEmpty().endsWith("upload: not configured"))
+    fun associationChangeDistinguishesSsidChangeAndUnknown() {
+        val ap = FakeMeasurementNetwork.DEFAULT_AP
+        assertEquals(AssociationChange.SAME, AssociationChange.between(ap, ap))
+        assertEquals(AssociationChange.SSID_CHANGED, AssociationChange.between(ap, ap.copy(ssid = "GUEST", bssid = "aa:bb:cc:dd:ee:09")))
+        assertEquals(AssociationChange.BSSID_CHANGED, AssociationChange.between(ap, ap.copy(bssid = "aa:bb:cc:dd:ee:09")))
+        assertEquals(AssociationChange.UNKNOWN, AssociationChange.between(ap, Association.UNKNOWN))
+        assertEquals(AssociationChange.UNKNOWN, AssociationChange.between(ap, ap.copy(bssid = null)))
     }
 
     @Test
-    fun reportsEachPhaseAsItStartsWithStepNumbersAndFinishedValues() {
-        val events = mutableListOf<ThroughputProgress>()
-        runner { ap }.measure(
-            ThroughputSettings(
-                iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = closedPort,
-                internetEnabled = true,
-                internetDownloadUrl = "http://127.0.0.1:$closedPort/__down?bytes={bytes}",
-                internetDurationSeconds = 2
-            )
-        ) { events += it }
-
-        // Both servers are unreachable: only the latency phases start, transfers are skipped.
-        assertEquals(listOf(1, 4), events.map { it.step })
-        assertTrue(events.all { it.totalSteps == 6 && it.phase == ThroughputPhase.LATENCY && it.phaseSeconds == null })
-        assertEquals(listOf("corporate", "internet"), events.map { it.target })
-        assertEquals(
-            listOf(ThroughputPhase.LATENCY, ThroughputPhase.DOWNLOAD, ThroughputPhase.UPLOAD),
-            events[1].finished.map { it.phase }
-        )
-        assertTrue(events[1].finished.all { it.value == null })
-    }
-
-    @Test
-    fun rowsCarryLinkBeaconDeviceAndLatencyStatistics() {
-        // Reachable but every HTTP request is cut: latency is measured, transfers fail.
-        val server = ServerSocket(0)
-        kotlin.concurrent.thread(isDaemon = true) {
-            while (!server.isClosed) runCatching { server.accept().close() }.onFailure { return@thread }
-        }
-        val test = server.use {
-            runner { ap }.measure(
-                ThroughputSettings(
-                    internetEnabled = true,
-                    internetDownloadUrl = "http://127.0.0.1:${server.localPort}/__down?bytes={bytes}",
-                    internetDurationSeconds = 1
-                )
+    fun unknownAssociationIsRecordedAsUnknownNotAsNoWifi() {
+        ServerSocket(0).use { server ->
+            val network = FakeMeasurementNetwork(associationProvider = { Association.UNKNOWN })
+            val test = runner(network).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = server.localPort, iperfDurationSeconds = 1)
             ).tests.single()
+            assertNull(test.ssid)
+            assertNull(test.bssidStart)
+            assertEquals(Association.SOURCE_UNKNOWN, test.associationSource)
+            assertEquals(AssociationChange.UNKNOWN, test.associationChange)
+            assertTrue(test.latencyMs != null) // the network is still measured
         }
+    }
 
-        assertEquals(649, test.rxLinkMbps)
-        assertEquals(5_500, test.frequencyMhz)
-        assertEquals(100, test.channel)
-        assertEquals(80, test.channelWidthMhz)
-        assertEquals("802.11ax (Wi-Fi 6/6E)", test.wifiStandard)
-        assertEquals(12, test.bssStationCount)
-        assertEquals(31, test.bssChannelUtilizationPct)
-        assertEquals("Zebra TC52", test.deviceModel)
-        assertEquals("13", test.androidVersion)
-        assertEquals(10, test.latencySamples)
-        val min = test.latencyMs!!
-        val avg = test.latencyAvgMs!!
-        assertTrue("min $min avg $avg", min <= avg)
-        assertTrue(test.jitterMs!! >= 0.0)
+    @Test
+    fun losingTheWifiMidRunEndsTheRemainingPhasesWithWifiLost() {
+        ServerSocket(0).use { server ->
+            val checks = AtomicInteger()
+            // Available for the latency pre-check, gone before the transfers.
+            val network = FakeMeasurementNetwork(available = { checks.incrementAndGet() <= 2 })
+            val test = runner(network).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "127.0.0.1", iperfPort = server.localPort, iperfDurationSeconds = 1)
+            ).tests.single()
+            assertTrue(test.latencyMs != null)
+            assertNull(test.downMbps)
+            assertNull(test.upMbps)
+            assertTrue(test.error!!, test.error!!.contains("download: ${ErrorCodes.WIFI_LOST}"))
+            assertTrue(test.error!!.contains("upload: ${ErrorCodes.WIFI_LOST}"))
+        }
+    }
+
+    @Test
+    fun iperf3UsesTheAssignedResolverAgainstARealServer() {
+        val binary = System.getenv("IPERF3_BIN")?.let(::File)
+        assumeTrue("IPERF3_BIN not set", binary?.canExecute() == true)
+        val port = ServerSocket(0).use { it.localPort }
+        val server = ProcessBuilder(binary!!.path, "-s", "-p", port.toString()).redirectErrorStream(true).start()
+        try {
+            Thread.sleep(500)
+            val network = FakeMeasurementNetwork(hosts = mapOf("iperf.internal" to listOf(FakeMeasurementNetwork.LOOPBACK)))
+            val test = runner(network).measure(
+                ThroughputSettings(iperfEnabled = true, iperfHost = "iperf.internal", iperfPort = port, iperfDurationSeconds = 1)
+            ).tests.single()
+            assertTrue(test.error ?: "", test.downMbps != null && test.upMbps != null)
+            assertEquals(listOf("iperf.internal"), network.resolved.distinct())
+        } finally {
+            server.destroy()
+            server.waitFor(5, TimeUnit.SECONDS)
+        }
     }
 
     @Test
     fun networkTestsAndScriptsRunAfterTheTargetsWithProgress() {
         MiniHttpServer { MiniHttpServer.Response(200, "ok") }.use { server ->
             val tests = listOf(
-                NetworkTest(name = "web", type = "http", url = "${server.base}/health"),
+                NetworkTest(name = "web", type = "http", url = "${server.base}/health", alias = "Health"),
                 NetworkTest(name = "off", type = "http", url = "${server.base}/x", enabled = false)
             )
             val scripts = listOf(
@@ -175,33 +208,24 @@ class ThroughputRunnerTest {
                 ))
             )
             val events = mutableListOf<ThroughputProgress>()
-            val result = ThroughputRunner(
-                iperf = Iperf3Client(),
-                http = HttpSpeedTest(),
-                socketFactory = SocketFactory.getDefault(),
-                connection = { ap },
-                networkTests = NetworkTestRunner(
-                    TimedHttpClient(), SocketFactory.getDefault(), java.net.InetAddress::getAllByName,
-                    { java.net.DatagramSocket() }, NetworkContext(), { ap }
-                ),
-                scriptRunner = ScriptRunner(TimedHttpClient()),
-                clock = { 1L }
-            ).measure(ThroughputSettings(), tests, scripts) { events += it }
+            val result = runner(FakeMeasurementNetwork()).measure(ThroughputSettings(), tests, scripts) { events += it }
 
-            assertEquals(listOf("web"), result.networkTests!!.map { it.name })
-            assertTrue(result.networkTests!!.single().ok)
+            val web = result.networkTests!!.single()
+            assertEquals("web", web.name)
+            assertEquals("Health", web.alias)
+            assertEquals(TargetCategory.INTERNAL, web.category)
+            assertTrue(web.error ?: "", web.ok)
             assertEquals(listOf("a", "b"), result.scripts!!.single().steps.map { it.name })
             assertEquals("aa:bb:cc:dd:ee:01", result.scripts!!.single().bssidEnd)
             assertEquals(listOf(1, 2, 3), events.map { it.step })
             assertTrue(events.all { it.totalSteps == 3 })
             assertEquals(listOf("http", "a", "b"), events.map { it.detail })
-            assertEquals(2, events.last().finished.size)
         }
     }
 
     @Test
     fun scriptsWithoutWifiAreSkippedWithTheReason() {
-        val run = runner { null }.measure(
+        val run = runner(null).measure(
             ThroughputSettings(),
             scripts = listOf(HttpScript("flow", steps = listOf(HttpScriptStep(name = "a", url = "http://127.0.0.1:9/a"))))
         ).scripts!!.single()

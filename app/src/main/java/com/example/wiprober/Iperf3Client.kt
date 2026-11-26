@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
@@ -15,7 +16,9 @@ import javax.net.SocketFactory
 /**
  * Minimal iperf3 client: TCP, one stream, one direction per run. It speaks the iperf3 control
  * protocol (cookie, JSON parameter/result exchange, state bytes) so it works against a stock
- * `iperf3 -s`. The [socketFactory] lets Android bind every socket to the Wi-Fi network.
+ * `iperf3 -s`. It never resolves names: the caller passes the address resolved on the measured
+ * Wi-Fi network, and both the control and the data connection go to that same address through
+ * [socketFactory] (bound to that network on Android).
  */
 class Iperf3Client(
     private val socketFactory: SocketFactory = SocketFactory.getDefault(),
@@ -24,10 +27,10 @@ class Iperf3Client(
     enum class Direction { DOWNLOAD, UPLOAD }
 
     /** Bits per second seen by the receiving side, or an [IOException] describing the failure. */
-    fun run(host: String, port: Int, durationSeconds: Int, direction: Direction): Double {
+    fun run(address: InetAddress, port: Int, durationSeconds: Int, direction: Direction): Double {
         val cookie = newCookie()
         val reverse = direction == Direction.DOWNLOAD
-        openSocket(host, port, durationSeconds).use { control ->
+        openSocket(address, port, durationSeconds).use { control ->
             val input = DataInputStream(control.getInputStream().buffered())
             val output = DataOutputStream(control.getOutputStream())
             output.write(cookie)
@@ -40,13 +43,13 @@ class Iperf3Client(
                     when (val state = input.readByte().toInt()) {
                         PARAM_EXCHANGE -> writeJson(output, parameters(durationSeconds, reverse))
                         CREATE_STREAMS -> {
-                            data = openSocket(host, port, durationSeconds).also {
+                            data = openSocket(address, port, durationSeconds).also {
                                 it.getOutputStream().apply { write(cookie); flush() }
                             }
                         }
                         TEST_START -> Unit
                         TEST_RUNNING -> {
-                            val stream = data ?: throw IOException("iperf3 server started without a data stream")
+                            val stream = data ?: throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 server started without a data stream")
                             transfer = if (reverse) {
                                 receive(stream, durationSeconds)
                             } else {
@@ -56,7 +59,7 @@ class Iperf3Client(
                             output.flush()
                         }
                         EXCHANGE_RESULTS -> {
-                            val done = transfer ?: throw IOException("iperf3 results requested before the test ran")
+                            val done = transfer ?: throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 results requested before the test ran")
                             writeJson(output, clientResults(done))
                             val serverResults = readJson(input)
                             if (!reverse) done.receiverBytesPerSecond = receiverRate(serverResults)
@@ -64,13 +67,13 @@ class Iperf3Client(
                         DISPLAY_RESULTS -> {
                             output.writeByte(IPERF_DONE)
                             output.flush()
-                            val done = transfer ?: throw IOException("iperf3 test finished without data")
+                            val done = transfer ?: throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 test finished without data")
                             return (done.receiverBytesPerSecond ?: done.bytesPerSecond) * 8.0
                         }
-                        ACCESS_DENIED -> throw IOException("iperf3 server is busy")
-                        SERVER_ERROR -> throw IOException("iperf3 server error ${readServerError(input)}")
-                        SERVER_TERMINATE -> throw IOException("iperf3 server terminated the test")
-                        else -> throw IOException("Unexpected iperf3 state $state")
+                        ACCESS_DENIED -> throw MeasurementException(ErrorCodes.IPERF_BUSY, "iperf3 server is busy")
+                        SERVER_ERROR -> throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 server error ${readServerError(input)}")
+                        SERVER_TERMINATE -> throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 server terminated the test")
+                        else -> throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "unexpected iperf3 state $state")
                     }
                 }
             } finally {
@@ -80,11 +83,11 @@ class Iperf3Client(
         }
     }
 
-    private fun openSocket(host: String, port: Int, durationSeconds: Int): Socket =
+    private fun openSocket(address: InetAddress, port: Int, durationSeconds: Int): Socket =
         socketFactory.createSocket().apply {
             tcpNoDelay = true
             soTimeout = (durationSeconds + CONTROL_GRACE_SECONDS) * 1_000
-            connect(InetSocketAddress(host, port), connectTimeoutMillis)
+            connect(InetSocketAddress(address, port), connectTimeoutMillis)
         }
 
     /** Counts bytes until the deadline, then keeps draining so the server sender never blocks. */
@@ -176,7 +179,7 @@ class Iperf3Client(
 
     private fun readJson(input: DataInputStream): JsonObject {
         val length = input.readInt()
-        if (length !in 0..MAX_JSON_BYTES) throw IOException("iperf3 results too large: $length bytes")
+        if (length !in 0..MAX_JSON_BYTES) throw MeasurementException(ErrorCodes.IPERF_PROTOCOL, "iperf3 results too large: $length bytes")
         val bytes = ByteArray(length).also(input::readFully)
         return JsonParser.parseString(String(bytes, StandardCharsets.UTF_8)).asJsonObject
     }

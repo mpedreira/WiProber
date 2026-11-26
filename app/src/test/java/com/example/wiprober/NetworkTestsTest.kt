@@ -5,7 +5,6 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.nio.ByteBuffer
-import javax.net.SocketFactory
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -13,21 +12,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NetworkTestsTest {
-    private val ap = WifiConnectionInfo("Corp", "aa:bb:cc:dd:ee:01", -60, 400)
-
     private fun runner(
-        context: NetworkContext = NetworkContext(),
-        connection: () -> WifiConnectionInfo? = { ap },
-        ping: ((String, Int, String?) -> String)? = null
+        network: MeasurementNetwork? = FakeMeasurementNetwork(),
+        ping: ((String, Int, String) -> String)? = null,
+        dnsPort: Int = 53
     ) = NetworkTestRunner(
-        http = TimedHttpClient(),
-        socketFactory = SocketFactory.getDefault(),
-        resolve = InetAddress::getAllByName,
-        datagramSocket = { DatagramSocket() },
-        context = context,
-        connection = connection,
+        http = TimedHttpClient(resolve = { host -> network!!.resolve(host).toTypedArray() }),
+        network = network,
         systemPing = ping,
-        clock = { 5L }
+        clock = { 5L },
+        dnsPort = dnsPort
     )
 
     @Test
@@ -55,7 +49,8 @@ class NetworkTestsTest {
     @Test
     fun pingFallsBackToTcpAndCountsRefusedAsAReply() {
         val closedPort = ServerSocket(0).use { it.localPort }
-        val result = runner(ping = { _, _, _ -> "ping: socket: Operation not permitted" })
+        val network = FakeMeasurementNetwork(link = NetworkContext(interfaceName = "wlan0"))
+        val result = runner(network, ping = { _, _, _ -> "ping: socket: Operation not permitted" })
             .run(NetworkTest(name = "gw", type = "ping", host = "127.0.0.1", port = closedPort, count = 3))
 
         assertEquals("tcp", result.method)
@@ -66,19 +61,33 @@ class NetworkTestsTest {
     }
 
     @Test
-    fun icmpPingIsUsedWhenTheSystemPingWorks() {
+    fun pingWithoutAKnownWifiInterfaceNeverUsesTheSystemPing() {
         val result = runner(
-            context = NetworkContext(gateway = "10.0.0.1", interfaceName = "wlan0"),
-            ping = { host, count, iface ->
-                assertEquals("10.0.0.1", host)
+            FakeMeasurementNetwork(link = NetworkContext(interfaceName = null)),
+            ping = { _, _, _ -> throw AssertionError("system ping must not run without the Wi-Fi interface") }
+        ).run(NetworkTest(name = "gw", type = "ping", host = "127.0.0.1", port = ServerSocket(0).use { it.localPort }, count = 2))
+        assertEquals("tcp", result.method)
+    }
+
+    @Test
+    fun icmpPingIsUsedWhenTheSystemPingWorks() {
+        val network = FakeMeasurementNetwork(
+            hosts = mapOf("gw.internal" to listOf(InetAddress.getByName("10.0.0.1"))),
+            link = NetworkContext(gateway = "gw.internal", interfaceName = "wlan0")
+        )
+        val result = runner(
+            network,
+            ping = { ip, count, iface ->
+                assertEquals("10.0.0.1", ip) // resolved on the Wi-Fi before pinging
                 assertEquals("wlan0", iface)
-                (1..count).joinToString("\n") { "64 bytes from $host: icmp_seq=$it ttl=64 time=1.0 ms" } +
+                (1..count).joinToString("\n") { "64 bytes from $ip: icmp_seq=$it ttl=64 time=1.0 ms" } +
                     "\n$count packets transmitted, $count received, 0% packet loss"
             }
         ).run(NetworkTest(name = "gw", type = "ping", host = "\${gateway}", count = 4))
 
         assertEquals("icmp", result.method)
-        assertEquals("10.0.0.1", result.target)
+        assertEquals("gw.internal", result.target)
+        assertEquals("10.0.0.1", result.resolvedAddress)
         assertEquals(4, result.sent)
         assertTrue(result.ok)
     }
@@ -86,7 +95,7 @@ class NetworkTestsTest {
     @Test
     fun gatewayVariableWithoutGatewayIsAnError() {
         val result = runner().run(NetworkTest(name = "gw", type = "ping", host = "\${gateway}"))
-        assertEquals("no default gateway", result.error)
+        assertEquals(ErrorCodes.NO_GATEWAY, result.errorCode)
         assertTrue(!result.ok)
     }
 
@@ -102,6 +111,7 @@ class NetworkTestsTest {
         assertTrue(!failed.ok)
         assertEquals(100.0, failed.lossPct)
         assertEquals("no reply", failed.error)
+        assertEquals(ErrorCodes.NO_REPLY, failed.errorCode)
     }
 
     @Test
@@ -120,13 +130,13 @@ class NetworkTestsTest {
 
     @Test
     fun withoutWifiNothingIsSent() {
-        val result = runner(connection = { null }).run(NetworkTest(name = "dns", type = "dns", host = "example.com"))
+        val result = runner(network = null).run(NetworkTest(name = "dns", type = "dns", host = "example.com"))
         assertEquals(ThroughputRunner.NOT_ON_WIFI, result.error)
         assertNull(result.target)
     }
 
     @Test
-    fun dnsQueryGoesToTheNetworksDnsServer() {
+    fun dnsQueryGoesToTheNetworksDnsServerOnASocketBoundToIt() {
         val server = DatagramSocket(0, InetAddress.getLoopbackAddress())
         thread(isDaemon = true) {
             val buffer = ByteArray(512)
@@ -135,22 +145,32 @@ class NetworkTestsTest {
             val reply = answer(buffer.copyOf(packet.length), byteArrayOf(10, 1, 2, 3))
             server.send(DatagramPacket(reply, reply.size, packet.socketAddress))
         }
-        // Port 53 is fixed in the runner; route the test through a socket that rewrites it.
-        val result = NetworkTestRunner(
-            http = TimedHttpClient(),
-            socketFactory = SocketFactory.getDefault(),
-            resolve = InetAddress::getAllByName,
-            datagramSocket = { RedirectingDatagramSocket(server.localPort) },
-            context = NetworkContext(dnsServers = listOf(InetAddress.getLoopbackAddress())),
-            connection = { ap }
-        ).run(NetworkTest(name = "dns", type = "dns", host = "app.example.com"))
+        val network = FakeMeasurementNetwork(link = NetworkContext(dnsServers = listOf(InetAddress.getLoopbackAddress())))
+        val result = runner(network, dnsPort = server.localPort).run(NetworkTest(name = "dns", type = "dns", host = "app.example.com"))
         server.close()
 
         assertTrue(result.error, result.ok)
         assertEquals("udp", result.method)
         assertEquals("10.1.2.3", result.resolvedAddress)
         assertEquals("127.0.0.1", result.dnsServer)
+        assertEquals(1, network.boundDatagrams.size) // the UDP socket was bound to the Wi-Fi network
         assertTrue(result.dnsMs != null)
+    }
+
+    @Test
+    fun internalNamesResolveOnlyThroughTheWifiResolver() {
+        ServerSocket(0).use { open ->
+            val network = FakeMeasurementNetwork(hosts = mapOf("db.internal" to listOf(FakeMeasurementNetwork.LOOPBACK)))
+            val result = runner(network).run(NetworkTest(name = "db", type = "tcp", host = "db.internal", port = open.localPort, count = 1))
+            assertTrue(result.error ?: "", result.ok)
+            assertEquals(listOf("db.internal"), network.resolved)
+        }
+    }
+
+    @Test
+    fun losingTheWifiBeforeATestReportsWifiLost() {
+        val result = runner(FakeMeasurementNetwork(available = { false })).run(NetworkTest(name = "dns", type = "dns", host = "a.example"))
+        assertEquals(ErrorCodes.WIFI_LOST, result.errorCode)
     }
 
     @Test
@@ -175,11 +195,5 @@ class NetworkTestsTest {
         return buffer.array()
     }
 
-    /** Sends to the fake server's port instead of 53. */
-    private class RedirectingDatagramSocket(private val port: Int) : DatagramSocket() {
-        override fun send(packet: DatagramPacket) {
-            super.send(DatagramPacket(packet.data, packet.length, packet.address, port))
-        }
-    }
 
 }

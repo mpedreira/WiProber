@@ -10,7 +10,6 @@ import java.net.URI
 import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
-import javax.net.SocketFactory
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -27,9 +26,15 @@ data class NetworkTestResult(
     val method: String?,
     val measuredAt: Long,
     val ok: Boolean = false,
+    val alias: String? = null,
+    val category: String? = null,
     val ssid: String? = null,
     val bssid: String? = null,
     val rssi: Int? = null,
+    val bssidEnd: String? = null,
+    val associationChange: String? = null,
+    val associationSource: String? = null,
+    val networkId: String? = null,
     val dnsServer: String? = null,
     val resolvedAddress: String? = null,
     val dnsMs: Double? = null,
@@ -47,7 +52,8 @@ data class NetworkTestResult(
     val rttAvgMs: Double? = null,
     val rttMaxMs: Double? = null,
     val jitterMs: Double? = null,
-    val error: String? = null
+    val error: String? = null,
+    val errorCode: String? = null
 )
 
 /** Addresses the Wi-Fi network's DHCP/RA gave the phone. */
@@ -142,47 +148,56 @@ object DnsWire {
 }
 
 /**
- * Runs [NetworkTest]s at a point. Blocking; Android binds every socket to the Wi-Fi network
- * through the factories it passes in.
+ * Runs [NetworkTest]s at a point on one [MeasurementNetwork]: names resolve on that network,
+ * sockets and HTTP are bound to it and `${gateway}`/`${dns}` come from its link. Without a
+ * network nothing is sent. Blocking.
  */
 class NetworkTestRunner(
     private val http: TimedHttpClient,
-    private val socketFactory: SocketFactory,
-    private val resolve: (String) -> Array<InetAddress>,
-    private val datagramSocket: () -> DatagramSocket,
-    private val context: NetworkContext,
-    private val connection: () -> WifiConnectionInfo?,
-    /** ICMP ping through the system `ping`; null where unavailable (falls back to TCP). */
-    private val systemPing: ((host: String, count: Int, interfaceName: String?) -> String)? = null,
-    private val clock: MillisClock = SystemMillisClock
+    private val network: MeasurementNetwork?,
+    /**
+     * ICMP ping through the system `ping`, given an already resolved IP and the Wi-Fi interface
+     * name; null where unavailable (a TCP probe bound to the Wi-Fi network is used instead).
+     */
+    private val systemPing: ((ip: String, count: Int, interfaceName: String) -> String)? = null,
+    private val clock: MillisClock = SystemMillisClock,
+    /** DNS server port; tests point it at a local fake server. */
+    private val dnsPort: Int = 53
 ) {
     fun run(test: NetworkTest): NetworkTestResult {
-        val ap = connection()
+        val start = network?.association()
         val base = NetworkTestResult(
             name = test.name, type = test.type, target = null, method = null, measuredAt = clock.now(),
-            ssid = ap?.ssid, bssid = ap?.bssid, rssi = ap?.rssi
+            alias = test.displayAlias, category = TargetCategory.INTERNAL,
+            ssid = start?.ssid, bssid = start?.bssid, rssi = start?.rssi,
+            networkId = network?.id, associationSource = start?.source
         )
-        if (ap == null) return base.copy(error = ThroughputRunner.NOT_ON_WIFI)
-        return try {
+        val net = network ?: return base.copy(error = ThroughputRunner.NOT_ON_WIFI, errorCode = ErrorCodes.NOT_ON_WIFI)
+        if (!net.isAvailable()) return base.copy(error = ErrorCodes.WIFI_LOST, errorCode = ErrorCodes.WIFI_LOST)
+        val result = try {
             when (test.type) {
-                NetworkTest.DNS -> dns(test, base)
-                NetworkTest.PING -> ping(test, base)
-                NetworkTest.TCP -> tcp(test, base)
+                NetworkTest.DNS -> dns(net, test, base)
+                NetworkTest.PING -> ping(net, test, base)
+                NetworkTest.TCP -> tcp(net, test, base)
                 NetworkTest.HTTP -> http(test, base)
-                else -> base.copy(error = "unknown test type ${test.type}")
+                else -> base.copy(error = "unknown test type ${test.type}", errorCode = ErrorCodes.INVALID_TARGET)
             }
         } catch (e: Exception) {
-            base.copy(error = e.message ?: e.javaClass.simpleName)
+            val code = if (!net.isAvailable()) ErrorCodes.WIFI_LOST else ErrorClassifier.code(e)
+            base.copy(error = "$code: ${ErrorClassifier.detail(e)}", errorCode = code)
         }
+        val end = net.association()
+        return result.copy(bssidEnd = end.bssid, associationChange = AssociationChange.between(start, end))
     }
 
-    private fun dns(test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
-        val host = substitute(test.host!!)
-        val server = context.dnsServers.firstOrNull()
+    private fun dns(net: MeasurementNetwork, test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
+        val link = net.link()
+        val host = substitute(test.host!!, link)
+        val server = link.dnsServers.firstOrNull()
         if (server == null) {
-            // No DNS server known: time the system resolver (may answer from its cache).
+            // No DNS server in the link properties: time this network's resolver (may answer from cache).
             val start = System.nanoTime()
-            val address = resolve(host).first()
+            val address = net.resolve(host).first()
             return base.copy(
                 target = host, method = "system", ok = true,
                 resolvedAddress = address.hostAddress, dnsMs = elapsed(start)
@@ -190,41 +205,56 @@ class NetworkTestRunner(
         }
         val id = SecureRandom().nextInt(0x10000)
         val request = DnsWire.query(id, host)
-        datagramSocket().use { socket ->
+        DatagramSocket().use { socket ->
+            net.bind(socket)
             socket.soTimeout = DNS_TIMEOUT_MILLIS
             val start = System.nanoTime()
-            socket.send(DatagramPacket(request, request.size, InetSocketAddress(server, 53)))
+            socket.send(DatagramPacket(request, request.size, InetSocketAddress(server, dnsPort)))
             val reply = ByteArray(1_500)
             val packet = DatagramPacket(reply, reply.size)
             socket.receive(packet)
             val millis = elapsed(start)
             val base2 = base.copy(target = host, method = "udp", dnsServer = server.hostAddress, dnsMs = millis)
-            val address = DnsWire.firstAddress(reply, packet.length, id)
-                ?: return base2.copy(error = "no IPv4 address in the answer")
+            val address = try {
+                DnsWire.firstAddress(reply, packet.length, id)
+            } catch (e: IOException) {
+                return base2.copy(error = "${ErrorCodes.DNS_ERROR}: ${e.message}", errorCode = ErrorCodes.DNS_ERROR)
+            } ?: return base2.copy(error = "no IPv4 address in the answer", errorCode = ErrorCodes.DNS_ERROR)
             return base2.copy(ok = true, resolvedAddress = address)
         }
     }
 
-    private fun ping(test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
-        val host = substitute(test.host!!)
+    private fun ping(net: MeasurementNetwork, test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
+        val link = net.link()
+        val host = substitute(test.host!!, link)
+        val address = resolveFirst(net, host)
         val count = test.count ?: DEFAULT_PING_COUNT
-        val icmp = systemPing?.let { ping ->
-            runCatching { PingOutputParser.parse(ping(host, count, context.interfaceName)) }.getOrNull()
+        // ICMP only with a known Wi-Fi interface and an address resolved on that network.
+        val iface = link.interfaceName
+        val pinger = systemPing
+        val icmp = if (pinger != null && iface != null) {
+            runCatching { PingOutputParser.parse(pinger(address.hostAddress!!, count, iface)) }.getOrNull()
+        } else {
+            null
         }
-        val stats = icmp ?: tcpProbes(host, test.port ?: DEFAULT_TCP_PING_PORT, count, refusedCounts = true)
-        return probeResult(base.copy(target = host, method = if (icmp != null) "icmp" else "tcp"), stats)
+        val stats = icmp ?: tcpProbes(net, address, test.port ?: DEFAULT_TCP_PING_PORT, count, refusedCounts = true)
+        return probeResult(
+            base.copy(target = host, resolvedAddress = address.hostAddress, method = if (icmp != null) "icmp" else "tcp"),
+            stats
+        )
     }
 
-    private fun tcp(test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
-        val host = substitute(test.host!!)
-        val stats = tcpProbes(host, test.port!!, test.count ?: DEFAULT_TCP_COUNT, refusedCounts = false)
-        return probeResult(base.copy(target = "$host:${test.port}", method = "tcp"), stats).let { result ->
-            result.copy(connectMs = result.rttMinMs)
-        }
+    private fun tcp(net: MeasurementNetwork, test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
+        val port = test.port ?: return base.copy(error = ErrorCodes.PORT_NOT_CONFIGURED, errorCode = ErrorCodes.PORT_NOT_CONFIGURED)
+        val host = substitute(test.host!!, net.link())
+        val address = resolveFirst(net, host)
+        val stats = tcpProbes(net, address, port, test.count ?: DEFAULT_TCP_COUNT, refusedCounts = false)
+        return probeResult(base.copy(target = "$host:$port", resolvedAddress = address.hostAddress, method = "tcp"), stats)
+            .let { result -> result.copy(connectMs = result.rttMinMs) }
     }
 
     private fun http(test: NetworkTest, base: NetworkTestResult): NetworkTestResult {
-        val url = URI(substitute(test.url!!))
+        val url = URI(substitute(test.url!!, network!!.link()))
         val timing = TimedHttpClient.Timing()
         val start = System.nanoTime()
         val target = "${url.host}${url.rawPath?.ifEmpty { "/" } ?: "/"}" // no query: it may hold secrets
@@ -239,27 +269,36 @@ class NetworkTestRunner(
                 val expected = test.expectStatus
                 if (expected != null && response.status != expected) add("status ${response.status}, expected $expected")
                 if (expected == null && response.status !in 200..399) add("status ${response.status}")
-                test.expectContains?.let { if (it !in String(response.body, Charsets.UTF_8)) add("response does not contain \"$it\"") }
+                test.expectContains?.let { if (it !in String(response.body, Charsets.UTF_8)) add("expected text not found") }
             }
             withTiming(base).copy(
                 status = response.status, bytes = response.bytes,
-                ok = problems.isEmpty(), error = problems.joinToString("; ").ifEmpty { null }
+                ok = problems.isEmpty(), error = problems.joinToString("; ").ifEmpty { null },
+                errorCode = when {
+                    problems.isEmpty() -> null
+                    problems.any { it.startsWith("status") } -> ErrorCodes.HTTP_STATUS
+                    else -> ErrorCodes.EXPECTATION_FAILED
+                }
             )
         } catch (e: Exception) {
-            withTiming(base).copy(error = e.message ?: e.javaClass.simpleName)
+            val code = ErrorClassifier.code(e)
+            withTiming(base).copy(error = "$code: ${ErrorClassifier.detail(e)}", errorCode = code)
         }
     }
 
+    private fun resolveFirst(net: MeasurementNetwork, host: String): InetAddress =
+        AddressPolicy.candidates(net.resolve(host)).firstOrNull()
+            ?: throw MeasurementException(ErrorCodes.RESOLUTION_FAILED, "no address for the host")
+
     /**
-     * TCP handshake round trips. For a ping, a refused connection still proves the host answered
-     * (like `tcping`), so it counts as a reply; for a port test it is a failure.
+     * TCP handshake round trips on the measured network. For a ping, a refused connection still
+     * proves the host answered (like `tcping`), so it counts as a reply; for a port test it is a failure.
      */
-    private fun tcpProbes(host: String, port: Int, count: Int, refusedCounts: Boolean): ProbeStats {
-        val address = resolve(host).first()
-        return ProbeStats((1..count).map {
+    private fun tcpProbes(net: MeasurementNetwork, address: InetAddress, port: Int, count: Int, refusedCounts: Boolean): ProbeStats =
+        ProbeStats((1..count).map {
             val start = System.nanoTime()
             try {
-                socketFactory.createSocket().use { it.connect(InetSocketAddress(address, port), PROBE_TIMEOUT_MILLIS) }
+                net.socketFactory.createSocket().use { it.connect(InetSocketAddress(address, port), PROBE_TIMEOUT_MILLIS) }
                 elapsed(start)
             } catch (e: ConnectException) {
                 if (refusedCounts && "refused" in e.message.orEmpty().lowercase()) elapsed(start) else null
@@ -267,7 +306,6 @@ class NetworkTestRunner(
                 null
             }.also { if (it == null || count > 1) Thread.sleep(PROBE_GAP_MILLIS) }
         })
-    }
 
     private fun probeResult(base: NetworkTestResult, stats: ProbeStats) = base.copy(
         ok = stats.received == stats.sent,
@@ -277,13 +315,26 @@ class NetworkTestRunner(
             stats.received == 0 -> "no reply"
             stats.received < stats.sent -> "${stats.sent - stats.received} of ${stats.sent} lost"
             else -> null
+        },
+        errorCode = when {
+            stats.received == 0 -> ErrorCodes.NO_REPLY
+            stats.received < stats.sent -> ErrorCodes.PARTIAL_LOSS
+            else -> null
         }
     )
 
-    private fun substitute(text: String): String = text
-        .replace("\${gateway}", context.gateway ?: if ("\${gateway}" in text) throw IOException("no default gateway") else "")
-        .replace("\${dns}", context.dnsServers.firstOrNull()?.hostAddress
-            ?: if ("\${dns}" in text) throw IOException("no DNS server") else "")
+    /** Placeholders are only evaluated when present, so a literal host never needs them. */
+    private fun substitute(text: String, link: NetworkContext): String {
+        var result = text
+        if ("\${gateway}" in result) {
+            result = result.replace("\${gateway}", link.gateway ?: throw MeasurementException(ErrorCodes.NO_GATEWAY, "no default gateway"))
+        }
+        if ("\${dns}" in result) {
+            result = result.replace("\${dns}", link.dnsServers.firstOrNull()?.hostAddress
+                ?: throw MeasurementException(ErrorCodes.NO_DNS_SERVER, "no DNS server"))
+        }
+        return result
+    }
 
     private fun elapsed(start: Long): Double = round1((System.nanoTime() - start) / 1_000_000.0)
 
@@ -296,19 +347,17 @@ class NetworkTestRunner(
         private const val PROBE_GAP_MILLIS = 100L
 
         /** System ping bound to the Wi-Fi interface: 0.2 s apart (the unprivileged minimum). */
-        fun systemPingCommand(host: String, count: Int, interfaceName: String?): List<String> = buildList {
-            addAll(listOf("ping", "-n", "-c", count.toString(), "-i", "0.2", "-W", "2"))
-            interfaceName?.let { addAll(listOf("-I", it)) }
-            add(host)
-        }
+        fun systemPingCommand(ip: String, count: Int, interfaceName: String): List<String> =
+            listOf("ping", "-n", "-c", count.toString(), "-i", "0.2", "-W", "2", "-I", interfaceName, ip)
 
-        /** Runs [systemPingCommand]; returns its output (also when some probes were lost). */
-        fun runSystemPing(host: String, count: Int, interfaceName: String?): String {
-            require(host.matches(Regex("[A-Za-z0-9.:\\-]+"))) { "invalid ping host" }
-            val process = ProcessBuilder(systemPingCommand(host, count, interfaceName)).redirectErrorStream(true).start()
+        /** Runs [systemPingCommand] on an IP literal; returns its output (also when probes were lost). */
+        fun runSystemPing(ip: String, count: Int, interfaceName: String): String {
+            require(ip.matches(Regex("[0-9a-fA-F.:]+"))) { "ping target must be an IP address" }
+            require(interfaceName.matches(Regex("[A-Za-z0-9_.-]+"))) { "invalid interface name" }
+            val process = ProcessBuilder(systemPingCommand(ip, count, interfaceName)).redirectErrorStream(true).start()
             if (!process.waitFor(count * 1L + 5L, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
-                throw IOException("ping timed out")
+                throw MeasurementException(ErrorCodes.TIMEOUT, "ping timed out")
             }
             return process.inputStream.bufferedReader().readText()
         }
