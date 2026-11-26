@@ -103,7 +103,7 @@ data class HttpScript(
     }.toSet()
 
     companion object {
-        val SECRET_REFERENCE = Regex("""\$\{secret\.([A-Za-z0-9_]+)}""")
+        val SECRET_REFERENCE = Regex("""\$\{secret\.([A-Za-z0-9_]+)\}""")
     }
 }
 
@@ -436,7 +436,7 @@ object HarImporter {
                     .take(WiproberConfigParser.MAX_HEADERS)
                     .toMap()
                 if (request.getAsJsonArray("cookies")?.size() ?: 0 > 0) stripped += "cookies"
-                val uri = URI(url.replace(Regex("""\$\{[^}]*}"""), "x"))
+                val uri = URI(url.replace(Regex("""\$\{[^\}]*\}"""), "x"))
                 HttpScriptStep(
                     name = "$stepName ${uri.host}${Sensitive.displayPath(uri.rawPath).takeLast(30)}".take(60),
                     method = request.get("method").asString.uppercase(),
@@ -476,7 +476,7 @@ object HarImporter {
 
 /** The small JSON path subset used by `extract`: `$.a.b`, `$.items[0].id`. */
 object JsonPathLite {
-    private val SEGMENT = Regex("""\.([A-Za-z0-9_\-]+)|\[(\d+)]""")
+    private val SEGMENT = Regex("""\.([A-Za-z0-9_\-]+)|\[(\d+)\]""")
 
     fun isValid(path: String): Boolean =
         path.startsWith("$") && path.length > 1 && SEGMENT.replace(path.substring(1), "").isEmpty()

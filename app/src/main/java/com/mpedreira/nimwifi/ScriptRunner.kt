@@ -351,7 +351,7 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
         }
 
     private companion object {
-        val PLACEHOLDER = Regex("""\$\{(secret\.)?([A-Za-z0-9_]+)}""")
+        val PLACEHOLDER = Regex("""\$\{(secret\.)?([A-Za-z0-9_]+)\}""")
         const val MAX_COOKIES = 30
         const val MAX_COOKIE_LENGTH = 4_096
     }
