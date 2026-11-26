@@ -5,19 +5,19 @@
 -keep class kotlin.** { *; }
 # Instrumentation lives in another APK: retain the public entry points it calls.
 # Do not retain fields: JSON field preservation is still exercised by release rules.
--keepclassmembers class com.example.wiprober.** {
+-keepclassmembers class com.mpedreira.nimwifi.** {
     public <init>(...);
     public <methods>;
 }
 -keep class androidx.core.content.FileProvider { public *; }
 # Assertions parse literal JSON and generated binary tracks independently.
 -keep class com.google.gson.Json** { public *; }
--keep class com.example.wiprober.BinaryTrackReader** { *; }
+-keep class com.mpedreira.nimwifi.BinaryTrackReader** { *; }
 # Separate UI-test APK references non-final resource IDs after target shrinking.
 # This is deliberately test-only; production release uses proguard-rules.pro alone.
--keep class com.example.wiprober.R$id { *; }
--keep class com.example.wiprober.R$string { *; }
--keep class com.example.wiprober.R$plurals { *; }
+-keep class com.mpedreira.nimwifi.R$id { *; }
+-keep class com.mpedreira.nimwifi.R$string { *; }
+-keep class com.mpedreira.nimwifi.R$plurals { *; }
 # Cross-APK test entry points and Espresso's shared future interface.
 -keep class androidx.lifecycle.ViewModelProvider** { public *; }
 -keep class com.google.common.util.concurrent.** { *; }

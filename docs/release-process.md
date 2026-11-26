@@ -2,7 +2,7 @@
 
 ## Version scheme
 
-The field channel is the **debug** build type (`com.example.wiprober.debug`), built from tags `vX.Y.Z-throughput.N`:
+The field channel is the **debug** build type (`com.mpedreira.nimwifi.debug`), built from tags `vX.Y.Z-throughput.N`:
 
 | | Rule | Example (`v3.0.0-throughput.5`) |
 |---|---|---|
@@ -17,7 +17,7 @@ Releases `.1`–`.4` all had `versionCode 5` and `versionName 3.0.0-debug`, so t
 
 `.github/workflows/field-build.yml` runs on every `v*-throughput.*` tag (or by hand with a tag). It runs the unit tests (including the iPerf3 protocol test against a real `iperf3`), lint, the debug/release/instrumentation builds and the R8 validation build, then checks that the APK's `versionName`/`versionCode` match the tag and uploads, as a workflow artifact:
 
-- `WiProber-<version>-debug.apk`, `SHA256SUMS`, `output-metadata.json`
+- `nimWifi-<version>-debug.apk`, `SHA256SUMS`, `output-metadata.json`
 - `build-info.json`: `tag`, `sourceSha`, `versionName`, `versionCode`, `apkSha256`, `signerCertificateSha256`, `fieldKey`, `workflowRun`
 
 **It never publishes a GitHub release.** Publishing (and attaching that exact APK, with its `build-info.json`) stays a manual decision.
@@ -49,6 +49,6 @@ IPERF3_BIN=/usr/bin/iperf3 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ./gradlew -Pr8Validation assembleR8Validation assembleR8ValidationAndroidTest
 ```
 
-Persisted models are `@JsonModel` classes kept by `-keep @com.example.wiprober.JsonModel class * { *; }`; after changing them, install the R8 validation build on a device and reopen a project saved by the previous version.
+Persisted models are `@JsonModel` classes kept by `-keep @com.mpedreira.nimwifi.JsonModel class * { *; }`; after changing them, install the R8 validation build on a device and reopen a project saved by the previous version.
 
 Needs a physical Android device (not runnable in CI or a container): Wi-Fi network selection and binding, association callbacks on Android 11 and 12+, scans, ICMP ping on the Wi-Fi interface, cancellation of real transfers, rotation and process death during a run, the cleartext policy and user/MDM CAs, the instrumentation tests. Needs real servers or files: an iPerf3 server on the corporate network, an Ekahau AI Pro installation to open the exported ESX, a NetSpot export sample.

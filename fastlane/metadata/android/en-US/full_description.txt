@@ -11,13 +11,13 @@ Survey Wi-Fi coverage using your own floor plans and export projects in ESX form
 • Follow a survey guide that suggests the next point on a grid and shades measured areas by signal.
 • Export performance results next to the ESX for your own analysis tools.
 
-Requires Android 11 or newer. Android requires location permission and enabled location services to retrieve Wi-Fi scan results. You mark your position on the plan; WiProber does not request GPS coordinates. For frequent measurements, disable Wi-Fi scan throttling in Android Developer Options.
+Requires Android 11 or newer. Android requires location permission and enabled location services to retrieve Wi-Fi scan results. You mark your position on the plan; nimWifi does not request GPS coordinates. For frequent measurements, disable Wi-Fi scan throttling in Android Developer Options.
 
 Projects and measurements are stored locally. There are no ads, in-app purchases, accounts or analytics. Android system backups and storage providers chosen by the user may copy files off the device. Network tests are off by default; when enabled, they contact only the servers you configure (and speed.cloudflare.com for the default Internet test). Imported server settings and credentials are excluded from backups.
 
-The application interface is in English. This version has no separate Wi-Fi scanner screen. Imported Wi-Fi and spectrum measurements remain opaque and read-only; WiProber does not provide all editing features of Ekahau.
+The application interface is in English. This version has no separate Wi-Fi scanner screen. Imported Wi-Fi and spectrum measurements remain opaque and read-only; nimWifi does not provide all editing features of Ekahau.
 
-WiProber is not affiliated with or endorsed by Ekahau.
+nimWifi is not affiliated with or endorsed by Ekahau.
 
 Privacy policy: https://github.com/mpedreira/WiProber/blob/main/docs/privacy-policy.md
 Support: wifi.solution.msk@gmail.com

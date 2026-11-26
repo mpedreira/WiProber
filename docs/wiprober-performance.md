@@ -1,4 +1,4 @@
-# WiProber performance export (`wiprober-performance.json`)
+# nimWifi performance export (`wiprober-performance.json`)
 
 Specification of the file produced by the [mpedreira/WiProber](https://github.com/mpedreira/WiProber) fork so that an external application (e.g. an analysis web app) can join it with the Ekahau `.esx`.
 
@@ -22,7 +22,7 @@ Project.zip
 
 For an imported project whose only local additions are active runs or planned points, `Project.esx` is the imported archive copied byte for byte (runs and planned points never touch the ESX).
 
-Nothing from WiProber is written inside the `.esx`, and Ekahau's native `throughputSessions`/`pingSessions` fields are not filled (their schema is not public).
+Nothing from nimWifi is written inside the `.esx`, and Ekahau's native `throughputSessions`/`pingSessions` fields are not filled (their schema is not public).
 
 ## 2. JSON structure
 
@@ -307,7 +307,7 @@ An outage is never inferred from scheduler delays, pauses, gaps without samples 
 - **To metres**: `metres = pixels × metersPerUnit` (from `floorPlans.json`). Plan size: `width`/`height`; image: `image-<imageId>`.
 - Points **imported from another `.esx`** have no rows. **Continuous** tracks only appear in `roamingSessions`/`roamingEvents`.
 
-Data your app can derive from the `.esx` with no WiProber change: APs on the same channel above −82 dBm (co-channel), APs above −67 dBm (redundant coverage), difference between the best and second AP, and the *BSS Load* of any AP (beacon elements are in `informationElements` of `accessPointMeasurements.json`).
+Data your app can derive from the `.esx` with no nimWifi change: APs on the same channel above −82 dBm (co-channel), APs above −67 dBm (redundant coverage), difference between the best and second AP, and the *BSS Load* of any AP (beacon elements are in `informationElements` of `accessPointMeasurements.json`).
 
 ## 5. How values are measured
 
