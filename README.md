@@ -6,6 +6,8 @@ This project was born out of the need for a simple, mobile-first tool for networ
 
 Version **3.0.0** requires **Android 11 (API 30) or newer**. It adds a project hub, recent projects, multi-floor surveying, and ESX import that preserves original archive contents while adding new surveys.
 
+> **About this fork.** [mpedreira/WiProber](https://github.com/mpedreira/WiProber) extends the original [htechno/WiProber](https://github.com/htechno/WiProber) with **active survey** features: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe and a NetSpot-style survey guide. Results are exported next to the unchanged `.esx` in a ZIP, as documented in [docs/wiprober-performance.md](docs/wiprober-performance.md). Prebuilt APKs are on the [Releases](https://github.com/mpedreira/WiProber/releases) page.
+
 ## Screenshots
 
 | Project hub | Multi-floor survey |
@@ -31,6 +33,17 @@ Select a screenshot to view it at full resolution.
 *   **Ekahau-compatible `.esx` Export:** New projects are generated from scratch with the required JSON files, binary Wi-Fi tracks, floor plans, and attached note images. Imported projects keep the complete source archive and append WiProber surveys without regenerating the original measurements.
 *   **`.esx` Import:** Imports floor plans, route geometry, scale, and map-positioned picture notes for display. Original Wi-Fi tracks, spectrum data, and unknown payloads remain opaque and are preserved for the next export.
 
+Added in this fork:
+
+*   **Per-point throughput tests:** after each Stop-and-Go scan, download, upload and latency (min/avg/jitter) against your own **iPerf3** server and an **Internet** speed test (Cloudflare by default, any compatible URL such as LibreSpeed). All test traffic is bound to the Wi-Fi network, never mobile data. A progress dialog shows each phase.
+*   **Connected-link details:** for each test, the associated AP (SSID, BSSID at start and end to detect roaming, RSSI), transmit/receive link rates, channel, channel width, Wi-Fi standard, the AP's *BSS Load* (clients and channel utilisation) and the phone model.
+*   **Network service tests:** configurable `dns` (query sent straight to the Wi-Fi's DNS server), `ping` (ICMP, TCP fallback), `tcp` (port) and `http` (DNS/TCP/TLS/first-byte/download breakdown) tests at every point, like the AutoTest of commercial survey tools. `${gateway}` and `${dns}` come from the network itself.
+*   **HTTP scripts:** replay a recorded user flow (login → token → query) at every point, with variables, cookies and checks, each step timed. Import it as JSON or straight from a browser `.har` recording. Read-only unless a step explicitly allows writes.
+*   **Roaming probe (Continuous mode):** every 200 ms the associated AP is read and the target is probed; roams (with time without connectivity) and outages are placed on the route you mark on the map.
+*   **Survey guide:** once the scale is calibrated, a grid suggests the next Stop-and-Go point (tap to measure there, long-press to move, *Skip* unreachable cells) and measured areas are shaded with a signal-coloured gradient.
+*   **Imported configuration:** servers, credentials, tests and scripts are never in the code. They are imported on the phone from a `wiprober-config.json` ([example](docs/wiprober-config.example.json)), kept in app-private storage and excluded from backups.
+*   **Performance export:** projects with results export a ZIP with the untouched `.esx` plus `wiprober-performance.json`, joinable with the ESX by survey ID or by floor-plan position.
+
 ## Limitations & System Requirements
 
 This is a non-commercial, open-source project. Please be aware of the following system limitations:
@@ -43,6 +56,11 @@ This is a non-commercial, open-source project. Please be aware of the following 
 *   **No "My Networks" Detection:** The app currently does not automatically identify or flag your own networks ("My Networks"). This must be done manually within Ekahau Pro after import.
 *   **No AP Merging:** WiProber creates a new, separate access point (`accessPoints.json`) for every unique BSSID found. It does not attempt to group multiple radios (e.g., 2.4-GHz and 5-GHz radios) under a single physical access point device. This grouping should be performed manually in Ekahau.
 *   **ESX Editing Scope:** WiProber does not display or edit imported RSSI/frequency/spectrum measurements, walls, requirements, or AP grouping. Schema-v3 projects preserve those source entries unchanged and add new WiProber survey data alongside them. New projects still contain the supported WiProber-generated subset. Projects imported by older schema-v2 builds must be re-imported from their original ESX to gain source-preservation guarantees.
+*   **No noise floor / SNR:** Android does not expose the noise floor, so neither the scans nor the throughput tests report noise or SNR.
+*   **Network access (fork):** this fork requests the `INTERNET` permission for the optional tests. Nothing is sent unless you enable a test or import a configuration, and then only to the servers you configure (and `speed.cloudflare.com` for the default Internet test). Trusts user/MDM-installed CAs so corporate HTTPS servers can be tested.
+*   **ICMP ping:** Android apps cannot send ICMP directly; the system `ping` bound to the Wi-Fi interface is used and, where a device does not allow it, a TCP ping (reported as `method: "tcp"`).
+*   **Association and DHCP timing:** apps cannot disconnect and reconnect Wi-Fi on Android 10+, so association/authentication/DHCP times are not measured.
+*   **Roaming probe and scans:** while Continuous mode scans, the radio leaves the channel; outages that overlap a scan are flagged (`duringScan`).
 *   **Android Version:** WiProber v3 requires Android 11 (API 30) or newer. Android 10 and older devices cannot install or update to v3. Public beacon Information Elements and `wifiStandard` are part of the v3 scan baseline, although the exact IE set still depends on the device chipset and driver.
 
 ## Getting Started
@@ -52,10 +70,14 @@ This is a non-commercial, open-source project. Please be aware of the following 
 *   An Android device with Android 11 (API 30) or higher.
 
 ### Building and Running
-1.  Clone the repository: `git clone https://github.com/htechno/WiProber.git`
+1.  Clone the repository: `git clone https://github.com/mpedreira/WiProber.git` (this fork) or `https://github.com/htechno/WiProber.git` (original).
 2.  Open the project in Android Studio.
 3.  Let Gradle sync and download all dependencies.
 4.  Build and run the application on your device.
+
+### Installing a prebuilt APK (fork)
+
+Each fork release on the [Releases](https://github.com/mpedreira/WiProber/releases) page attaches a debug-signed APK (`com.example.wiprober.debug`) with its SHA-256 in the notes. Open the release on the phone, download the APK and install it. It installs next to the F-Droid build; export your projects before uninstalling any build.
 
 ### Building an APK on GitHub
 
@@ -87,8 +109,24 @@ This is a debug-signed APK (`com.example.wiprober.debug`), not a production-sign
 5.  Tap again to mark a **Turn** (waypoint). A Magenta line follows your path.
 6.  Tap the red **Stop route** action to finish the path. The line turns green.
 
+### Survey guide (fork)
+1.  Calibrate the floor scale first; without it the guide is hidden and a hint asks for calibration.
+2.  After the first Stop-and-Go point, a blue ring with a cross marks the **next suggested point**: the nearest unmeasured grid cell (default 10 m), preferring the current walking direction.
+3.  Tap the ring to measure exactly there, or tap anywhere else to measure there instead. **Long-press** the map to move the suggestion. **Skip** marks a cell as "do not measure" (outside the building, racks); Undo restores it.
+4.  Measured areas are shaded around each point and route scan (default 5 m) from red (−85 dBm) through yellow to green (−55 dBm). Configure spacing, radius and an optional SSID in the survey menu → **Survey guide**.
+
+### Throughput tests (fork)
+1.  In the survey menu → **Throughput tests**, enable the iPerf3 test (server, port, target name shown in the export) and/or the Internet test (download/upload URLs, Cloudflare by default). Durations are seconds per direction (default 5).
+2.  Measure Stop-and-Go points as usual: after each scan a dialog shows every phase with a countdown and the values already measured. An unreachable server is skipped quickly.
+
+### Imported configuration: network tests, scripts and roaming (fork)
+1.  Prepare a `wiprober-config.json` (start from the [example](docs/wiprober-config.example.json)) or record a browser `.har` (Developer tools → Network → *Save all as HAR*; only GET requests of documents/XHR/fetch are kept).
+2.  In the survey menu → **Configuration…** → **Import file…**, select it. The dialog lists the imported tests, scripts and roaming probe; **Remove tests & scripts** clears them.
+3.  Network tests and scripts run at every Stop-and-Go point after the throughput tests. The roaming probe runs during Continuous tracks.
+4.  Use a read-only test account in scripts: credentials in the file are stored in clear text on the phone.
+
 ### Export
-Tap **"Export ESX"** to generate one `.esx` containing every floor currently stored in the local project. A new project is generated from scratch; an imported project preserves all original archive entries and overlays only WiProber additions or supported edits. Export runs behind a labelled progress state and reports the number of floors, points, routes, and notes written.
+Tap **"Export ESX"** to generate one `.esx` containing every floor currently stored in the local project. In this fork, a project with performance results (throughput, network tests, scripts or roaming) is exported as a **ZIP** with that same `.esx` plus `wiprober-performance.json` ([specification](docs/wiprober-performance.md)). A new project is generated from scratch; an imported project preserves all original archive entries and overlays only WiProber additions or supported edits. Export runs behind a labelled progress state and reports the number of floors, points, routes, and notes written.
 
 ### Import
 On the start screen, tap **"Open ESX project"** and select a project. All supported floor plans are imported together; use the selector in the survey screen to move between them.
@@ -131,7 +169,7 @@ these instrumentation rules. Run normal debug checks without `-Pr8Validation`.
 I'm a wireless engineer, just like many of you, not a full-time developer. Let's build this tool together!
 
 ## License
-This project is licensed under the **MIT License** - see the [LICENSE](https://github.com/htechno/WiProber/blob/main/LICENSE) file for details.
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details. The fork's additions are released under the same license.
 
 ---
 *Disclaimer: Ekahau Pro™ is a trademark of Ekahau. This project is not affiliated with, endorsed by, or sponsored by Ekahau.*
@@ -148,46 +186,3 @@ This project uses some third-party libraries and assets. Here are their licenses
 *   **AndroidX Libraries:** Licensed under the [Apache License Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 This project itself is licensed under the MIT license.
-
-## Per-point throughput tests (fork mpedreira/WiProber)
-
-After each Stop-and-Go scan WiProber can measure the connected Wi-Fi network:
-
-- **iPerf3 (TCP)** against your own server (`iperf3 -s`): download, upload and TCP-connect latency.
-- **Internet speed test** over HTTP with 4 parallel streams, by default against Cloudflare (`speed.cloudflare.com`); any server with compatible download/upload URLs works (e.g. a LibreSpeed backend).
-
-Configure it in the survey menu → *Throughput tests*. Server names and URLs are stored on the device only. All test traffic is bound to the Wi-Fi network, never mobile data.
-
-Projects with results are exported as a ZIP: the `.esx` (unchanged, opens in Ekahau as usual) plus `wiprober-performance.json`, one row per point and target:
-
-```json
-{ "format": "wiprober-performance", "version": 1, "esxFile": "Site.esx",
-  "measurements": [ { "surveyId": "…", "floorPlanId": "…", "floorName": "Ground", "x": 812.5, "y": 433.0,
-    "measuredAt": "2026-11-25T09:14:22.105Z", "target": "corporate", "method": "iperf3-tcp", "durationSeconds": 5,
-    "ssid": "CORP", "bssidStart": "…", "bssidEnd": "…", "rssi": -58, "linkMbps": 573,
-    "downMbps": 212.4, "upMbps": 148.0, "latencyMs": 2.1, "error": null } ] }
-```
-
-Each row also carries, when Android reports them: `rxLinkMbps` (`linkMbps` is the transmit rate), `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard` of the connected AP; `bssStationCount` and `bssChannelUtilizationPct` from the AP's BSS Load beacon element (only APs that advertise it); `latencyAvgMs`, `jitterMs` and `latencySamples` (10 TCP handshakes; `latencyMs` is the minimum); `deviceModel` and `androidVersion` of the phone. Android does not expose the noise floor, so there is no noise/SNR field.
-
-Values that could not be measured are `null` with the reason in `error`, never `0`. Full field-by-field specification (Spanish): [docs/wiprober-performance.md](docs/wiprober-performance.md). `x`/`y` are original floor-plan pixels, equal to the point's survey route point in the ESX; `surveyId` matches the ESX in the same ZIP only (it changes on every export), `floorPlanId` + `x`/`y` are stable.
-
-## Survey guide (fork mpedreira/WiProber)
-
-Once a floor's scale is calibrated, Stop-and-Go shows (menu → *Survey guide* to configure):
-
-- **Next suggested point** on a grid (default every 10 m), NetSpot-style: the nearest unmeasured cell from the last point, preferring to keep walking the same way. Tap the marker to measure exactly there, tap anywhere else to measure there, long-press the map to move the suggestion, or **Skip** a cell (outside the building, racks…). Skipped cells are saved with the floor and Undo restores the last one.
-- **Coverage**: every measurement (Stop-and-Go points and Continuous routes) shades a radius around it (default 5 m) with a gradient coloured by its strongest signal, red at −85 dBm through yellow to green at −55 dBm. Optionally only one SSID counts.
-
-All of this is drawn in the app only; nothing changes in the ESX or `wiprober-performance.json`.
-
-## Imported configuration: network tests and HTTP scripts (fork mpedreira/WiProber)
-
-Servers, credentials and tests are never in the code: import them on the phone from the survey menu → *Configuration…* → *Import file…*, either a `wiprober-config.json` ([example](docs/wiprober-config.example.json)) or a browser `.har` recording (Developer tools → Network → *Save all as HAR*; only GET requests of documents/XHR/fetch are kept).
-
-- **Network tests** (`tests`), run at every Stop-and-Go point like the AutoTest of commercial survey tools: `dns` (query sent straight to the Wi-Fi's DNS server), `ping` (system ICMP ping on the Wi-Fi interface, TCP fallback), `tcp` (port connect) and `http` (DNS/TCP/TLS/first-byte/download breakdown). `${gateway}` and `${dns}` are the network's own gateway and DNS server.
-- **HTTP scripts** (`scripts`): chained requests with variables, values extracted from JSON responses (e.g. a login token) and cookies, each step timed the same way. Only GET/HEAD unless a step says `"allowWrite": true`.
-- The file may also set the throughput tests (`throughput`), the survey guide (`guide`) and the Continuous-mode roaming probe (`roaming`).
-- **Roaming probe** (`roaming`): during Continuous tracks, every 200 ms the associated AP is read and a TCP connect to the target (e.g. `${gateway}:443`) is tried over Wi-Fi. Roams (BSSID changes, with the time without connectivity) and outages are placed on the route marked on the map and exported as `roamingSessions`/`roamingEvents`.
-
-Imported data stays in app-private storage and is excluded from backups. Corporate HTTPS certificates from a user/MDM-installed CA are trusted. Results go to `networkTests` and `scriptSteps` in `wiprober-performance.json`.

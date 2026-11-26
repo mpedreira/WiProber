@@ -50,6 +50,13 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file). It is never written inside the ESX.
 - `SurveyGuide.kt`: Android-free survey guide: grid next-point suggestion (needs a calibrated scale), coverage samples (Continuous scans placed along the route by time) and the RSSI colour gradient.
 - `SurveyGuideSettingsDialog.kt`: device-side guide settings (spacing, coverage radius, SSID filter) and their dialog. Skipped guide cells are persisted with the floor (`skippedSuggestions`), never exported.
+- `WiproberConfig.kt`: parser of the imported `wiprober-config.json` (throughput, guide, roaming, network tests, HTTP scripts) and of browser HAR recordings; validates names, URLs, write methods (`allowWrite`) and extract paths.
+- `WiproberConfigStore.kt`: app-private storage of imported tests/scripts/roaming (`files/private-config/`, excluded from backups by `res/xml` rules).
+- `NetworkTests.kt`: `dns` (UDP query to the network's DNS server), `ping` (system ICMP ping on the Wi-Fi interface, TCP fallback), `tcp` and `http` tests, ping output parser and minimal DNS wire format.
+- `ScriptRunner.kt`: `TimedHttpClient` (HTTP/1.1 client timing DNS/TCP/TLS/TTFB/download separately, one connection per request) and the HTTP script replayer (variables, JSON extraction, cookies, checks).
+- `Roaming.kt`: Android-free `RoamingTracker` turning Continuous-mode probe samples into roam/outage events; the log is kept in `MainViewModel` and saved with the track.
+- `ThroughputProgressDialog.kt`: modal progress of a point's tests (step, phase, countdown, finished values).
+- `WifiChannels.kt`: channel numbers, channel widths, Wi-Fi standard names and the BSS Load element parser.
 - `app/src/main/assets/`: static ESX payloads copied into every export. These files are part of the export contract, not generic sample data.
 
 Do not add more business logic to `SurveyActivity`. Prefer extracting a small, testable boundary (scanner, permission coordinator, survey state reducer/use case, ESX reader/writer, or storage component) as part of the change being made.
@@ -77,6 +84,14 @@ When changing ESX handling, add fixture-based tests that validate JSON relations
 
 - Projects with throughput results export a ZIP holding the ESX exactly as a plain export would produce it plus `wiprober-performance.json`. Never add WiProber files inside the ESX and never fill `throughputSessions`/`pingSessions` without a real Ekahau reference fixture.
 - Rows join the ESX of the same ZIP by `surveyId` and across exports by `floorPlanId` + `x`/`y` (original floor-plan pixels, identical to the survey route point). Local survey IDs are regenerated on every export.
+
+## Network tests and imported configuration
+
+- Never put internal hosts, URLs or credentials in the code or the repository; they come from the imported configuration or device settings. Repository examples use `example.com` names.
+- Bind every test socket and HTTP connection to the Wi-Fi `Network`. Without Wi-Fi, send nothing and report `not connected to a Wi-Fi network`.
+- Tests at one point run sequentially, never in parallel. Anything not measured is `null` with the reason in `error`, never `0`. A server that cannot be connected to skips its remaining phases.
+- Replayed requests are read-only unless the step sets `allowWrite`; the parser and the runner both enforce it. Exported HTTP targets never include the query string.
+- Keep `docs/wiprober-performance.md` and `docs/wiprober-config.example.json` in sync with the code; `ExampleConfigTest` parses the example.
 
 ## Android and Wi-Fi rules
 

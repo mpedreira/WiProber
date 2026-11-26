@@ -1,228 +1,230 @@
-# Exportación de rendimiento de WiProber (`wiprober-performance.json`)
+# WiProber performance export (`wiprober-performance.json`)
 
-Especificación del fichero que genera el fork [mpedreira/WiProber](https://github.com/mpedreira/WiProber) para que una aplicación externa (p. ej. una web de análisis) lo cruce con el `.esx` de Ekahau.
+Specification of the file produced by the [mpedreira/WiProber](https://github.com/mpedreira/WiProber) fork so that an external application (e.g. an analysis web app) can join it with the Ekahau `.esx`.
 
-Estado: **formato 1**, implementado desde la release `v3.0.0-throughput.1` y ampliado (sin romper nada) en `v3.0.0-throughput.2`. La guía de medición de `v3.0.0-throughput.3` no cambia la exportación.
+Status: **format 1**, implemented since release `v3.0.0-throughput.1` and extended without breaking changes up to `v3.0.0-throughput.4` (see [History](#7-history)).
 
-## 1. Qué se exporta
+## 1. What is exported
 
-| Situación del proyecto | Resultado de *Exportar* |
+| Project state | *Export* produces |
 |---|---|
-| Ningún punto tiene mediciones de rendimiento | `Proyecto.esx`, igual que la app original |
-| Al menos un punto tiene mediciones | `Proyecto.zip` |
+| No Stop-and-Go point has performance results and no Continuous track has a roaming log | `Project.esx`, exactly as the original app |
+| Otherwise | `Project.zip` |
 
-Contenido del ZIP (siempre exactamente estas dos entradas, en la raíz):
+ZIP contents (always exactly these two entries, at the root):
 
 ```
-Proyecto.zip
-├── Proyecto.esx                 ← el mismo .esx que daría una exportación normal; Ekahau lo abre como siempre
-└── wiprober-performance.json    ← las mediciones (este documento)
+Project.zip
+├── Project.esx                  ← the same .esx a plain export produces; Ekahau opens it as usual
+└── wiprober-performance.json    ← the measurements (this document)
 ```
 
-Nada de WiProber se escribe dentro del `.esx`, y los campos nativos `throughputSessions`/`pingSessions` de Ekahau no se rellenan (su esquema no es público).
+Nothing from WiProber is written inside the `.esx`, and Ekahau's native `throughputSessions`/`pingSessions` fields are not filled (their schema is not public).
 
-## 2. Estructura del JSON
+## 2. JSON structure
 
 ```json
 {
   "format": "wiprober-performance",
   "version": 1,
   "generatedAt": "2026-11-26T10:41:03.512Z",
-  "esxFile": "Proyecto.esx",
-  "measurements": [ { …fila… }, … ],
-  "networkTests": [ { …fila… }, … ],
-  "scriptSteps":  [ { …fila… }, … ],
-  "roamingSessions": [ { …fila… }, … ],
-  "roamingEvents":   [ { …fila… }, … ]
+  "esxFile": "Project.esx",
+  "measurements":    [ { …row… }, … ],
+  "networkTests":    [ { …row… }, … ],
+  "scriptSteps":     [ { …row… }, … ],
+  "roamingSessions": [ { …row… }, … ],
+  "roamingEvents":   [ { …row… }, … ]
 }
 ```
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `format` | string | Siempre `"wiprober-performance"` |
-| `version` | int | `1`. Solo cambiará si se rompe la compatibilidad; los campos nuevos se añaden sin subirla |
-| `generatedAt` | string ISO-8601 UTC | Momento de la exportación |
-| `esxFile` | string | Nombre del `.esx` que acompaña al JSON en el ZIP |
-| `measurements` | array | Una fila por **punto Stop-and-Go × destino de rendimiento** (iPerf3 / Internet) |
-| `networkTests` | array | Una fila por **punto × prueba de red importada** (sección 3b) |
-| `scriptSteps` | array | Una fila por **punto × paso de guion HTTP importado** (sección 3c) |
-| `roamingSessions` | array | Una fila por **recorrido continuo con sonda de roaming** (sección 3d) |
-| `roamingEvents` | array | Una fila por **roaming o corte** detectado en esos recorridos (sección 3d) |
+| `format` | string | Always `"wiprober-performance"` |
+| `version` | int | `1`. Only changes on a breaking change; new fields are added without bumping it |
+| `generatedAt` | ISO-8601 UTC string | Export time |
+| `esxFile` | string | Name of the `.esx` next to the JSON in the ZIP |
+| `measurements` | array | One row per **Stop-and-Go point × throughput target** (iPerf3 / Internet) — section 3 |
+| `networkTests` | array | One row per **point × imported network test** — section 3b |
+| `scriptSteps` | array | One row per **point × imported HTTP script step** — section 3c |
+| `roamingSessions` | array | One row per **Continuous track with a roaming probe** — section 3d |
+| `roamingEvents` | array | One row per **roam or outage** found in those tracks — section 3d |
 
-Todos los arrays aparecen siempre (vacíos si no hay datos).
+Every array is always present (empty when there is no data).
 
-## 3. Campos de cada fila
+## 3. Throughput rows (`measurements`)
 
-Regla general: **lo no medido o no disponible es `null`, nunca `0`**. Todos los campos aparecen siempre (con `null` si no hay valor). Si un test falló, el motivo está en `error`.
+General rule for every row type: **anything not measured or not available is `null`, never `0`**. Every field is always present (`null` when there is no value). When a test failed, the reason is in `error`.
 
-### Posición y enlace con el `.esx`
+### Position and link with the `.esx`
 
-| Campo | Tipo | Descripción |
+Shared by `measurements`, `networkTests` and `scriptSteps`.
+
+| Field | Type | Description |
 |---|---|---|
-| `surveyId` | string UUID | Id del `survey-<surveyId>.json` de ese punto **en el `.esx` del mismo ZIP** |
-| `floorPlanId` | string UUID | Planta (`floorPlans.json`). Estable entre exportaciones |
-| `floorName` | string | Nombre de la planta |
-| `x`, `y` | number | Posición en **píxeles de la imagen original del plano**, origen arriba-izquierda. Mismo valor que `surveys[0].routePoints[0][0].location` del survey |
-| `measuredAt` | string ISO-8601 UTC | Inicio de ese test |
+| `surveyId` | UUID string | ID of the point's `survey-<surveyId>.json` **in the `.esx` of the same ZIP** |
+| `floorPlanId` | UUID string | Floor (`floorPlans.json`). Stable across exports |
+| `floorName` | string | Floor name |
+| `x`, `y` | number | Position in **original floor-plan image pixels**, origin top-left. Same value as the survey's `surveys[0].routePoints[0][0].location` |
+| `measuredAt` | ISO-8601 UTC string | Start of that test |
 
 ### Test
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `target` | string | `internet`, o la etiqueta configurada en el móvil para el servidor iPerf3 (por defecto `corporate`; p. ej. `inditex`) |
-| `method` | string | `iperf3-tcp` (servidor iPerf3) o `http` (test de velocidad de Internet) |
-| `durationSeconds` | int | Segundos por dirección (por defecto 5) |
-| `downMbps` | number \| null | Bajada en Mbit/s (10⁶ bit/s), 1 decimal |
-| `upMbps` | number \| null | Subida en Mbit/s, 1 decimal |
-| `latencyMs` | number \| null | Latencia = **mínimo** de 10 handshakes TCP contra el servidor, ms |
-| `latencyAvgMs` | number \| null | Media de esas 10 muestras, ms |
-| `jitterMs` | number \| null | Diferencia media entre muestras consecutivas, ms |
-| `latencySamples` | int \| null | Muestras tomadas (10) |
-| `error` | string \| null | Motivo de lo que falló; `null` si todo se midió |
+| `target` | string | `internet`, or the label set on the phone for the iPerf3 server (default `corporate`) |
+| `method` | string | `iperf3-tcp` (iPerf3 server) or `http` (Internet speed test) |
+| `durationSeconds` | int | Seconds per direction (default 5) |
+| `downMbps` | number \| null | Download in Mbit/s (10⁶ bit/s), 1 decimal |
+| `upMbps` | number \| null | Upload in Mbit/s, 1 decimal |
+| `latencyMs` | number \| null | Latency = **minimum** of 10 TCP handshakes with the server, ms |
+| `latencyAvgMs` | number \| null | Mean of those 10 samples, ms |
+| `jitterMs` | number \| null | Mean difference between consecutive samples, ms |
+| `latencySamples` | int \| null | Samples taken (10) |
+| `error` | string \| null | What failed; `null` when everything was measured |
 
-### AP conectado durante el test
+### Associated AP during the test
 
-Leído al **empezar** el test, salvo `bssidEnd`.
+Read when the test **started**, except `bssidEnd`.
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `ssid` | string \| null | SSID conectado |
-| `bssidStart` | string \| null | BSSID (minúsculas) al empezar |
-| `bssidEnd` | string \| null | BSSID al terminar. **Distinto de `bssidStart` ⇒ hubo roaming durante el test** |
-| `rssi` | int \| null | Señal del AP conectado, dBm |
-| `linkMbps` | int \| null | Velocidad de enlace de **transmisión**, Mbit/s |
-| `rxLinkMbps` | int \| null | Velocidad de enlace de **recepción**, Mbit/s |
-| `frequencyMhz` | int \| null | Frecuencia del canal, MHz |
-| `channel` | int \| null | Canal (bandas 2,4 / 5 / 6 GHz) |
-| `channelWidthMhz` | int \| null | 20, 40, 80, 160 o 320 (del escaneo de ese punto) |
-| `wifiStandard` | string \| null | P. ej. `"802.11ax (Wi-Fi 6/6E)"`, `"802.11ac (Wi-Fi 5)"` |
-| `bssStationCount` | int \| null | Clientes asociados según el elemento *BSS Load* del beacon (solo si el AP lo anuncia) |
-| `bssChannelUtilizationPct` | int \| null | Ocupación del canal 0–100 % según *BSS Load* |
+| `ssid` | string \| null | Connected SSID |
+| `bssidStart` | string \| null | BSSID (lower case) at the start |
+| `bssidEnd` | string \| null | BSSID at the end. **Different from `bssidStart` ⇒ the phone roamed during the test** |
+| `rssi` | int \| null | Signal of the connected AP, dBm |
+| `linkMbps` | int \| null | **Transmit** link rate, Mbit/s |
+| `rxLinkMbps` | int \| null | **Receive** link rate, Mbit/s |
+| `frequencyMhz` | int \| null | Channel frequency, MHz |
+| `channel` | int \| null | Channel number (2.4 / 5 / 6 GHz bands) |
+| `channelWidthMhz` | int \| null | 20, 40, 80, 160 or 320 (from the point's scan) |
+| `wifiStandard` | string \| null | E.g. `"802.11ax (Wi-Fi 6/6E)"`, `"802.11ac (Wi-Fi 5)"` |
+| `bssStationCount` | int \| null | Associated clients according to the beacon's *BSS Load* element (only APs that advertise it) |
+| `bssChannelUtilizationPct` | int \| null | Channel utilisation 0–100 % according to *BSS Load* |
 
-### Dispositivo
+### Device
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `deviceModel` | string \| null | Fabricante y modelo del móvil (el RSSI varía varios dB entre modelos) |
-| `androidVersion` | string \| null | Versión de Android |
+| `deviceModel` | string \| null | Phone manufacturer and model (RSSI differs by several dB between models) |
+| `androidVersion` | string \| null | Android version |
 
-### Valores de `error`
+### `error` values
 
-| Texto | Significado |
+| Text | Meaning |
 |---|---|
-| `not connected to a Wi-Fi network` | Sin WiFi: no se envió nada; todos los valores son `null` |
-| `iPerf3 server not configured` / `download URL not configured` | Destino activado sin servidor/URL |
-| `latency: <motivo>; download/upload skipped: server unreachable` | No se pudo ni conectar: se saltan las transferencias |
-| `download: <motivo>` / `upload: <motivo>` | Falló esa dirección (p. ej. `iperf3 server is busy`, `HTTP 403 from speed.cloudflare.com`) |
-| `upload: not configured` | Test de Internet sin URL de subida |
+| `not connected to a Wi-Fi network` | No Wi-Fi: nothing was sent; every value is `null` |
+| `iPerf3 server not configured` / `download URL not configured` | Target enabled without a server/URL |
+| `latency: <reason>; download/upload skipped: server unreachable` | Could not even connect: transfers were skipped |
+| `download: <reason>` / `upload: <reason>` | That direction failed (e.g. `iperf3 server is busy`, `HTTP 403 from speed.cloudflare.com`) |
+| `upload: not configured` | Internet test without an upload URL |
 
-Varios motivos se separan con `; `.
+Several reasons are separated by `; `.
 
-## 3b. Pruebas de red (`networkTests`)
+## 3b. Network tests (`networkTests`)
 
-Configuradas en el fichero importado (sección `tests`, ver [ejemplo](wiprober-config.example.json)); se ejecutan en cada punto tras los tests de rendimiento. Cada fila lleva además los campos de posición de la sección anterior (`surveyId`, `floorPlanId`, `floorName`, `x`, `y`, `measuredAt`).
+Configured in the imported file (`tests` section, see the [example](wiprober-config.example.json)); they run at each point after the throughput tests. Each row also carries the position fields of section 3 (`surveyId`, `floorPlanId`, `floorName`, `x`, `y`, `measuredAt`).
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `name` | string | Nombre de la prueba en la configuración |
-| `type` | string | `dns`, `ping`, `tcp` o `http` |
-| `target` | string \| null | Host consultado (`dns`/`ping`), `host:puerto` (`tcp`) o `host/ruta` sin query (`http`) |
-| `method` | string \| null | `udp` (consulta directa al DNS de la WiFi) o `system` (resolver de Android, puede usar caché); `icmp` (ping del sistema) o `tcp` (ping por TCP si ICMP no está disponible); `tcp`; `http`/`https` |
-| `ok` | bool | La prueba cumplió: respuesta DNS, sin pérdidas, puerto abierto, estado y texto esperados |
-| `ssid`, `bssid`, `rssi` | | AP conectado al empezar la prueba |
-| `dnsServer` | string \| null | Servidor DNS consultado (`dns`) |
-| `resolvedAddress` | string \| null | Primera IPv4 obtenida (`dns`) |
-| `dnsMs` | number \| null | Tiempo de la consulta DNS (`dns`, `http`) |
-| `connectMs` | number \| null | Handshake TCP (`http`; en `tcp`, el mínimo) |
-| `tlsMs` | number \| null | Handshake TLS (`https`) |
-| `ttfbMs` | number \| null | Tiempo hasta el primer byte de la respuesta (`http`) |
-| `downloadMs` | number \| null | Descarga del cuerpo (`http`) |
-| `totalMs` | number \| null | Total de la petición (`http`) |
-| `status` | int \| null | Código HTTP |
-| `bytes` | int \| null | Tamaño del cuerpo HTTP |
-| `sent`, `received` | int \| null | Sondas enviadas / respondidas (`ping`, `tcp`) |
-| `lossPct` | number \| null | Pérdida 0–100 % |
-| `rttMinMs`, `rttAvgMs`, `rttMaxMs` | number \| null | Ida y vuelta mín/media/máx |
-| `jitterMs` | number \| null | Diferencia media entre respuestas consecutivas |
-| `error` | string \| null | Motivo del fallo: `no reply`, `2 of 10 lost`, `NXDOMAIN`, `SERVFAIL`, `status 500, expected 200`, `no default gateway`… |
+| `name` | string | Test name in the configuration |
+| `type` | string | `dns`, `ping`, `tcp` or `http` |
+| `target` | string \| null | Queried host (`dns`/`ping`), `host:port` (`tcp`) or `host/path` without query (`http`) |
+| `method` | string \| null | `udp` (query sent straight to the Wi-Fi's DNS server) or `system` (Android resolver, may answer from cache); `icmp` (system ping) or `tcp` (TCP ping when ICMP is unavailable); `tcp`; `http`/`https` |
+| `ok` | bool | The test passed: DNS answer, no loss, open port, expected status and text |
+| `ssid`, `bssid`, `rssi` | | Connected AP when the test started |
+| `dnsServer` | string \| null | DNS server queried (`dns`) |
+| `resolvedAddress` | string \| null | First IPv4 address returned (`dns`) |
+| `dnsMs` | number \| null | DNS query time (`dns`, `http`) |
+| `connectMs` | number \| null | TCP handshake (`http`; the minimum for `tcp`) |
+| `tlsMs` | number \| null | TLS handshake (`https`) |
+| `ttfbMs` | number \| null | Time to the first response byte (`http`) |
+| `downloadMs` | number \| null | Body download (`http`) |
+| `totalMs` | number \| null | Whole request (`http`) |
+| `status` | int \| null | HTTP status |
+| `bytes` | int \| null | HTTP body size |
+| `sent`, `received` | int \| null | Probes sent / answered (`ping`, `tcp`) |
+| `lossPct` | number \| null | Loss 0–100 % |
+| `rttMinMs`, `rttAvgMs`, `rttMaxMs` | number \| null | Round trip min/avg/max |
+| `jitterMs` | number \| null | Mean difference between consecutive answers |
+| `error` | string \| null | Why it failed: `no reply`, `2 of 10 lost`, `NXDOMAIN`, `SERVFAIL`, `status 500, expected 200`, `no default gateway`… |
 
-`${gateway}` y `${dns}` en la configuración se sustituyen por la puerta de enlace y el primer DNS que dio la WiFi.
+`${gateway}` and `${dns}` in the configuration are replaced with the default gateway and first DNS server the Wi-Fi network assigned.
 
-## 3c. Pasos de guiones HTTP (`scriptSteps`)
+## 3c. HTTP script steps (`scriptSteps`)
 
-Guiones de la sección `scripts` (o importados de un `.har`): peticiones encadenadas con variables, extracción de valores (p. ej. un token) y cookies entre pasos. Solo GET/HEAD salvo `"allowWrite": true` en el paso. Cada paso abre conexión nueva, así que DNS/TCP/TLS se miden siempre. Cada fila lleva los campos de posición.
+Scripts from the `scripts` section (or imported from a `.har`): chained requests with variables, values extracted from responses (e.g. a token) and cookies kept between steps. Only GET/HEAD unless the step has `"allowWrite": true`. Every step opens a new connection, so DNS/TCP/TLS are always measured. Each row carries the position fields.
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `script`, `stepIndex`, `step` | | Guion, número de paso (desde 1) y nombre |
-| `method`, `host`, `path` | | Petición (sin query string) |
-| `status` | int \| null | Código HTTP |
-| `ok` | bool | Estado, texto esperado y extracciones correctos |
-| `ssid`, `bssidStart`, `bssidEnd`, `rssi` | | AP conectado al empezar/terminar el guion |
-| `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`, `downloadMs`, `totalMs` | number \| null | Desglose de tiempos del paso, ms |
-| `bytes` | int \| null | Tamaño del cuerpo |
-| `error` | string \| null | P. ej. `status 401`, `response does not contain "A-01"`, `cannot extract token from $.data.token`, `unknown variable token` |
+| `script`, `stepIndex`, `step` | | Script, step number (from 1) and name |
+| `method`, `host`, `path` | | Request (without query string) |
+| `status` | int \| null | HTTP status |
+| `ok` | bool | Status, expected text and extractions all correct |
+| `ssid`, `bssidStart`, `bssidEnd`, `rssi` | | Connected AP when the script started/ended |
+| `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`, `downloadMs`, `totalMs` | number \| null | Timing breakdown of the step, ms |
+| `bytes` | int \| null | Body size |
+| `error` | string \| null | E.g. `status 401`, `response does not contain "A-01"`, `cannot extract token from $.data.token`, `unknown variable token` |
 
-## 3d. Roaming en modo continuo (`roamingSessions`, `roamingEvents`)
+## 3d. Continuous-mode roaming (`roamingSessions`, `roamingEvents`)
 
-Si la configuración importada activa `roaming`, durante cada recorrido continuo la app, cada `intervalMs` (200 ms por defecto), lee el AP conectado y hace una conexión TCP al destino (`host:port`, p. ej. `${gateway}:443`) por la WiFi; una conexión rechazada también prueba conectividad. Los eventos se sitúan **sobre el recorrido marcado en el plano** interpolando por tiempo entre los toques, igual que los escaneos del recorrido en el `.esx`. El `surveyId` es el del survey del recorrido en el `.esx` (el id de la sesión, estable entre exportaciones).
+When the imported configuration enables `roaming`, during every Continuous track the app reads the associated AP every `intervalMs` (200 ms by default) and tries a TCP connect to the target (`host:port`, e.g. `${gateway}:443`) over Wi-Fi; a refused connection also proves connectivity. Events are placed **on the route marked on the map** by interpolating in time between the taps, like the route's scans in the `.esx`. The `surveyId` is the track's survey in the `.esx` (the session ID, stable across exports).
 
 `roamingSessions`:
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `surveyId`, `floorPlanId`, `floorName` | | Recorrido y planta |
-| `startedAt`, `endedAt` | string ISO-8601 UTC | Inicio y fin del recorrido |
-| `target` | string | Destino de la sonda (`gateway:443`, `host:puerto`) |
-| `intervalMs` | int | Intervalo entre sondas |
-| `probes`, `lost` | int | Sondas enviadas / fallidas |
-| `lossPct` | number \| null | Pérdida 0–100 % |
-| `avgRttMs` | number \| null | Tiempo medio de conexión de las sondas correctas |
-| `roams`, `outages` | int | Eventos de cada tipo |
+| `surveyId`, `floorPlanId`, `floorName` | | Track and floor |
+| `startedAt`, `endedAt` | ISO-8601 UTC string | Track start and end |
+| `target` | string | Probe target (`gateway:443`, `host:port`) |
+| `intervalMs` | int | Interval between probes |
+| `probes`, `lost` | int | Probes sent / failed |
+| `lossPct` | number \| null | Loss 0–100 % |
+| `avgRttMs` | number \| null | Mean connect time of the successful probes |
+| `roams`, `outages` | int | Events of each type |
 
 `roamingEvents`:
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |---|---|---|
-| `surveyId`, `floorPlanId`, `floorName` | | Recorrido y planta |
-| `x`, `y` | number \| null | Posición en el recorrido (píxeles del plano) |
-| `at` | string ISO-8601 UTC | Momento del evento |
-| `type` | string | `roam` (cambió el BSSID) u `outage` (≥3 sondas seguidas fallidas sin cambiar de AP) |
-| `fromBssid`, `toBssid` | string \| null | AP anterior y nuevo (iguales en un `outage`) |
-| `fromRssi`, `toRssi` | int \| null | Señal antes y después, dBm |
-| `outageMs` | int \| null | Tiempo sin conexión más allá de un intervalo (0 = roaming sin corte); `null` si no se recuperó antes de acabar el recorrido |
-| `lostProbes` | int | Sondas fallidas en el evento |
-| `duringScan` | bool | Hubo un escaneo WiFi durante el corte: el móvil estaba fuera de canal y parte del corte puede deberse al escaneo |
+| `surveyId`, `floorPlanId`, `floorName` | | Track and floor |
+| `x`, `y` | number \| null | Position on the route (floor-plan pixels) |
+| `at` | ISO-8601 UTC string | Event time |
+| `type` | string | `roam` (BSSID changed) or `outage` (≥3 consecutive failed probes without changing AP) |
+| `fromBssid`, `toBssid` | string \| null | Previous and new AP (equal for an `outage`) |
+| `fromRssi`, `toRssi` | int \| null | Signal before and after, dBm |
+| `outageMs` | int \| null | Time without connectivity beyond one interval (0 = seamless roam); `null` if it had not recovered when the track ended |
+| `lostProbes` | int | Failed probes in the event |
+| `duringScan` | bool | A Wi-Fi scan ran during the outage: the phone was off channel, so part of it may be due to the scan |
 
-## 4. Cómo cruzarlo con el `.esx`
+## 4. Joining with the `.esx`
 
-- **Dentro del mismo ZIP**: por `surveyId` → `survey-<surveyId>.json`. El escaneo WiFi completo del punto (todos los APs) está en ese survey (`wifiTracks[0]`) y en su binario `track-<binaryFileId>.bin`.
-- **Entre exportaciones distintas** (histórico, comparativas): por `floorPlanId` + `x` + `y` (tolerancia sugerida 0,5 px). El `surveyId` de los puntos se **regenera en cada exportación**; `floorPlanId` y las coordenadas no cambian.
-- **A metros**: `metros = píxeles × metersPerUnit` (de `floorPlans.json`). Tamaño del plano: `width`/`height`; imagen: `image-<imageId>`.
-- Puntos **importados de otro `.esx`** no tienen filas. Los recorridos del **modo continuo** solo aparecen en `roamingSessions`/`roamingEvents`.
+- **Within the same ZIP**: by `surveyId` → `survey-<surveyId>.json`. The point's full Wi-Fi scan (every AP) is in that survey (`wifiTracks[0]`) and its binary `track-<binaryFileId>.bin`.
+- **Across exports** (history, comparisons): by `floorPlanId` + `x` + `y` (suggested tolerance 0.5 px). Stop-and-Go points get a **new `surveyId` on every export**; `floorPlanId`, coordinates and Continuous track IDs do not change.
+- **To metres**: `metres = pixels × metersPerUnit` (from `floorPlans.json`). Plan size: `width`/`height`; image: `image-<imageId>`.
+- Points **imported from another `.esx`** have no rows. **Continuous** tracks only appear in `roamingSessions`/`roamingEvents`.
 
-Datos que tu app puede derivar del `.esx` sin cambios en WiProber: APs en el mismo canal por encima de −82 dBm (cocanal), APs por encima de −67 dBm (cobertura redundante), diferencia entre el mejor y el segundo AP, y el *BSS Load* de cualquier AP (los elementos del beacon están en `informationElements` de `accessPointMeasurements.json`).
+Data your app can derive from the `.esx` with no WiProber change: APs on the same channel above −82 dBm (co-channel), APs above −67 dBm (redundant coverage), difference between the best and second AP, and the *BSS Load* of any AP (beacon elements are in `informationElements` of `accessPointMeasurements.json`).
 
-## 5. Cómo se mide
+## 5. How values are measured
 
-- Tras cada escaneo Stop-and-Go, si hay destinos activados, se mide en el mismo punto, uno detrás de otro (nunca en paralelo, para no falsear resultados). Una ventana muestra el progreso.
-- **Todo el tráfico va atado a la red WiFi**; nunca sale por datos móviles.
-- **iPerf3**: cliente propio del protocolo iperf3, TCP, 1 flujo. Bajada = modo inverso medido por el móvil; subida = lo que reporta el servidor como recibido.
-- **Internet**: HTTP con 4 conexiones en paralelo; por defecto Cloudflare (`speed.cloudflare.com/__down` y `/__up`), configurable (p. ej. LibreSpeed).
-- **Latencia**: 10 handshakes TCP al puerto del servidor (iPerf3) o al 443/80 de la URL de descarga. Si el primero falla, se salta el resto del destino.
-- **No hay ruido ni SNR**: Android no expone el nivel de ruido.
-- Configuración (servidores, URLs, etiqueta del destino) solo en el móvil, nunca en el código.
+- After each Stop-and-Go scan, if anything is enabled, the tests run at the same point one after another (never in parallel, so results are not skewed). A dialog shows the progress.
+- **All test traffic is bound to the Wi-Fi network**; it never goes over mobile data.
+- **iPerf3**: built-in iperf3 protocol client, TCP, 1 stream. Download = reverse mode measured by the phone; upload = what the server reports as received.
+- **Internet**: HTTP with 4 parallel connections; Cloudflare by default (`speed.cloudflare.com/__down` and `/__up`), configurable (e.g. LibreSpeed).
+- **Latency**: 10 TCP handshakes to the server port (iPerf3) or to 443/80 of the download URL. If the first one fails, the rest of that target is skipped.
+- **No noise or SNR**: Android does not expose the noise floor.
+- Configuration (servers, URLs, target label, tests, scripts) lives on the phone only, never in the code.
 
-## 6. Lo que no se exporta
+## 6. Not exported
 
-- La **guía de medición** (propuesta de siguiente punto, casillas saltadas, cobertura en degradado): es solo visual en la app.
-- Escaneos sin tests de rendimiento: solo están en el `.esx`.
+- The **survey guide** (next suggested point, skipped cells, coverage gradient): app display only.
+- Scans without performance tests: only in the `.esx`.
 
-## 7. Historial
+## 7. History
 
-| Release | Cambios en este fichero |
+| Release | Changes to this file |
 |---|---|
-| `v3.0.0-throughput.1` | Formato 1: ZIP con `.esx` + JSON; posición, `surveyId`, `target`, `method`, `downMbps`, `upMbps`, `latencyMs`, `ssid`, `bssidStart`/`bssidEnd`, `rssi`, `linkMbps`, `error`. Ventana de progreso y salto rápido de servidores caídos |
-| `v3.0.0-throughput.2` | Añadidos `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latencia con 10 muestras |
-| `v3.0.0-throughput.3` | Sin cambios en la exportación (guía de medición en la app) |
-| `v3.0.0-throughput.4` | Añadidos los arrays `networkTests` y `scriptSteps` (configuración importada) y `roamingSessions`/`roamingEvents` (roaming en modo continuo) |
+| `v3.0.0-throughput.1` | Format 1: ZIP with `.esx` + JSON; position, `surveyId`, `target`, `method`, `downMbps`, `upMbps`, `latencyMs`, `ssid`, `bssidStart`/`bssidEnd`, `rssi`, `linkMbps`, `error` |
+| `v3.0.0-throughput.2` | Added `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latency from 10 samples |
+| `v3.0.0-throughput.3` | No export changes (survey guide in the app) |
+| `v3.0.0-throughput.4` | Added `networkTests` and `scriptSteps` (imported configuration) and `roamingSessions`/`roamingEvents` (Continuous-mode roaming) |
