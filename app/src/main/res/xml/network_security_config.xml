@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network tests and scripts often target corporate servers whose certificates come from an
+    internal CA installed by the user or the MDM. Trust it in addition to the system CAs.
+    Cleartext stays at the platform default (blocked for HttpURLConnection).
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates
+                src="user"
+                tools:ignore="AcceptsUserCertificates" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

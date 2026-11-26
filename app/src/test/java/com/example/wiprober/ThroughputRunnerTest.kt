@@ -160,4 +160,52 @@ class ThroughputRunnerTest {
         assertTrue("min $min avg $avg", min <= avg)
         assertTrue(test.jitterMs!! >= 0.0)
     }
+
+    @Test
+    fun networkTestsAndScriptsRunAfterTheTargetsWithProgress() {
+        MiniHttpServer { MiniHttpServer.Response(200, "ok") }.use { server ->
+            val tests = listOf(
+                NetworkTest(name = "web", type = "http", url = "${server.base}/health"),
+                NetworkTest(name = "off", type = "http", url = "${server.base}/x", enabled = false)
+            )
+            val scripts = listOf(
+                HttpScript("flow", steps = listOf(
+                    HttpScriptStep(name = "a", url = "${server.base}/a"),
+                    HttpScriptStep(name = "b", url = "${server.base}/b")
+                ))
+            )
+            val events = mutableListOf<ThroughputProgress>()
+            val result = ThroughputRunner(
+                iperf = Iperf3Client(),
+                http = HttpSpeedTest(),
+                socketFactory = SocketFactory.getDefault(),
+                connection = { ap },
+                networkTests = NetworkTestRunner(
+                    TimedHttpClient(), SocketFactory.getDefault(), java.net.InetAddress::getAllByName,
+                    { java.net.DatagramSocket() }, NetworkContext(), { ap }
+                ),
+                scriptRunner = ScriptRunner(TimedHttpClient()),
+                clock = { 1L }
+            ).measure(ThroughputSettings(), tests, scripts) { events += it }
+
+            assertEquals(listOf("web"), result.networkTests!!.map { it.name })
+            assertTrue(result.networkTests!!.single().ok)
+            assertEquals(listOf("a", "b"), result.scripts!!.single().steps.map { it.name })
+            assertEquals("aa:bb:cc:dd:ee:01", result.scripts!!.single().bssidEnd)
+            assertEquals(listOf(1, 2, 3), events.map { it.step })
+            assertTrue(events.all { it.totalSteps == 3 })
+            assertEquals(listOf("http", "a", "b"), events.map { it.detail })
+            assertEquals(2, events.last().finished.size)
+        }
+    }
+
+    @Test
+    fun scriptsWithoutWifiAreSkippedWithTheReason() {
+        val run = runner { null }.measure(
+            ThroughputSettings(),
+            scripts = listOf(HttpScript("flow", steps = listOf(HttpScriptStep(name = "a", url = "http://127.0.0.1:9/a"))))
+        ).scripts!!.single()
+        assertEquals(ThroughputRunner.NOT_ON_WIFI, run.error)
+        assertTrue(run.steps.isEmpty())
+    }
 }

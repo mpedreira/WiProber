@@ -53,6 +53,7 @@ class SurveyActivity : AppCompatActivity() {
     private val throughputSettingsStore by lazy { ThroughputSettingsStore(applicationContext) }
     private val throughputProbe by lazy { ThroughputProbe(applicationContext) }
     private val surveyGuideStore by lazy { SurveyGuideSettingsStore(applicationContext) }
+    private val configStore by lazy { WiproberConfigStore(applicationContext) }
     /** Suggestion currently drawn on the map (floor-plan pixels), if any. */
     private var currentSuggestion: SurveyCoordinate? = null
     /** Last finger-down position on the map, for long-press moves of the suggestion. */
@@ -198,6 +199,10 @@ class SurveyActivity : AppCompatActivity() {
                     else exportProject(uri, bundle)
                 }
 
+                override fun onConfigFileSelected(uri: Uri?) {
+                    if (uri != null) importConfiguration(uri)
+                }
+
                 override fun onScanAccessReady() = startPendingScanAction()
 
                 override fun pendingScanAccess() = viewModel.pendingScanAccess()
@@ -339,6 +344,10 @@ class SurveyActivity : AppCompatActivity() {
                     requestProjectExport()
                     true
                 }
+                R.id.action_configuration -> {
+                    showConfigurationDialog()
+                    true
+                }
                 R.id.action_survey_guide -> {
                     SurveyGuideSettingsDialog.show(this, surveyGuideStore) {
                         renderSurveyGuide(viewModel.screenState.value)
@@ -477,6 +486,75 @@ class SurveyActivity : AppCompatActivity() {
             val suggestion = currentSuggestion ?: return@setOnClickListener
             if (viewModel.skipSuggestion(suggestion)) {
                 Toast.makeText(this, R.string.guide_skipped, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** Imported tests/scripts/roaming at a glance, with Import and Remove. */
+    private fun showConfigurationDialog() {
+        val imported = configStore.load()
+        val none = getString(R.string.config_none)
+        val message = getString(
+            R.string.config_summary,
+            imported.tests.orEmpty().joinToString(", ") { it.name }.ifEmpty { none },
+            imported.scripts.orEmpty().joinToString(", ") { it.name }.ifEmpty { none },
+            imported.roamingSettings.let { if (it.enabled && it.host.isNotEmpty()) "${it.host}:${it.port}" else none }
+        )
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.config_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.config_import) { _, _ -> androidCoordinator.openConfigFile() }
+            .setNeutralButton(R.string.config_remove) { _, _ ->
+                configStore.clear()
+                Toast.makeText(this, R.string.config_removed, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun importConfiguration(uri: Uri) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = requireNotNull(contentResolver.openInputStream(uri)) { "Cannot open the file" }.use { input ->
+                        val bytes = java.io.ByteArrayOutputStream()
+                        val buffer = ByteArray(16 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            bytes.write(buffer, 0, read)
+                            require(bytes.size() <= WiproberConfigStore.MAX_FILE_BYTES) { "File larger than 2 MB" }
+                        }
+                        bytes.toString(Charsets.UTF_8.name())
+                    }
+                    val name = uri.lastPathSegment?.substringAfterLast('/') ?: "config"
+                    configStore.apply(WiproberConfigParser.parse(text, name), throughputSettingsStore, surveyGuideStore)
+                }
+            }
+            result.onSuccess { summary ->
+                renderSurveyGuide(viewModel.screenState.value)
+                val yes = getString(R.string.config_updated)
+                val unchanged = getString(R.string.config_unchanged)
+                MaterialAlertDialogBuilder(this@SurveyActivity)
+                    .setTitle(R.string.config_imported_title)
+                    .setMessage(
+                        getString(
+                            R.string.config_imported_summary,
+                            if (summary.throughput) yes else unchanged,
+                            if (summary.guide) yes else unchanged,
+                            summary.tests?.toString() ?: unchanged,
+                            summary.scripts?.joinToString(", ")?.ifEmpty { "0" } ?: unchanged,
+                            if (summary.roaming) yes else unchanged
+                        )
+                    )
+                    .setPositiveButton(R.string.action_ok, null)
+                    .show()
+            }.onFailure { error ->
+                MaterialAlertDialogBuilder(this@SurveyActivity)
+                    .setTitle(R.string.config_import_failed)
+                    .setMessage(error.message ?: error.javaClass.simpleName)
+                    .setPositiveButton(R.string.action_ok, null)
+                    .show()
             }
         }
     }
@@ -943,12 +1021,15 @@ class SurveyActivity : AppCompatActivity() {
                     val wifiInfoList = mapScanResults(outcome.results)
                     // The point stays pending (Stop-and-Go scanning) until its tests finish.
                     val settings = throughputSettingsStore.load()
-                    val throughput = if (settings.anyEnabled) {
+                    val imported = configStore.load()
+                    val throughput = if (settings.anyEnabled || imported.enabledTests.isNotEmpty() ||
+                        imported.enabledScripts.isNotEmpty()
+                    ) {
                         binding.surveyStatusText.setText(R.string.throughput_in_progress)
                         val progressDialog = ThroughputProgressDialog(this@SurveyActivity)
                         progressDialog.show()
                         try {
-                            throughputProbe.measure(settings, outcome.results, progressDialog::update)
+                            throughputProbe.measure(settings, imported, outcome.results, progressDialog::update)
                         } finally {
                             progressDialog.dismiss()
                         }

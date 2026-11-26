@@ -29,7 +29,9 @@ Nada de WiProber se escribe dentro del `.esx`, y los campos nativos `throughputS
   "version": 1,
   "generatedAt": "2026-11-26T10:41:03.512Z",
   "esxFile": "Proyecto.esx",
-  "measurements": [ { …fila… }, … ]
+  "measurements": [ { …fila… }, … ],
+  "networkTests": [ { …fila… }, … ],
+  "scriptSteps":  [ { …fila… }, … ]
 }
 ```
 
@@ -39,7 +41,11 @@ Nada de WiProber se escribe dentro del `.esx`, y los campos nativos `throughputS
 | `version` | int | `1`. Solo cambiará si se rompe la compatibilidad; los campos nuevos se añaden sin subirla |
 | `generatedAt` | string ISO-8601 UTC | Momento de la exportación |
 | `esxFile` | string | Nombre del `.esx` que acompaña al JSON en el ZIP |
-| `measurements` | array | Una fila por **punto Stop-and-Go × destino medido** (puede estar vacío) |
+| `measurements` | array | Una fila por **punto Stop-and-Go × destino de rendimiento** (iPerf3 / Internet) |
+| `networkTests` | array | Una fila por **punto × prueba de red importada** (sección 3b) |
+| `scriptSteps` | array | Una fila por **punto × paso de guion HTTP importado** (sección 3c) |
+
+Los tres arrays aparecen siempre (vacíos si no hay datos).
 
 ## 3. Campos de cada fila
 
@@ -108,6 +114,51 @@ Leído al **empezar** el test, salvo `bssidEnd`.
 
 Varios motivos se separan con `; `.
 
+## 3b. Pruebas de red (`networkTests`)
+
+Configuradas en el fichero importado (sección `tests`, ver [ejemplo](wiprober-config.example.json)); se ejecutan en cada punto tras los tests de rendimiento. Cada fila lleva además los campos de posición de la sección anterior (`surveyId`, `floorPlanId`, `floorName`, `x`, `y`, `measuredAt`).
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `name` | string | Nombre de la prueba en la configuración |
+| `type` | string | `dns`, `ping`, `tcp` o `http` |
+| `target` | string \| null | Host consultado (`dns`/`ping`), `host:puerto` (`tcp`) o `host/ruta` sin query (`http`) |
+| `method` | string \| null | `udp` (consulta directa al DNS de la WiFi) o `system` (resolver de Android, puede usar caché); `icmp` (ping del sistema) o `tcp` (ping por TCP si ICMP no está disponible); `tcp`; `http`/`https` |
+| `ok` | bool | La prueba cumplió: respuesta DNS, sin pérdidas, puerto abierto, estado y texto esperados |
+| `ssid`, `bssid`, `rssi` | | AP conectado al empezar la prueba |
+| `dnsServer` | string \| null | Servidor DNS consultado (`dns`) |
+| `resolvedAddress` | string \| null | Primera IPv4 obtenida (`dns`) |
+| `dnsMs` | number \| null | Tiempo de la consulta DNS (`dns`, `http`) |
+| `connectMs` | number \| null | Handshake TCP (`http`; en `tcp`, el mínimo) |
+| `tlsMs` | number \| null | Handshake TLS (`https`) |
+| `ttfbMs` | number \| null | Tiempo hasta el primer byte de la respuesta (`http`) |
+| `downloadMs` | number \| null | Descarga del cuerpo (`http`) |
+| `totalMs` | number \| null | Total de la petición (`http`) |
+| `status` | int \| null | Código HTTP |
+| `bytes` | int \| null | Tamaño del cuerpo HTTP |
+| `sent`, `received` | int \| null | Sondas enviadas / respondidas (`ping`, `tcp`) |
+| `lossPct` | number \| null | Pérdida 0–100 % |
+| `rttMinMs`, `rttAvgMs`, `rttMaxMs` | number \| null | Ida y vuelta mín/media/máx |
+| `jitterMs` | number \| null | Diferencia media entre respuestas consecutivas |
+| `error` | string \| null | Motivo del fallo: `no reply`, `2 of 10 lost`, `NXDOMAIN`, `SERVFAIL`, `status 500, expected 200`, `no default gateway`… |
+
+`${gateway}` y `${dns}` en la configuración se sustituyen por la puerta de enlace y el primer DNS que dio la WiFi.
+
+## 3c. Pasos de guiones HTTP (`scriptSteps`)
+
+Guiones de la sección `scripts` (o importados de un `.har`): peticiones encadenadas con variables, extracción de valores (p. ej. un token) y cookies entre pasos. Solo GET/HEAD salvo `"allowWrite": true` en el paso. Cada paso abre conexión nueva, así que DNS/TCP/TLS se miden siempre. Cada fila lleva los campos de posición.
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `script`, `stepIndex`, `step` | | Guion, número de paso (desde 1) y nombre |
+| `method`, `host`, `path` | | Petición (sin query string) |
+| `status` | int \| null | Código HTTP |
+| `ok` | bool | Estado, texto esperado y extracciones correctos |
+| `ssid`, `bssidStart`, `bssidEnd`, `rssi` | | AP conectado al empezar/terminar el guion |
+| `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`, `downloadMs`, `totalMs` | number \| null | Desglose de tiempos del paso, ms |
+| `bytes` | int \| null | Tamaño del cuerpo |
+| `error` | string \| null | P. ej. `status 401`, `response does not contain "A-01"`, `cannot extract token from $.data.token`, `unknown variable token` |
+
 ## 4. Cómo cruzarlo con el `.esx`
 
 - **Dentro del mismo ZIP**: por `surveyId` → `survey-<surveyId>.json`. El escaneo WiFi completo del punto (todos los APs) está en ese survey (`wifiTracks[0]`) y en su binario `track-<binaryFileId>.bin`.
@@ -139,10 +190,10 @@ Datos que tu app puede derivar del `.esx` sin cambios en WiProber: APs en el mis
 | `v3.0.0-throughput.1` | Formato 1: ZIP con `.esx` + JSON; posición, `surveyId`, `target`, `method`, `downMbps`, `upMbps`, `latencyMs`, `ssid`, `bssidStart`/`bssidEnd`, `rssi`, `linkMbps`, `error`. Ventana de progreso y salto rápido de servidores caídos |
 | `v3.0.0-throughput.2` | Añadidos `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latencia con 10 muestras |
 | `v3.0.0-throughput.3` | Sin cambios en la exportación (guía de medición en la app) |
+| `v3.0.0-throughput.4` | Añadidos los arrays `networkTests` y `scriptSteps` (configuración importada) |
 
 ## 8. Propuesto, aún no implementado
 
 Sujeto a aprobación; cuando se haga se documentará aquí:
 
-- **Pruebas de servicios de red configurables** importadas desde un fichero de configuración (no en el código): `dns`, `ping`, `tcp`, `http` con desglose DNS/TCP/TLS/primer byte, y puerta de enlace automática. Guiones HTTP de varios pasos y HAR como opción avanzada.
 - **Roaming en modo continuo**: eventos de cambio de AP y tiempo sin conexión, situados sobre el recorrido marcado en el plano.

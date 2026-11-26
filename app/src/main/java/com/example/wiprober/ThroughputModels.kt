@@ -4,8 +4,14 @@ package com.example.wiprober
 @JsonModel
 data class PointThroughput(
     val measuredAt: Long,
-    val tests: List<ThroughputTestResult>
-)
+    val tests: List<ThroughputTestResult>,
+    /** Imported network tests (DNS, ping, TCP, HTTP); nullable for points saved before them. */
+    val networkTests: List<NetworkTestResult>? = emptyList(),
+    /** Imported HTTP scripts replayed at the point. */
+    val scripts: List<ScriptRun>? = emptyList()
+) {
+    val isEmpty: Boolean get() = tests.isEmpty() && networkTests.isNullOrEmpty() && scripts.isNullOrEmpty()
+}
 
 /**
  * One target measured at a point. Null values were not measured or not reported: [error] says

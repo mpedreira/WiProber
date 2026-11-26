@@ -50,7 +50,8 @@ class ThroughputProgressDialog(private val activity: AppCompatActivity) {
         current = progress
         phaseStartedAt = SystemClock.elapsedRealtime()
         stepText.text = activity.getString(
-            R.string.throughput_progress_step, progress.step, progress.totalSteps, progress.target, phaseName(progress.phase)
+            R.string.throughput_progress_step, progress.step, progress.totalSteps, progress.target,
+            phaseName(progress.phase, progress.detail)
         )
         if (progress.phaseSeconds == null) {
             bar.isIndeterminate = true
@@ -73,7 +74,10 @@ class ThroughputProgressDialog(private val activity: AppCompatActivity) {
         val progress = current ?: return
         val seconds = progress.phaseSeconds
         if (seconds == null) {
-            phaseText.setText(R.string.throughput_progress_latency_hint)
+            phaseText.setText(
+                if (progress.phase == ThroughputPhase.LATENCY) R.string.throughput_progress_latency_hint
+                else R.string.throughput_progress_running
+            )
             return
         }
         val elapsed = (SystemClock.elapsedRealtime() - phaseStartedAt).coerceAtMost(seconds * 1_000L)
@@ -87,19 +91,18 @@ class ThroughputProgressDialog(private val activity: AppCompatActivity) {
     }
 
     private fun finishedLine(result: ThroughputPhaseResult): String {
-        val value = result.value?.let {
-            String.format(Locale.US, "%.1f %s", it, if (result.phase == ThroughputPhase.LATENCY) "ms" else "Mbps")
-        } ?: activity.getString(R.string.throughput_progress_failed)
-        return "✓ ${result.target} · ${phaseName(result.phase)}: $value"
+        val transfer = result.phase == ThroughputPhase.DOWNLOAD || result.phase == ThroughputPhase.UPLOAD
+        val value = result.value?.let { String.format(Locale.US, "%.1f %s", it, if (transfer) "Mbps" else "ms") }
+            ?: activity.getString(R.string.throughput_progress_failed)
+        return "${if (result.value != null) "✓" else "✗"} ${result.target} · ${phaseName(result.phase, result.detail)}: $value"
     }
 
-    private fun phaseName(phase: ThroughputPhase): String = activity.getString(
-        when (phase) {
-            ThroughputPhase.LATENCY -> R.string.throughput_phase_latency
-            ThroughputPhase.DOWNLOAD -> R.string.throughput_phase_download
-            ThroughputPhase.UPLOAD -> R.string.throughput_phase_upload
-        }
-    )
+    private fun phaseName(phase: ThroughputPhase, detail: String?): String = when (phase) {
+        ThroughputPhase.LATENCY -> activity.getString(R.string.throughput_phase_latency)
+        ThroughputPhase.DOWNLOAD -> activity.getString(R.string.throughput_phase_download)
+        ThroughputPhase.UPLOAD -> activity.getString(R.string.throughput_phase_upload)
+        ThroughputPhase.NETWORK_TEST, ThroughputPhase.SCRIPT_STEP -> detail.orEmpty()
+    }
 
     private companion object {
         const val TICK_MILLIS = 200L

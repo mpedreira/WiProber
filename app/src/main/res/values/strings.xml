@@ -231,6 +231,7 @@
     <string name="throughput_progress_finishing">Collecting results…</string>
     <string name="throughput_progress_latency_hint">Connecting to the server…</string>
     <string name="throughput_progress_failed">failed</string>
+    <string name="throughput_progress_running">Running…</string>
     <string name="throughput_phase_latency">latency</string>
     <string name="throughput_phase_download">download</string>
     <string name="throughput_phase_upload">upload</string>
@@ -247,4 +248,17 @@
     <string name="guide_moved">Next point moved here</string>
     <string name="guide_needs_scale">Calibrate the scale to see the survey guide</string>
     <string name="last_skip_undone">Skipped cell restored</string>
+    <!-- Imported configuration (network tests, scripts, roaming) -->
+    <string name="action_configuration">Configuration…</string>
+    <string name="config_title">Imported configuration</string>
+    <string name="config_summary">Network tests: %1$s\n\nScripts: %2$s\n\nRoaming probe: %3$s\n\nImport a wiprober-config.json (tests, scripts, throughput, guide, roaming) or a browser .har recording. Imported files stay on this phone only.</string>
+    <string name="config_none">none</string>
+    <string name="config_import">Import file…</string>
+    <string name="config_remove">Remove tests &amp; scripts</string>
+    <string name="config_removed">Imported tests and scripts removed</string>
+    <string name="config_imported_title">Configuration imported</string>
+    <string name="config_imported_summary">Throughput tests: %1$s\nSurvey guide: %2$s\nNetwork tests: %3$s\nScripts: %4$s\nRoaming probe: %5$s</string>
+    <string name="config_updated">updated</string>
+    <string name="config_unchanged">unchanged</string>
+    <string name="config_import_failed">Cannot import the configuration</string>
 </resources>

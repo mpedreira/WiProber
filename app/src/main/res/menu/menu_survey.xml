@@ -7,6 +7,10 @@
         android:title="@string/btn_export_esx"
         app:showAsAction="ifRoom" />
     <item
+        android:id="@+id/action_configuration"
+        android:title="@string/action_configuration"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_survey_guide"
         android:title="@string/action_survey_guide"
         app:showAsAction="never" />

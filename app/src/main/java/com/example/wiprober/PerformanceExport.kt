@@ -25,12 +25,19 @@ object PerformanceExport {
     const val VERSION = 1
 
     fun hasMeasurements(snapshot: ProjectExportSnapshot): Boolean =
-        snapshot.floors.any { floor -> floor.survey.scanPoints.any { !it.throughput?.tests.isNullOrEmpty() } }
+        snapshot.floors.any { floor -> floor.survey.scanPoints.any { it.throughput?.isEmpty == false } }
 
     fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long): JsonObject {
         val rows = JsonArray()
+        val networkRows = JsonArray()
+        val scriptRows = JsonArray()
         report?.stopAndGoSurveys.orEmpty().forEach { ref ->
-            ref.point.throughput?.tests.orEmpty().forEach { test -> rows.add(row(ref, test)) }
+            val throughput = ref.point.throughput ?: return@forEach
+            throughput.tests.forEach { test -> rows.add(row(ref, test)) }
+            throughput.networkTests.orEmpty().forEach { test -> networkRows.add(networkRow(ref, test)) }
+            throughput.scripts.orEmpty().forEach { run ->
+                run.steps.forEachIndexed { index, step -> scriptRows.add(scriptRow(ref, run, index, step)) }
+            }
         }
         return JsonObject().apply {
             addProperty("format", FORMAT)
@@ -38,6 +45,8 @@ object PerformanceExport {
             addProperty("generatedAt", isoUtc(generatedAt))
             addProperty("esxFile", esxFileName)
             add("measurements", rows)
+            add("networkTests", networkRows)
+            add("scriptSteps", scriptRows)
         }
     }
 
@@ -57,13 +66,72 @@ object PerformanceExport {
         }
     }
 
-    private fun row(ref: StopAndGoSurveyRef, test: ThroughputTestResult) = JsonObject().apply {
+    /** Position fields shared by every row type. */
+    private fun JsonObject.position(ref: StopAndGoSurveyRef, measuredAt: Long) {
         addProperty("surveyId", ref.surveyId)
         addProperty("floorPlanId", ref.floorPlanId)
         addProperty("floorName", ref.floorName)
         addProperty("x", ref.point.x.toDouble())
         addProperty("y", ref.point.y.toDouble())
-        addProperty("measuredAt", isoUtc(test.measuredAt))
+        addProperty("measuredAt", isoUtc(measuredAt))
+    }
+
+    private fun networkRow(ref: StopAndGoSurveyRef, test: NetworkTestResult) = JsonObject().apply {
+        position(ref, test.measuredAt)
+        addProperty("name", test.name)
+        addProperty("type", test.type)
+        addProperty("target", test.target)
+        addProperty("method", test.method)
+        addProperty("ok", test.ok)
+        addProperty("ssid", test.ssid)
+        addProperty("bssid", test.bssid)
+        addProperty("rssi", test.rssi)
+        addProperty("dnsServer", test.dnsServer)
+        addProperty("resolvedAddress", test.resolvedAddress)
+        addProperty("dnsMs", test.dnsMs)
+        addProperty("connectMs", test.connectMs)
+        addProperty("tlsMs", test.tlsMs)
+        addProperty("ttfbMs", test.ttfbMs)
+        addProperty("downloadMs", test.downloadMs)
+        addProperty("totalMs", test.totalMs)
+        addProperty("status", test.status)
+        addProperty("bytes", test.bytes)
+        addProperty("sent", test.sent)
+        addProperty("received", test.received)
+        addProperty("lossPct", test.lossPct)
+        addProperty("rttMinMs", test.rttMinMs)
+        addProperty("rttAvgMs", test.rttAvgMs)
+        addProperty("rttMaxMs", test.rttMaxMs)
+        addProperty("jitterMs", test.jitterMs)
+        addProperty("error", test.error)
+    }
+
+    private fun scriptRow(ref: StopAndGoSurveyRef, run: ScriptRun, index: Int, step: ScriptStepResult) = JsonObject().apply {
+        position(ref, run.measuredAt)
+        addProperty("script", run.name)
+        addProperty("stepIndex", index + 1)
+        addProperty("step", step.name)
+        addProperty("method", step.method)
+        addProperty("host", step.host)
+        addProperty("path", step.path)
+        addProperty("status", step.status)
+        addProperty("ok", step.ok)
+        addProperty("ssid", run.ssid)
+        addProperty("bssidStart", run.bssidStart)
+        addProperty("bssidEnd", run.bssidEnd)
+        addProperty("rssi", run.rssi)
+        addProperty("dnsMs", step.dnsMs)
+        addProperty("connectMs", step.connectMs)
+        addProperty("tlsMs", step.tlsMs)
+        addProperty("ttfbMs", step.ttfbMs)
+        addProperty("downloadMs", step.downloadMs)
+        addProperty("totalMs", step.totalMs)
+        addProperty("bytes", step.bytes)
+        addProperty("error", step.error ?: run.error)
+    }
+
+    private fun row(ref: StopAndGoSurveyRef, test: ThroughputTestResult) = JsonObject().apply {
+        position(ref, test.measuredAt)
         addProperty("target", test.target)
         addProperty("method", test.method)
         addProperty("durationSeconds", test.durationSeconds)

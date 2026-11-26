@@ -9,7 +9,10 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import java.net.DatagramSocket
 import java.net.HttpURLConnection
+import java.net.InetAddress
+import javax.net.SocketFactory
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,25 +34,54 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
      */
     suspend fun measure(
         settings: ThroughputSettings,
+        imported: WiproberConfigStore.Imported,
         scanResults: List<ScanResult>,
         onProgress: (ThroughputProgress) -> Unit = {}
     ): PointThroughput = withContext(Dispatchers.IO) {
         val network = wifiNetwork()
         val beacons = scanResults.associateBy { it.BSSID?.lowercase(Locale.ROOT) }
+        val socketFactory = network?.socketFactory ?: SocketFactory.getDefault()
+        val resolve: (String) -> Array<InetAddress> = { host -> network?.getAllByName(host) ?: InetAddress.getAllByName(host) }
+        val connection = { if (network == null) null else connectionInfo(beacons) }
+        val timedHttp = TimedHttpClient(socketFactory = socketFactory, resolve = resolve)
         val runner = ThroughputRunner(
-            iperf = Iperf3Client(socketFactory = network?.socketFactory ?: javax.net.SocketFactory.getDefault()),
+            iperf = Iperf3Client(socketFactory = socketFactory),
             http = HttpSpeedTest(open = { url ->
                 (network?.openConnection(url) ?: url.openConnection()) as HttpURLConnection
             }),
-            socketFactory = network?.socketFactory ?: javax.net.SocketFactory.getDefault(),
-            connection = { if (network == null) null else connectionInfo(beacons) },
+            socketFactory = socketFactory,
+            connection = connection,
             device = DeviceInfo(
                 model = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
                 androidVersion = Build.VERSION.RELEASE
             ),
+            networkTests = NetworkTestRunner(
+                http = timedHttp,
+                socketFactory = socketFactory,
+                resolve = resolve,
+                datagramSocket = { DatagramSocket().also { socket -> network?.bindSocket(socket) } },
+                context = networkContext(network),
+                connection = connection,
+                systemPing = NetworkTestRunner::runSystemPing,
+                clock = clock
+            ),
+            scriptRunner = ScriptRunner(timedHttp),
             clock = clock
         )
-        runner.measure(settings) { progress -> mainThread.post { onProgress(progress) } }
+        runner.measure(settings, imported.enabledTests, imported.enabledScripts) { progress ->
+            mainThread.post { onProgress(progress) }
+        }
+    }
+
+    /** Default gateway, DNS servers and interface name the Wi-Fi network got from DHCP. */
+    private fun networkContext(network: Network?): NetworkContext {
+        val link = network?.let { connectivity?.getLinkProperties(it) } ?: return NetworkContext()
+        return NetworkContext(
+            gateway = link.routes.firstOrNull { it.isDefaultRoute && it.gateway != null && !it.gateway!!.isAnyLocalAddress }
+                ?.gateway?.hostAddress,
+            dnsServers = link.dnsServers,
+            interfaceName = link.interfaceName
+        )
     }
 
     @Suppress("DEPRECATION") // allNetworks: the active network may be cellular while Wi-Fi is up

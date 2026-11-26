@@ -180,3 +180,13 @@ Once a floor's scale is calibrated, Stop-and-Go shows (menu → *Survey guide* t
 - **Coverage**: every measurement (Stop-and-Go points and Continuous routes) shades a radius around it (default 5 m) with a gradient coloured by its strongest signal, red at −85 dBm through yellow to green at −55 dBm. Optionally only one SSID counts.
 
 All of this is drawn in the app only; nothing changes in the ESX or `wiprober-performance.json`.
+
+## Imported configuration: network tests and HTTP scripts (fork mpedreira/WiProber)
+
+Servers, credentials and tests are never in the code: import them on the phone from the survey menu → *Configuration…* → *Import file…*, either a `wiprober-config.json` ([example](docs/wiprober-config.example.json)) or a browser `.har` recording (Developer tools → Network → *Save all as HAR*; only GET requests of documents/XHR/fetch are kept).
+
+- **Network tests** (`tests`), run at every Stop-and-Go point like the AutoTest of commercial survey tools: `dns` (query sent straight to the Wi-Fi's DNS server), `ping` (system ICMP ping on the Wi-Fi interface, TCP fallback), `tcp` (port connect) and `http` (DNS/TCP/TLS/first-byte/download breakdown). `${gateway}` and `${dns}` are the network's own gateway and DNS server.
+- **HTTP scripts** (`scripts`): chained requests with variables, values extracted from JSON responses (e.g. a login token) and cookies, each step timed the same way. Only GET/HEAD unless a step says `"allowWrite": true`.
+- The file may also set the throughput tests (`throughput`), the survey guide (`guide`) and the Continuous-mode roaming probe (`roaming`).
+
+Imported data stays in app-private storage and is excluded from backups. Corporate HTTPS certificates from a user/MDM-installed CA are trusted. Results go to `networkTests` and `scriptSteps` in `wiprober-performance.json`.

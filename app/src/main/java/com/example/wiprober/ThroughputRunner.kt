@@ -7,10 +7,18 @@ import javax.net.SocketFactory
 import kotlin.math.roundToLong
 
 /** Phases of one target, in the order they run. */
-enum class ThroughputPhase { LATENCY, DOWNLOAD, UPLOAD }
+enum class ThroughputPhase { LATENCY, DOWNLOAD, UPLOAD, NETWORK_TEST, SCRIPT_STEP }
 
-/** Outcome of a finished phase: ms for latency, Mbps otherwise; null if it failed or was skipped. */
-data class ThroughputPhaseResult(val target: String, val phase: ThroughputPhase, val value: Double?)
+/**
+ * Outcome of a finished phase: Mbps for transfers, ms otherwise; null if it failed or was
+ * skipped. [detail] names the network test or script step.
+ */
+data class ThroughputPhaseResult(
+    val target: String,
+    val phase: ThroughputPhase,
+    val value: Double?,
+    val detail: String? = null
+)
 
 /**
  * Reported when a phase starts. [phaseSeconds] is its planned duration (null for latency, which is
@@ -22,7 +30,8 @@ data class ThroughputProgress(
     val target: String,
     val phase: ThroughputPhase,
     val phaseSeconds: Int?,
-    val finished: List<ThroughputPhaseResult>
+    val finished: List<ThroughputPhaseResult>,
+    val detail: String? = null
 )
 
 /**
@@ -38,6 +47,8 @@ class ThroughputRunner(
     private val socketFactory: SocketFactory,
     private val connection: () -> WifiConnectionInfo?,
     private val device: DeviceInfo? = null,
+    private val networkTests: NetworkTestRunner? = null,
+    private val scriptRunner: ScriptRunner? = null,
     private val clock: MillisClock = SystemMillisClock
 ) {
     /** TCP handshake times in ms. */
@@ -54,15 +65,64 @@ class ThroughputRunner(
         val upload: (() -> Double)?
     )
 
-    fun measure(settings: ThroughputSettings, progress: (ThroughputProgress) -> Unit = {}): PointThroughput {
+    fun measure(
+        settings: ThroughputSettings,
+        tests: List<NetworkTest> = emptyList(),
+        scripts: List<HttpScript> = emptyList(),
+        progress: (ThroughputProgress) -> Unit = {}
+    ): PointThroughput {
         val config = settings.sanitized()
         val targets = buildList {
             if (config.iperfEnabled) add(iperfTarget(config))
             if (config.internetEnabled) add(internetTarget(config))
         }
-        val tracker = ProgressTracker(targets.size * ThroughputPhase.entries.size, progress)
-        val tests = targets.map { measureTarget(it, tracker) }
-        return PointThroughput(measuredAt = clock.now(), tests = tests)
+        val enabledTests = tests.filter { it.enabled }
+        val enabledScripts = scripts.filter { it.enabled }
+        val tracker = ProgressTracker(
+            targets.size * TARGET_PHASES + enabledTests.size + enabledScripts.sumOf { it.steps.size },
+            progress
+        )
+        val results = targets.map { measureTarget(it, tracker) }
+        val networkResults = enabledTests.map { test -> runNetworkTest(test, tracker) }
+        val scriptRuns = enabledScripts.map { script -> runScript(script, tracker) }
+        return PointThroughput(
+            measuredAt = clock.now(),
+            tests = results,
+            networkTests = networkResults,
+            scripts = scriptRuns
+        )
+    }
+
+    private fun runNetworkTest(test: NetworkTest, tracker: ProgressTracker): NetworkTestResult {
+        var result: NetworkTestResult? = null
+        tracker.run(test.name, ThroughputPhase.NETWORK_TEST, null, detail = test.type) {
+            val runner = networkTests
+            result = runner?.run(test) ?: NetworkTestResult(
+                name = test.name, type = test.type, target = null, method = null,
+                measuredAt = clock.now(), error = "network tests unavailable"
+            )
+            result?.takeIf { it.ok }?.let { it.dnsMs ?: it.rttAvgMs ?: it.totalMs }
+        }
+        return result!!
+    }
+
+    private fun runScript(script: HttpScript, tracker: ProgressTracker): ScriptRun {
+        val before = connection()
+        val base = ScriptRun(
+            name = script.name, measuredAt = clock.now(),
+            ssid = before?.ssid, bssidStart = before?.bssid, rssi = before?.rssi
+        )
+        val runner = scriptRunner
+        if (before == null || runner == null) {
+            tracker.skipSteps(script.name, script.steps.size)
+            return base.copy(error = if (before == null) NOT_ON_WIFI else "scripts unavailable")
+        }
+        val results = runner.run(
+            script,
+            onStep = { _, step -> tracker.startStep(script.name, step.name) },
+            onResult = { result -> tracker.finishStep(script.name, result) }
+        )
+        return base.copy(bssidEnd = connection()?.bssid, steps = results)
     }
 
     private fun iperfTarget(config: ThroughputSettings) = Target(
@@ -205,13 +265,35 @@ class ThroughputRunner(
         private var step = 0
         private val finished = mutableListOf<ThroughputPhaseResult>()
 
-        fun run(target: String, phase: ThroughputPhase, seconds: Int?, block: () -> Double?): Double? {
+        fun run(
+            target: String,
+            phase: ThroughputPhase,
+            seconds: Int?,
+            detail: String? = null,
+            block: () -> Double?
+        ): Double? {
             step++
-            listener(ThroughputProgress(step, totalSteps, target, phase, seconds, finished.toList()))
-            return block().also { finished += ThroughputPhaseResult(target, phase, it) }
+            listener(ThroughputProgress(step, totalSteps, target, phase, seconds, finished.toList(), detail))
+            return block().also { finished += ThroughputPhaseResult(target, phase, it, detail) }
         }
 
-        fun skip(target: String, vararg phases: ThroughputPhase = ThroughputPhase.entries.toTypedArray()) {
+        fun startStep(script: String, stepName: String) {
+            step++
+            listener(ThroughputProgress(step, totalSteps, script, ThroughputPhase.SCRIPT_STEP, null, finished.toList(), stepName))
+        }
+
+        fun finishStep(script: String, result: ScriptStepResult) {
+            finished += ThroughputPhaseResult(script, ThroughputPhase.SCRIPT_STEP, result.totalMs?.takeIf { result.ok }, result.name)
+        }
+
+        fun skipSteps(script: String, count: Int) {
+            repeat(count) {
+                step++
+                finished += ThroughputPhaseResult(script, ThroughputPhase.SCRIPT_STEP, null)
+            }
+        }
+
+        fun skip(target: String, vararg phases: ThroughputPhase = TARGET_PHASE_LIST) {
             phases.forEach { phase ->
                 step++
                 finished += ThroughputPhaseResult(target, phase, null)
@@ -221,6 +303,8 @@ class ThroughputRunner(
 
     companion object {
         const val NOT_ON_WIFI = "not connected to a Wi-Fi network"
+        private val TARGET_PHASE_LIST = arrayOf(ThroughputPhase.LATENCY, ThroughputPhase.DOWNLOAD, ThroughputPhase.UPLOAD)
+        private val TARGET_PHASES = TARGET_PHASE_LIST.size
         private const val LATENCY_SAMPLES = 10
         private const val CONNECT_TIMEOUT_MILLIS = 3_000
     }

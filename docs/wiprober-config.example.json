@@ -1,0 +1,48 @@
+{
+  "format": "wiprober-config",
+  "version": 1,
+
+  "throughput": {
+    "iperf": { "enabled": true, "label": "corporate", "host": "iperf.example.com", "port": 5201, "durationSeconds": 5 },
+    "internet": {
+      "enabled": true,
+      "downloadUrl": "https://speed.cloudflare.com/__down?bytes={bytes}",
+      "uploadUrl": "https://speed.cloudflare.com/__up",
+      "durationSeconds": 5
+    }
+  },
+
+  "guide": { "enabled": true, "spacingMeters": 10, "coverageRadiusMeters": 5, "ssid": "CORP-WIFI" },
+
+  "roaming": { "enabled": true, "host": "${gateway}", "port": 443, "intervalMs": 200 },
+
+  "tests": [
+    { "name": "gateway",  "type": "ping", "host": "${gateway}", "count": 10 },
+    { "name": "dns-app",  "type": "dns",  "host": "app.example.com" },
+    { "name": "app-db",   "type": "tcp",  "host": "10.0.0.5", "port": 1521 },
+    { "name": "app-web",  "type": "http", "url": "https://app.example.com/health", "expectStatus": 200 }
+  ],
+
+  "scripts": [
+    {
+      "name": "item-lookup",
+      "variables": { "user": "survey", "password": "change-me" },
+      "steps": [
+        {
+          "name": "login", "method": "POST", "allowWrite": true,
+          "url": "https://app.example.com/api/login",
+          "headers": { "Content-Type": "application/json" },
+          "body": "{\"user\":\"${user}\",\"password\":\"${password}\"}",
+          "expectStatus": 200,
+          "extract": { "token": "$.data.token" }
+        },
+        {
+          "name": "location",
+          "url": "https://app.example.com/api/locations/A-01",
+          "headers": { "Authorization": "Bearer ${token}" },
+          "expectContains": "A-01"
+        }
+      ]
+    }
+  ]
+}

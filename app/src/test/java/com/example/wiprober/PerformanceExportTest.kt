@@ -94,4 +94,40 @@ class PerformanceExportTest {
         assertEquals(listOf("Site.esx", PerformanceExport.FILE_NAME), entries.keys.toList())
         assertArrayEquals(esx.readBytes(), entries.getValue("Site.esx"))
     }
+
+    @Test
+    fun networkTestsAndScriptStepsGetTheirOwnArraysWithPosition() {
+        val point = ScanPoint(
+            1L, 7f, 9f, listOf(network),
+            throughput = PointThroughput(
+                1L, emptyList(),
+                networkTests = listOf(NetworkTestResult("gw", "ping", "10.0.0.1", "icmp", 1L, ok = true, rttAvgMs = 2.5)),
+                scripts = listOf(ScriptRun("flow", 1L, steps = listOf(
+                    ScriptStepResult("login", "POST", "app.example.com", "/login", status = 200, ok = true, totalMs = 80.0),
+                    ScriptStepResult("item", "GET", "app.example.com", "/items", error = "status 500")
+                )))
+            )
+        )
+        val report = EkahauReportBuilder().build(
+            "Site", listOf(EkahauFloorInput("G", MapInfo("g.png", 100, 80), 0.1, listOf(point), emptyList(), emptyList()))
+        )
+
+        val json = PerformanceExport.build(report, "Site.esx", 0L)
+
+        assertEquals(0, json.getAsJsonArray("measurements").size())
+        val test = json.getAsJsonArray("networkTests").single().asJsonObject
+        assertEquals("gw", test["name"].asString)
+        assertEquals(2.5, test["rttAvgMs"].asDouble, 0.0)
+        assertEquals(7.0, test["x"].asDouble, 0.0)
+        val steps = json.getAsJsonArray("scriptSteps").map { it.asJsonObject }
+        assertEquals(listOf(1, 2), steps.map { it["stepIndex"].asInt })
+        assertEquals("status 500", steps[1]["error"].asString)
+        assertTrue(steps[1]["status"].isJsonNull)
+        assertTrue(PerformanceExport.hasMeasurements(
+            ProjectExportSnapshot("p", "Site", null, listOf(
+                FloorExportSnapshot("f", "G", java.io.File("g.png"), "a", "b", false, null,
+                    ProjectSnapshot(MapInfo("g.png", 100, 80), 0.1, listOf(point), emptyList(), emptyList()))
+            ))
+        ))
+    }
 }
