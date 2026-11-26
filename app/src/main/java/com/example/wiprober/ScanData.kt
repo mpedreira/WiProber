@@ -1,6 +1,6 @@
 package com.example.wiprober
 
-enum class LastAction { SCAN, NOTE, SCAN_SESSION, SUGGESTION_SKIP, ACTIVE_RUN }
+enum class LastAction { SCAN, NOTE, SCAN_SESSION, SUGGESTION_SKIP, ACTIVE_RUN, PLANNED_POINTS }
 
 /** A survey-guide grid cell the user marked "do not measure" (any point inside it, floor pixels). */
 @JsonModel
@@ -20,6 +20,20 @@ data class ScanPoint(
     val pointId: String? = null,
     /** This passive scan. */
     val scanId: String? = null
+)
+
+/**
+ * A point planned from an imported template (or kept for measuring later): position in
+ * original floor-plan pixels, no measurement yet. Measuring it reuses [pointId].
+ */
+@JsonModel
+data class PlannedPoint(
+    val pointId: String,
+    val label: String,
+    val x: Float,
+    val y: Float,
+    /** Import batch, so Undo removes one template import at a time. */
+    val batch: String? = null
 )
 
 // Этот класс описывает информацию об одной Wi-Fi сети

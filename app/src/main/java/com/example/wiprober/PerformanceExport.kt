@@ -32,7 +32,7 @@ object PerformanceExport {
     }
 
     /** Where a run's point is: exact floor-plan pixels plus the survey of the run's scan in this ESX, if any. */
-    private class Position(val surveyId: String?, val floorPlanId: String, val floorName: String, val point: ScanPoint)
+    private class Position(val surveyId: String?, val floorPlanId: String, val floorName: String, val x: Float, val y: Float)
 
     fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot? = null): JsonObject {
         val rows = JsonArray()
@@ -44,10 +44,12 @@ object PerformanceExport {
         snapshot?.floors.orEmpty().forEach { floor ->
             val points = floor.survey.scanPoints
             floor.survey.activeRuns.forEach { run ->
-                // The run's own scan, else any scan of the same physical point (same coordinates).
+                // The run's own scan, else any scan of the same physical point (same coordinates),
+                // else the position saved with the run (imported or planned point).
                 val point = points.firstOrNull { it.scanId == run.scanId } ?: points.firstOrNull { it.pointId == run.pointId }
-                    ?: return@forEach
-                val position = Position(run.scanId?.let(surveyByScan::get), floor.esxFloorPlanId, floor.name, point)
+                val x = point?.x ?: run.x ?: floor.survey.plannedPoints.firstOrNull { it.pointId == run.pointId }?.x ?: return@forEach
+                val y = point?.y ?: run.y ?: floor.survey.plannedPoints.firstOrNull { it.pointId == run.pointId }?.y ?: return@forEach
+                val position = Position(run.scanId?.let(surveyByScan::get), floor.esxFloorPlanId, floor.name, x, y)
                 runRows.add(runRow(position, run))
                 val results = run.results ?: return@forEach
                 results.tests.forEach { test -> rows.add(row(position, run, test)) }
@@ -83,8 +85,8 @@ object PerformanceExport {
         GsonBuilder().serializeNulls().setPrettyPrinting().create().toJson(json)
             .toByteArray(StandardCharsets.UTF_8)
 
-    /** Writes the export bundle: the ESX archive untouched plus the performance file. */
-    fun writeBundle(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray) {
+    /** Writes the export bundle: the ESX archive untouched plus the performance file and the readable report. */
+    fun writeBundle(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray, reportHtml: ByteArray? = null) {
         ZipOutputStream(output).use { zip ->
             zip.putNextEntry(ZipEntry(esxFileName))
             esxArchive.inputStream().use { it.copyTo(zip) }
@@ -92,6 +94,11 @@ object PerformanceExport {
             zip.putNextEntry(ZipEntry(FILE_NAME))
             zip.write(performanceJson)
             zip.closeEntry()
+            reportHtml?.let {
+                zip.putNextEntry(ZipEntry(SurveyReport.FILE_NAME))
+                zip.write(it)
+                zip.closeEntry()
+            }
         }
     }
 
@@ -172,8 +179,8 @@ object PerformanceExport {
         addProperty("pointId", run.pointId)
         addProperty("scanId", run.scanId)
         addProperty("runId", run.runId)
-        addProperty("x", position.point.x.toDouble())
-        addProperty("y", position.point.y.toDouble())
+        addProperty("x", position.x.toDouble())
+        addProperty("y", position.y.toDouble())
         addProperty("measuredAt", isoUtc(measuredAt))
     }
 

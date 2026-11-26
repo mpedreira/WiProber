@@ -11,13 +11,16 @@ Status: **format 2** (one row per active run, with run and phase statuses). Form
 | No Stop-and-Go point has performance results and no Continuous track has a roaming log | `Project.esx`, exactly as the original app |
 | Otherwise | `Project.zip` |
 
-ZIP contents (always exactly these two entries, at the root):
+ZIP contents (always exactly these entries, at the root):
 
 ```
 Project.zip
 ├── Project.esx                  ← the same .esx a plain export produces; Ekahau opens it as usual
-└── wiprober-performance.json    ← the measurements (this document)
+├── wiprober-performance.json    ← the measurements (this document)
+└── wiprober-report.html         ← readable report per floor and SSID (section 8); not meant for parsing
 ```
+
+For an imported project whose only local additions are active runs or planned points, `Project.esx` is the imported archive copied byte for byte (runs and planned points never touch the ESX).
 
 Nothing from WiProber is written inside the `.esx`, and Ekahau's native `throughputSessions`/`pingSessions` fields are not filled (their schema is not public).
 
@@ -56,6 +59,8 @@ Every array is always present (empty when there is no data).
 ## 2b. Points, scans and runs (`activeRuns`)
 
 A **point** (`pointId`) is a physical position on a floor; each passive Wi-Fi **scan** at it has a `scanId` (one ESX survey), and each set of **active tests** is a **run** (`runId`). The point is saved as soon as the passive scan finishes; the run is recorded with every phase `pending` before anything is measured and is saved progressively, so finished phases survive a later failure, a cancel ("Cancel tests"), a rotation or a process death. Points and results saved by format-1 releases are migrated repeatably (ids derived from floor, time and position).
+
+**Measuring again at a point.** Tapping an existing point (local, imported from an ESX, or planned from a template) offers *Measure at this point* (new passive scan + tests, same `pointId`, exactly the same coordinates) or *Active tests only* (a run with `scanId: null`). Earlier scans and runs are kept; Undo removes only the latest local scan or run. Rows of a run without a scan of its own take the position of the point; `surveyId` is then `null` (or that of another scan of the same point). Join across exports by `pointId`/`runId`; within one ZIP, `surveyId` links to the ESX.
 
 | Field | Type | Description |
 |---|---|---|
@@ -319,6 +324,15 @@ Data your app can derive from the `.esx` with no WiProber change: APs on the sam
 - The **survey guide** (next suggested point, skipped cells, coverage gradient): app display only.
 - Scans without performance tests: only in the `.esx`.
 
+## 8. Readable report (`wiprober-report.html`)
+
+A self-contained HTML page (no scripts) for non-specialists, one section per floor and SSID:
+
+- **SSIDs reported:** the SSID chosen on the map (*Map SSID…*), then the SSIDs the phone was associated with during active tests; without either, the three most widely detected. Each SSID is judged on its own: a strong guest SSID never makes an operational SSID look covered.
+- **Point states:** *Good signal*; *Weak signal measured* (strongest AP of the SSID below −70 dBm in the latest valid scan); *SSID not detected in a valid scan* (the scan saw other networks); *No local measurement* (planned points, points imported from an ESX — their Ekahau data stays opaque — and scans that returned nothing). The signal is the strongest AP of the SSID in the passive scan, not necessarily the AP the phone was connected to during tests.
+- **Services:** private iPerf3 server, Internet and internal services (network tests, scripts) listed separately by alias, with measure, median and range, unit, method, samples and failures. By default the latest run at each point is used; the JSON keeps every run.
+- **AP changes and outages:** association changes during active tests and Continuous-track roaming events, with their bounds.
+
 ## 7. History
 
 | Release | Changes to this file |
@@ -327,4 +341,4 @@ Data your app can derive from the `.esx` with no WiProber change: APs on the sam
 | `v3.0.0-throughput.2` | Added `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latency from 10 samples |
 | `v3.0.0-throughput.3` | No export changes (survey guide in the app) |
 | `v3.0.0-throughput.4` | Added `networkTests` and `scriptSteps` (imported configuration) and `roamingSessions`/`roamingEvents` (Continuous-mode roaming) |
-| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; `scriptRuns` and `scriptAlias`; script paths from the definition; roaming schema 2 (typed attempt results, bounded outages, association-change types, monotonic time base, grounded approximate positions); measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |
+| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; `wiprober-report.html`; runs on imported/planned points (`scanId: null`, position of the point); `scriptRuns` and `scriptAlias`; script paths from the definition; roaming schema 2 (typed attempt results, bounded outages, association-change types, monotonic time base, grounded approximate positions); measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |

@@ -11,6 +11,14 @@
         android:title="@string/action_configuration"
         app:showAsAction="never" />
     <item
+        android:id="@+id/action_map_ssid"
+        android:title="@string/action_map_ssid"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_point_template"
+        android:title="@string/action_point_template"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_survey_guide"
         android:title="@string/action_survey_guide"
         app:showAsAction="never" />

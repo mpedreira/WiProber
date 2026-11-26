@@ -46,7 +46,10 @@ data class ActiveRun(
     val profile: String? = null,
     val phases: List<PhaseRecord> = emptyList(),
     /** Results finished so far. */
-    val results: PointThroughput? = null
+    val results: PointThroughput? = null,
+    /** Position of [pointId] in original floor-plan pixels, so runs on imported or planned points export too. */
+    val x: Float? = null,
+    val y: Float? = null
 ) {
     val isFinished: Boolean get() = status !in RunStatus.UNFINISHED
 

@@ -208,6 +208,10 @@ class SurveyActivity : AppCompatActivity() {
                     if (uri != null) importConfiguration(uri)
                 }
 
+                override fun onPointTemplateSelected(uri: Uri?) {
+                    if (uri != null) importPointTemplate(uri)
+                }
+
                 override fun onScanAccessReady() = startPendingScanAction()
 
                 override fun pendingScanAccess() = viewModel.pendingScanAccess()
@@ -247,9 +251,10 @@ class SurveyActivity : AppCompatActivity() {
                         state.notes != previous.notes ||
                         state.metersPerUnit != previous.metersPerUnit ||
                         state.skippedSuggestions != previous.skippedSuggestions ||
-                        state.activeRuns != previous.activeRuns
+                        state.activeRuns != previous.activeRuns ||
+                        state.plannedPoints != previous.plannedPoints
 
-                    binding.pointsOverlay.setScanPoints(state.scanPoints.map { Pair(it.x, it.y) })
+                    renderPointMarkers(state)
                     binding.pointsOverlay.setCompletedTracks(state.continuousScanSessions)
                     renderSurveyGuide(state)
                     renderActiveRun(state, previous)
@@ -327,6 +332,7 @@ class SurveyActivity : AppCompatActivity() {
                             LastAction.SCAN_SESSION -> R.string.last_track_undone
                             LastAction.SUGGESTION_SKIP -> R.string.last_skip_undone
                             LastAction.ACTIVE_RUN -> R.string.last_run_undone
+                            LastAction.PLANNED_POINTS -> R.string.last_template_undone
                         }
                         Toast.makeText(this@SurveyActivity, message, Toast.LENGTH_SHORT).show()
                         viewModel.consumeLastUndoneAction()
@@ -359,6 +365,25 @@ class SurveyActivity : AppCompatActivity() {
                 R.id.action_survey_guide -> {
                     SurveyGuideSettingsDialog.show(this, surveyGuideStore) {
                         renderSurveyGuide(viewModel.screenState.value)
+                    }
+                    true
+                }
+                R.id.action_point_template -> {
+                    androidCoordinator.openPointTemplateFile()
+                    true
+                }
+                R.id.action_map_ssid -> {
+                    val state = viewModel.screenState.value
+                    PointActionsDialogs.showSsidPicker(
+                        this,
+                        SsidCoverage.ssids(state.scanPoints, state.continuousScanSessions),
+                        surveyGuideStore.load().ssidFilter
+                    ) { ssid ->
+                        surveyGuideStore.save(surveyGuideStore.load().copy(ssidFilter = ssid))
+                        val current = viewModel.screenState.value
+                        renderSurveyGuide(current)
+                        renderPointMarkers(current)
+                        mapSsid(current)?.let { Toast.makeText(this, getString(R.string.map_ssid_selected, it), Toast.LENGTH_LONG).show() }
                     }
                     true
                 }
@@ -455,7 +480,10 @@ class SurveyActivity : AppCompatActivity() {
                             Toast.makeText(this, R.string.continuous_ready, Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        if (prepareForScan()) {
+                        val existing = existingPointAt(state, x, y, originalCoords)
+                        if (existing != null && state.interaction is SurveyInteraction.Idle) {
+                            showPointActions(state, existing, originalCoords[0], originalCoords[1])
+                        } else if (prepareForScan()) {
                             // A tap on the suggestion measures exactly at the suggested point.
                             val target = suggestionAt(x, y)
                             lastTouchX = target?.x ?: originalCoords[0]
@@ -618,6 +646,85 @@ class SurveyActivity : AppCompatActivity() {
             .show()
     }
 
+    /** SSID the map shows: the chosen one, else the most widely detected on this floor. */
+    private fun mapSsid(state: SurveyScreenState): String? =
+        SsidCoverage.selected(surveyGuideStore.load().ssidFilter, state.scanPoints, state.continuousScanSessions)
+
+    /** Points coloured by their state for the map SSID; planned points as hollow rings. */
+    private fun renderPointMarkers(state: SurveyScreenState) {
+        val ssid = mapSsid(state)
+        binding.pointsOverlay.setScanPoints(emptyList())
+        binding.pointsOverlay.setPointMarkers(
+            if (ssid == null) {
+                state.scanPoints.map { PointsOverlayView.PointMarker(it.x, it.y, null) } +
+                    state.plannedPoints.map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED) }
+            } else {
+                SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid).map { PointsOverlayView.PointMarker(it.x, it.y, it.state) } +
+                    state.scanPoints.filter { it.pointId == null }.map { PointsOverlayView.PointMarker(it.x, it.y, null) }
+            }
+        )
+    }
+
+    /** The existing point under a tap (touch radius in screen pixels converted to plan pixels). */
+    private fun existingPointAt(state: SurveyScreenState, viewX: Float, viewY: Float, original: FloatArray): String? {
+        val edge = getOriginalImageCoordinates(binding.mapImageView, viewX + POINT_TOUCH_RADIUS_DP * resources.displayMetrics.density, viewY)
+        val radius = edge?.let { kotlin.math.abs(it[0] - original[0]) } ?: return null
+        return SsidCoverage.pointAt(state.scanPoints, state.plannedPoints, original[0], original[1], radius)
+    }
+
+    private fun showPointActions(state: SurveyScreenState, pointId: String, tapX: Float, tapY: Float) {
+        val label = SsidCoverage.labels(state.scanPoints, state.plannedPoints)[pointId] ?: pointId
+        val settings = throughputSettingsStore.load()
+        val imported = configStore.load()
+        PointActionsDialogs.showPointActions(
+            this, label,
+            canRunActiveTests = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isNotEmpty(),
+            onMeasure = {
+                if (prepareForScan() && viewModel.requestMeasureAtPoint(pointId)) androidCoordinator.ensureWifiScanAccess()
+            },
+            onActiveOnly = { startActiveTests(pointId, scanId = null, scanResults = emptyList()) },
+            onNewPoint = {
+                if (prepareForScan()) {
+                    lastTouchX = tapX
+                    lastTouchY = tapY
+                    if (viewModel.requestStopAndGoScan(tapX, tapY)) androidCoordinator.ensureWifiScanAccess()
+                }
+            }
+        )
+    }
+
+    private fun importPointTemplate(uri: Uri) {
+        val state = viewModel.screenState.value
+        val map = state.mapInfo ?: return
+        val floorKey = currentFloorId ?: return
+        lifecycleScope.launch {
+            val parsed = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = requireNotNull(contentResolver.openInputStream(uri)) { "Cannot open the file" }.use { input ->
+                        String(BoundedIo.readBytes(input, 0L, WiproberConfigStore.MAX_FILE_BYTES, "File larger than 2 MB"), Charsets.UTF_8)
+                    }
+                    PointTemplateParser.parse(
+                        text, map.width, map.height, floorKey, java.util.UUID.randomUUID().toString(),
+                        existing = state.plannedPoints.map(PlannedPoint::pointId).toSet()
+                    )
+                }
+            }
+            parsed.onSuccess { preview ->
+                PointActionsDialogs.showTemplatePreview(this@SurveyActivity, preview) {
+                    if (!viewModel.addPlannedPoints(preview.points)) {
+                        Toast.makeText(this@SurveyActivity, R.string.template_nothing_added, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }.onFailure { error ->
+                MaterialAlertDialogBuilder(this@SurveyActivity)
+                    .setTitle(R.string.template_import_failed)
+                    .setMessage(error.message ?: error.javaClass.simpleName)
+                    .setPositiveButton(R.string.action_ok, null)
+                    .show()
+            }
+        }
+    }
+
     /** Stop-and-Go on a calibrated floor with the guide enabled. */
     private fun guideActive(state: SurveyScreenState): Boolean =
         state.hasMap && state.scanMode == SurveyScanMode.STOP_AND_GO &&
@@ -631,7 +738,8 @@ class SurveyActivity : AppCompatActivity() {
         val showGuide = settings.enabled && map != null && scale != null
         binding.pointsOverlay.setCoverage(
             samples = if (showGuide) {
-                SurveyGuide.coverageSamples(state.scanPoints, state.continuousScanSessions, settings.ssidFilter)
+                // One SSID at a time: another SSID's signal never fills this one's gaps.
+                mapSsid(state)?.let { SurveyGuide.coverageSamples(state.scanPoints, state.continuousScanSessions, it) }.orEmpty()
             } else {
                 emptyList()
             },
@@ -776,7 +884,8 @@ class SurveyActivity : AppCompatActivity() {
                     EsxExportService(applicationContext).export(
                         destination,
                         projectSnapshot,
-                        bundleEsxName = if (bundle) "${exportFileTitle()}.esx" else null
+                        bundleEsxName = if (bundle) "${exportFileTitle()}.esx" else null,
+                        reportSsid = surveyGuideStore.load().ssidFilter
                     )
                     projectSnapshot.surveySummary()
                 }
@@ -1549,7 +1658,10 @@ class SurveyActivity : AppCompatActivity() {
             scanPoints = floor.scanPoints,
             continuousSessions = floor.continuousScanSessions,
             notes = floor.notes,
-            skippedSuggestions = floor.skippedSuggestions
+            skippedSuggestions = floor.skippedSuggestions,
+            // Without these a reopened floor lost its runs (and planned points) on the next save.
+            activeRuns = floor.activeRuns,
+            plannedPoints = floor.plannedPoints
         )
         binding.mapImageView.post(::syncOverlayTransform)
     }
@@ -1628,6 +1740,7 @@ class SurveyActivity : AppCompatActivity() {
     //</editor-fold>
 
     companion object {
+        private const val POINT_TOUCH_RADIUS_DP = 20f
         private const val NOTE_PREVIEW_MAX_SIZE_PX = 1_024
         const val EXTRA_PROJECT_ID = "project_id"
         private const val SAVE_DEBOUNCE_MILLIS = 750L

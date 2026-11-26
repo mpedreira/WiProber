@@ -45,6 +45,10 @@ internal class SurveyAndroidCoordinator(
         ActivityResultContracts.OpenDocument()
     ) { callbacks.onConfigFileSelected(it) }
 
+    private val openPointTemplateLauncher = activity.registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { callbacks.onPointTemplateSelected(it) }
+
     /** ESX + performance file; a separate launcher so the format survives Activity recreation. */
     private val saveBundleLauncher = activity.registerForActivityResult(
         ActivityResultContracts.CreateDocument(ZIP_MIME_TYPE)
@@ -98,6 +102,9 @@ internal class SurveyAndroidCoordinator(
 
     /** wiprober-config.json or a browser .har (both JSON; some file managers report neither type). */
     fun openConfigFile() = openConfigLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
+
+    /** wiprober-points JSON or CSV point list. */
+    fun openPointTemplateFile() = openPointTemplateLauncher.launch(arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "*/*"))
 
     fun ensureWifiScanAccess() {
         if (callbacks.pendingScanAccess()?.step != ScanAccessStep.CHECKING) return
@@ -238,6 +245,7 @@ internal class SurveyAndroidCoordinator(
         fun onFloorMapSelected(uri: Uri?)
         fun onExportDestinationSelected(uri: Uri?, bundle: Boolean)
         fun onConfigFileSelected(uri: Uri?)
+        fun onPointTemplateSelected(uri: Uri?)
         fun pendingScanAccess(): SurveyInteraction.AwaitingScanAccess?
         fun transitionScanAccess(expected: ScanAccessStep, next: ScanAccessStep): Boolean
         fun onScanAccessReady()

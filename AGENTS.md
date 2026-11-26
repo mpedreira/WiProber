@@ -47,7 +47,11 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `ThroughputRunner.kt`: runs the configured targets after a Stop-and-Go scan; null + `error` for anything not measured, never 0.
 - `ThroughputProbe.kt`: Android boundary; binds every connection to the Wi-Fi `Network` and reads the associated AP.
 - `ThroughputSettingsDialog.kt`: SharedPreferences store and settings dialog. Server names/URLs live on the device, never in the code.
-- `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file). It is never written inside the ESX.
+- `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file + `wiprober-report.html`). It is never written inside the ESX.
+- `SsidCoverage.kt`: Android-free per-SSID point states (ok, weak, SSID not detected in a valid scan, no local measurement), point labels and tap hit-testing.
+- `SurveyReport.kt`: readable per-floor/per-SSID report model and its self-contained HTML.
+- `PointTemplate.kt`: parser of point templates (`wiprober-points` JSON or CSV) with plan-size scaling and repeatable ids.
+- `PointActionsDialogs.kt`: point actions (measure again / active tests only / new point), template preview and map-SSID picker dialogs.
 - `SurveyGuide.kt`: Android-free survey guide: grid next-point suggestion (needs a calibrated scale), coverage samples (Continuous scans placed along the route by time) and the RSSI colour gradient.
 - `SurveyGuideSettingsDialog.kt`: device-side guide settings (spacing, coverage radius, SSID filter) and their dialog. Skipped guide cells are persisted with the floor (`skippedSuggestions`), never exported.
 - `WiproberConfig.kt`: parser of the imported `wiprober-config.json` (throughput, guide, roaming, network tests, HTTP scripts) and of browser HAR recordings; validates names, URLs, write methods (`allowWrite`) and extract paths; strips HAR credentials and moves literal credentials out of definitions (`CredentialSplitter`).
@@ -85,7 +89,9 @@ When changing ESX handling, add fixture-based tests that validate JSON relations
 ## Throughput export
 
 - Projects with throughput results export a ZIP holding the ESX exactly as a plain export would produce it plus `wiprober-performance.json`. Never add WiProber files inside the ESX and never fill `throughputSessions`/`pingSessions` without a real Ekahau reference fixture.
-- Rows join the ESX of the same ZIP by `surveyId` and across exports by `floorPlanId` + `x`/`y` (original floor-plan pixels, identical to the survey route point). Local survey IDs are regenerated on every export.
+- Rows join the ESX of the same ZIP by `surveyId` and across exports by `pointId`/`runId` (and `floorPlanId` + `x`/`y`, original floor-plan pixels, identical to the survey route point). Local survey IDs are regenerated on every export.
+- Active runs and planned points never change the ESX: an imported project with only those additions exports its source archive byte for byte.
+- Judge each SSID on its own in maps and reports; never let another SSID's signal fill gaps of the selected one.
 
 ## Network tests and imported configuration
 

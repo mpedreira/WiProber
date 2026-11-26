@@ -233,6 +233,21 @@
     <string name="throughput_progress_running">Running…</string>
     <string name="throughput_cancel_tests">Cancel tests</string>
     <string name="throughput_cancelling">Cancelling… finished phases are kept</string>
+    <string name="last_template_undone">Last imported point template removed</string>
+    <string name="action_map_ssid">Map SSID…</string>
+    <string name="action_point_template">Import point template…</string>
+    <string name="map_ssid_title">SSID shown on the map and first in the report</string>
+    <string name="map_ssid_automatic">Automatic (most widely detected)</string>
+    <string name="map_ssid_selected">Map: %1$s. Green = good signal, orange = weak signal measured, red with a cross = SSID not detected in a valid scan, hollow = no local measurement. Signal is the strongest AP of this SSID in the scan (not necessarily the connected AP); circles are an approximate influence area.</string>
+    <string name="point_actions_title">Point %1$s</string>
+    <string name="point_measure_here">Measure at this point (scan + tests)</string>
+    <string name="point_active_only">Active tests only at this point</string>
+    <string name="point_new_here">New point here</string>
+    <string name="template_preview_title">Import point template</string>
+    <string name="template_preview_message">%1$d points to add.\nTemplate plan: %2$d×%3$d px, scaled ×%4$s to this plan.\nOutside the plan (ignored): %5$d. Already on this floor (ignored): %6$d.\n\n%7$s</string>
+    <string name="template_add">Add points</string>
+    <string name="template_nothing_added">No new points to add</string>
+    <string name="template_import_failed">Cannot import the point template</string>
     <string name="last_run_undone">Last test run removed (the point is kept)</string>
     <string name="run_summary_completed">Tests finished</string>
     <string name="run_summary_cancelled">Tests cancelled; finished phases kept</string>

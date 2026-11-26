@@ -20,7 +20,8 @@ class EsxExportService(
     private val appContext = context.applicationContext
     private val contentResolver = appContext.contentResolver
 
-    fun export(destinationUri: Uri, snapshot: ProjectExportSnapshot, bundleEsxName: String? = null) {
+    /** [reportSsid]: SSID chosen on the map, reported first (empty = automatic). */
+    fun export(destinationUri: Uri, snapshot: ProjectExportSnapshot, bundleEsxName: String? = null, reportSsid: String = "") {
         val exportDirectory = File(appContext.cacheDir, "esx-export-${System.nanoTime()}")
         val completeArchive = File(appContext.cacheDir, "${exportDirectory.name}.esx")
         require(exportDirectory.mkdirs()) { "Cannot create the ESX export workspace" }
@@ -56,12 +57,14 @@ class EsxExportService(
                 "Cannot open the selected export destination"
             }.use { output ->
                 if (bundleEsxName != null) {
-                    val performance = PerformanceExport.build(report, bundleEsxName, System.currentTimeMillis(), snapshot)
+                    val now = System.currentTimeMillis()
+                    val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot)
                     PerformanceExport.writeBundle(
                         output,
                         bundleEsxName,
                         completeArchive,
-                        PerformanceExport.toBytes(performance)
+                        PerformanceExport.toBytes(performance),
+                        SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid)).toByteArray(Charsets.UTF_8)
                     )
                     return@use
                 }
@@ -157,20 +160,6 @@ class EsxExportService(
             }
         )
 
-    private fun hasSourceOverlayChanges(snapshot: ProjectExportSnapshot): Boolean =
-        snapshot.floors.any { floor ->
-            !floor.importedFromSource ||
-                !sameScale(floor.sourceMetersPerUnit, FloorScalePolicy.forExport(floor.survey.metersPerUnit)) ||
-                floor.survey.scanPoints.any { !it.importedFromEsx } ||
-                floor.survey.continuousScanSessions.any { !it.importedFromEsx } ||
-                floor.survey.notes.any { !it.importedFromEsx }
-        }
-
-    private fun sameScale(first: Double?, second: Double?): Boolean {
-        if (first == null || second == null) return first == second
-        return kotlin.math.abs(first - second) <= SCALE_EPSILON
-    }
-
     private fun validateSourceInventory(
         sourceArchive: File,
         expected: EsxSourceCompatibility?
@@ -227,8 +216,27 @@ class EsxExportService(
             }
     }
 
-    private companion object {
+    internal companion object {
         private const val SCALE_EPSILON = 1e-12
+
+        /**
+         * Whether the imported archive needs a local overlay. Active runs and planned points never do:
+         * their data goes to wiprober-performance.json, so the source ESX is copied byte for byte.
+         */
+        internal fun hasSourceOverlayChanges(snapshot: ProjectExportSnapshot): Boolean =
+            snapshot.floors.any { floor ->
+                !floor.importedFromSource ||
+                    !sameScale(floor.sourceMetersPerUnit, FloorScalePolicy.forExport(floor.survey.metersPerUnit)) ||
+                    floor.survey.scanPoints.any { !it.importedFromEsx } ||
+                    floor.survey.continuousScanSessions.any { !it.importedFromEsx } ||
+                    floor.survey.notes.any { !it.importedFromEsx }
+            }
+
+        private fun sameScale(first: Double?, second: Double?): Boolean {
+            if (first == null || second == null) return first == second
+            return kotlin.math.abs(first - second) <= SCALE_EPSILON
+        }
+
         val STATIC_PAYLOADS = listOf(
             "projectConfiguration.json",
             "requirements.json",

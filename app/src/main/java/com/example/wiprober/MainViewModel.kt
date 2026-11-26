@@ -73,7 +73,8 @@ class MainViewModel @JvmOverloads constructor(
         continuousSessions: List<ContinuousScanSession>,
         notes: List<AppNote>,
         skippedSuggestions: List<SkippedSuggestion> = emptyList(),
-        activeRuns: List<ActiveRun> = emptyList()
+        activeRuns: List<ActiveRun> = emptyList(),
+        plannedPoints: List<PlannedPoint> = emptyList()
     ) {
         activeRunJob?.cancel()
         activeRunJob = null
@@ -89,6 +90,7 @@ class MainViewModel @JvmOverloads constructor(
             skippedSuggestions = skippedSuggestions.map { SurveyCoordinate(it.x, it.y) },
             // Nothing runs right after a load: anything unfinished was interrupted.
             activeRuns = SurveyIds.reconcile(activeRuns, clock.now()),
+            plannedPoints = plannedPoints.toList(),
             scanMode = selectedScanMode,
             actionHistory = buildList {
                 repeat(scanPoints.count { !it.importedFromEsx }) { add(LastAction.SCAN) }
@@ -185,6 +187,33 @@ class MainViewModel @JvmOverloads constructor(
         return true
     }
 
+    /**
+     * "Measure at this point": a new passive scan (then the active tests) at the exact position of
+     * an existing local, imported or planned point, reusing its pointId. Earlier scans and runs
+     * of the point are kept.
+     */
+    fun requestMeasureAtPoint(pointId: String): Boolean {
+        val state = _screenState.value
+        if (!state.hasMap || state.scanMode != SurveyScanMode.STOP_AND_GO || state.interaction !is SurveyInteraction.Idle) return false
+        val position = state.pointPosition(pointId) ?: return false
+        setInteraction(SurveyInteraction.AwaitingScanAccess(PendingScanRequest.StopAndGo(position, pointId)))
+        return true
+    }
+
+    /** Adds the points of one template import (Undo removes them as a batch). */
+    fun addPlannedPoints(points: List<PlannedPoint>): Boolean {
+        val state = _screenState.value
+        if (!state.hasMap || state.interaction !is SurveyInteraction.Idle || points.isEmpty()) return false
+        val known = state.plannedPoints.map(PlannedPoint::pointId).toSet()
+        val added = points.filter { it.pointId !in known }
+        if (added.isEmpty()) return false
+        _screenState.value = state.copy(
+            plannedPoints = state.plannedPoints + added,
+            actionHistory = state.actionHistory + LastAction.PLANNED_POINTS
+        )
+        return true
+    }
+
     fun requestContinuousStart(x: Float, y: Float): Boolean {
         val state = _screenState.value
         if (state.scanMode != SurveyScanMode.CONTINUOUS ||
@@ -214,7 +243,7 @@ class MainViewModel @JvmOverloads constructor(
         val request = pendingScanRequest() ?: return null
         return when (request) {
             is PendingScanRequest.StopAndGo -> {
-                setInteraction(SurveyInteraction.StopAndGoScanning(request.coordinate))
+                setInteraction(SurveyInteraction.StopAndGoScanning(request.coordinate, request.pointId))
                 StartedScanAction.StopAndGo(request.coordinate)
             }
             is PendingScanRequest.ContinuousStart -> {
@@ -248,7 +277,7 @@ class MainViewModel @JvmOverloads constructor(
             x = scan.coordinate.x,
             y = scan.coordinate.y,
             wifiNetworks = wifiNetworks.toList(),
-            pointId = pointId ?: idSource.newId(),
+            pointId = pointId ?: scan.pointId ?: idSource.newId(),
             scanId = idSource.newId()
         )
         recentScanTimestamps.addLast(timestamp)
@@ -398,6 +427,13 @@ class MainViewModel @JvmOverloads constructor(
                 actionHistory = state.actionHistory.dropLast(1),
                 lastUndoneAction = action
             )
+            LastAction.PLANNED_POINTS -> state.copy(
+                plannedPoints = state.plannedPoints.lastOrNull()?.batch.let { batch ->
+                    if (batch == null) state.plannedPoints.dropLast(1) else state.plannedPoints.filterNot { it.batch == batch }
+                },
+                actionHistory = state.actionHistory.dropLast(1),
+                lastUndoneAction = action
+            )
         }
         return action
     }
@@ -459,7 +495,8 @@ class MainViewModel @JvmOverloads constructor(
             continuousScanSessions = state.continuousScanSessions.map { it.immutableCopy() },
             notes = state.notes.toList(),
             skippedSuggestions = state.skippedSuggestions.map { SkippedSuggestion(it.x, it.y) },
-            activeRuns = state.activeRuns.toList()
+            activeRuns = state.activeRuns.toList(),
+            plannedPoints = state.plannedPoints.toList()
         )
     }
 
@@ -478,11 +515,12 @@ class MainViewModel @JvmOverloads constructor(
     ): String? {
         val state = _screenState.value
         if (state.interaction !is SurveyInteraction.Idle || phases.isEmpty()) return null
-        if (state.scanPoints.none { it.pointId == pointId }) return null
+        val position = state.pointPosition(pointId) ?: return null
         val runId = idSource.newId()
         val run = ActiveRun(
             runId = runId, pointId = pointId, scanId = scanId, startedAt = clock.now(),
-            status = RunStatus.RUNNING, profile = profile, phases = phases
+            status = RunStatus.RUNNING, profile = profile, phases = phases,
+            x = position.x, y = position.y
         )
         _screenState.value = state.copy(
             activeRuns = state.activeRuns + run,
@@ -534,7 +572,7 @@ class MainViewModel @JvmOverloads constructor(
     private fun updateRun(runId: String, change: (SurveyScreenState, ActiveRun) -> SurveyScreenState) {
         _screenState.update { state ->
             val run = state.activeRuns.firstOrNull { it.runId == runId }
-            val point = run?.let { r -> state.scanPoints.firstOrNull { it.pointId == r.pointId } }
+            val point = run?.let { r -> state.pointPosition(r.pointId) }
             if (run == null || point == null || run.isFinished) state else change(state, run)
         }
     }

@@ -23,7 +23,8 @@ enum class ProjectOperation {
 sealed interface PendingScanRequest {
     val coordinate: SurveyCoordinate
 
-    data class StopAndGo(override val coordinate: SurveyCoordinate) : PendingScanRequest
+    /** [pointId]: measure again at an existing (local, imported or planned) point; null = new point. */
+    data class StopAndGo(override val coordinate: SurveyCoordinate, val pointId: String? = null) : PendingScanRequest
     data class ContinuousStart(override val coordinate: SurveyCoordinate) : PendingScanRequest
 }
 
@@ -36,7 +37,7 @@ sealed interface SurveyInteraction {
         val request: PendingScanRequest,
         val step: ScanAccessStep = ScanAccessStep.CHECKING
     ) : SurveyInteraction
-    data class StopAndGoScanning(val coordinate: SurveyCoordinate) : SurveyInteraction
+    data class StopAndGoScanning(val coordinate: SurveyCoordinate, val pointId: String? = null) : SurveyInteraction
     data class ContinuousTracking(
         val startedAt: Long,
         val waypoints: List<SurveyCoordinate>,
@@ -65,6 +66,8 @@ data class SurveyScreenState(
     val movedSuggestion: SurveyCoordinate? = null,
     /** Active test runs of this floor, saved progressively. */
     val activeRuns: List<ActiveRun> = emptyList(),
+    /** Template points not measured yet. */
+    val plannedPoints: List<PlannedPoint> = emptyList(),
     /** Phase currently running in the active run, for the progress dialog. */
     val activeRunProgress: ThroughputProgress? = null,
     val scanMode: SurveyScanMode = SurveyScanMode.STOP_AND_GO,
@@ -72,6 +75,11 @@ data class SurveyScreenState(
     val lastUndoneAction: LastAction? = null
 ) {
     val hasMap: Boolean get() = mapInfo != null
+
+    /** Exact position of a physical point: any scan with that pointId (local or imported), else a planned point. */
+    fun pointPosition(pointId: String): SurveyCoordinate? =
+        scanPoints.firstOrNull { it.pointId == pointId }?.let { SurveyCoordinate(it.x, it.y) }
+            ?: plannedPoints.firstOrNull { it.pointId == pointId }?.let { SurveyCoordinate(it.x, it.y) }
     val isTracking: Boolean get() = interaction is SurveyInteraction.ContinuousTracking
     val isBusy: Boolean get() = interaction !is SurveyInteraction.Idle
     val activeTrackPoints: List<SurveyCoordinate>

@@ -171,6 +171,22 @@ class PointsOverlayView @JvmOverloads constructor(
 
     // ================== DATA SETTERS ==================
 
+    /** Point marker coloured by its [PointState] for the selected SSID; null state = no SSID selected. */
+    data class PointMarker(val x: Float, val y: Float, val state: String?)
+
+    private val pointMarkers = mutableListOf<PointMarker>()
+    private val okPaint = Paint().apply { color = Color.rgb(27, 110, 32); style = Paint.Style.FILL; isAntiAlias = true }
+    private val weakPaint = Paint().apply { color = Color.rgb(230, 126, 0); style = Paint.Style.FILL; isAntiAlias = true }
+    private val unmeasuredPaint = Paint().apply {
+        color = Color.DKGRAY; style = Paint.Style.STROKE; strokeWidth = 5f; isAntiAlias = true
+    }
+
+    fun setPointMarkers(markers: List<PointMarker>) {
+        pointMarkers.clear()
+        pointMarkers.addAll(markers)
+        invalidate()
+    }
+
     fun setScanPoints(points: List<Pair<Float, Float>>) {
         pointsToDraw.clear()
         pointsToDraw.addAll(points)
@@ -216,6 +232,7 @@ class PointsOverlayView @JvmOverloads constructor(
         coverageKey = null
         suggestion = null
         pointsToDraw.clear()
+        pointMarkers.clear()
         noteMarkers.clear()
         calibrationLinePoints.clear()
         activeTrackPoints.clear()
@@ -255,6 +272,34 @@ class PointsOverlayView @JvmOverloads constructor(
             val t = transformPoint(point.first, point.second, currentMatrix)
             canvas.drawCircle(t[0], t[1], radius, strokePaint)
             canvas.drawCircle(t[0], t[1], radius, pointPaint)
+        }
+        // 3b. Points by state for the selected SSID: filled green (ok), orange (weak), red with a
+        // cross (SSID not detected), hollow ring (no local measurement: planned or imported).
+        for (marker in pointMarkers) {
+            val t = transformPoint(marker.x, marker.y, currentMatrix)
+            when (marker.state) {
+                PointState.NOT_MEASURED -> {
+                    canvas.drawCircle(t[0], t[1], radius, strokePaint)
+                    canvas.drawCircle(t[0], t[1], radius, unmeasuredPaint)
+                }
+                PointState.SSID_NOT_DETECTED -> {
+                    canvas.drawCircle(t[0], t[1], radius, strokePaint)
+                    canvas.drawCircle(t[0], t[1], radius, pointPaint)
+                    canvas.drawLine(t[0] - radius / 2, t[1] - radius / 2, t[0] + radius / 2, t[1] + radius / 2, strokePaint)
+                    canvas.drawLine(t[0] - radius / 2, t[1] + radius / 2, t[0] + radius / 2, t[1] - radius / 2, strokePaint)
+                }
+                else -> {
+                    canvas.drawCircle(t[0], t[1], radius, strokePaint)
+                    canvas.drawCircle(
+                        t[0], t[1], radius,
+                        when (marker.state) {
+                            PointState.OK -> okPaint
+                            PointState.WEAK -> weakPaint
+                            else -> pointPaint
+                        }
+                    )
+                }
+            }
         }
 
         // 4. Рисуем маркеры заметок (Синие)
