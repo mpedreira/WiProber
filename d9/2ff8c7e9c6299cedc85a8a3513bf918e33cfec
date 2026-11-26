@@ -1,0 +1,27 @@
+README.md
+  s_162f368a1e379c::t_e4391000aaee31 9,74,81
+app/src/main/res/values/strings.xml
+  s_162f368a1e379c::t_d269e6c7694674 203
+docs/privacy-policy.md
+  s_162f368a1e379c::t_4c89cb00de12df 3,11
+docs/wiprober-performance.md
+  s_162f368a1e379c::t_825f413dc6122c 3
+fastlane/metadata/android/en-US/full_description.txt
+  s_162f368a1e379c::t_7efce59740d97f 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d92ff8c7e9c6299cedc85a8a3513bf918e33cfec",
+  "prompts": {},
+  "sessions": {
+    "s_162f368a1e379c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7f44c00-a64c-44bc-8421-7f4be6c34441",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel Pedreira Antón <manuelpa@inditex.com>"
+    }
+  }
+}
