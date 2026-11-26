@@ -3,10 +3,8 @@ package com.example.wiprober
 import android.content.Context
 import android.net.wifi.ScanResult
 import android.os.Build
-import android.os.SystemClock
 import java.net.ConnectException
 import java.net.InetSocketAddress
-import java.net.UnknownHostException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -85,68 +83,66 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
     }
 
     /**
-     * Continuous-mode roaming probe: every [RoamingSettings.intervalMillis] reads the associated AP
-     * of the selected Wi-Fi network and tries a TCP connect to the target over it (a refused
-     * connection still proves connectivity). [onSample] runs on the main thread with the
-     * wall-clock time of the probe.
+     * Continuous-mode roaming probe. Every [RoamingSettings.intervalMillis] (best effort: an
+     * attempt can take up to the connect timeout) it reads the association of the selected Wi-Fi
+     * network and tries a TCP connect to the target over it, recording monotonic start/end and a
+     * typed result. The target is resolved again when the network, or the gateway/DNS a
+     * placeholder uses, changes. [onAttempt] runs on the main thread.
      */
     fun launchRoamingProbe(
         scope: CoroutineScope,
         settings: RoamingSettings,
-        isScanning: () -> Boolean,
-        onSample: (atMillis: Long, bssid: String?, rssi: Int?, ok: Boolean, rttMs: Double?, scanning: Boolean) -> Unit
+        onAttempt: (startMono: Long, endMono: Long, result: String, association: Association?) -> Unit
     ): Job = scope.launch(Dispatchers.IO) {
         val config = settings.sanitized()
         var network: AndroidMeasurementNetwork? = null
+        var resolvedKey: String? = null
         var address: InetAddress? = null
         try {
             while (isActive) {
-                val wall = System.currentTimeMillis()
-                val started = SystemClock.elapsedRealtime()
+                val start = MonotonicMillisClock.now()
                 if (network?.isAvailable() != true) {
                     network?.close()
                     network = wifiNetworks.select()
-                    address = null
                 }
                 val net = network
-                val info = net?.association()?.takeIf { it.known }
-                var ok = false
-                var rtt: Double? = null
-                if (net != null) {
-                    try {
-                        val target = address ?: AddressPolicy.candidates(net.resolve(roamingHost(config.host, net))).first()
-                            .also { address = it }
-                        val start = System.nanoTime()
-                        try {
-                            net.socketFactory.createSocket().use {
-                                it.connect(InetSocketAddress(target, config.port), ROAMING_CONNECT_TIMEOUT_MILLIS)
-                            }
-                            ok = true
-                        } catch (e: ConnectException) {
-                            ok = "refused" in e.message.orEmpty().lowercase()
+                var association: Association? = null
+                val result = if (net == null) {
+                    ProbeResult.NO_WIFI
+                } else {
+                    association = net.association()
+                    val host = expandRoamingTarget(config.host, net)
+                    if (host == null) {
+                        ProbeResult.INVALID_TARGET
+                    } else {
+                        // Resolve again when the network or the expanded host (gateway/DNS) changed.
+                        val key = "${net.id}|$host"
+                        if (key != resolvedKey) {
+                            address = runCatching { AddressPolicy.candidates(net.resolve(host)).firstOrNull() }.getOrNull()
+                            resolvedKey = key.takeIf { address != null }
                         }
-                        if (ok) rtt = round1((System.nanoTime() - start) / 1_000_000.0)
-                    } catch (e: Exception) {
-                        if (e is UnknownHostException || e is MeasurementException) address = null
+                        val target = address
+                        if (target == null) ProbeResult.RESOLUTION_FAILED else connectOnce(net, target, config.port)
                     }
                 }
-                val scanning = isScanning()
-                withContext(Dispatchers.Main) { onSample(wall, info?.bssid, info?.rssi, ok, rtt, scanning) }
-                delay((config.intervalMillis - (SystemClock.elapsedRealtime() - started)).coerceAtLeast(0L))
+                val end = MonotonicMillisClock.now()
+                withContext(Dispatchers.Main) { onAttempt(start, end, result, association) }
+                delay((config.intervalMillis - (MonotonicMillisClock.now() - start)).coerceAtLeast(0L))
             }
         } finally {
             network?.close()
         }
     }
 
-    /** Placeholders are only evaluated when the configured host contains them. */
-    private fun roamingHost(template: String, network: MeasurementNetwork): String {
-        if ("\${" !in template) return template
-        val link = network.link()
-        var host = template
-        if ("\${gateway}" in host) host = host.replace("\${gateway}", link.gateway ?: throw UnknownHostException("no default gateway"))
-        if ("\${dns}" in host) host = host.replace("\${dns}", link.dnsServers.firstOrNull()?.hostAddress ?: throw UnknownHostException("no DNS server"))
-        return host
+    private fun connectOnce(network: MeasurementNetwork, target: InetAddress, port: Int): String = try {
+        network.socketFactory.createSocket().use { it.connect(InetSocketAddress(target, port), ROAMING_CONNECT_TIMEOUT_MILLIS) }
+        ProbeResult.CONNECTED
+    } catch (e: java.net.SocketTimeoutException) {
+        ProbeResult.TIMEOUT
+    } catch (e: ConnectException) {
+        if ("refused" in e.message.orEmpty().lowercase()) ProbeResult.REFUSED else ProbeResult.UNREACHABLE
+    } catch (e: Exception) {
+        ProbeResult.UNREACHABLE
     }
 
     private fun bssLoad(beacon: ScanResult): BssLoad? = beacon.informationElements
@@ -167,4 +163,18 @@ internal object NoNetworkSocketFactory : SocketFactory() {
     override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): java.net.Socket = refuse()
     override fun createSocket(host: InetAddress?, port: Int): java.net.Socket = refuse()
     override fun createSocket(address: InetAddress?, port: Int, localAddress: InetAddress?, localPort: Int): java.net.Socket = refuse()
+}
+
+/**
+ * Expands `${gateway}`/`${dns}` only when the configured host contains them, from the measured
+ * network's current link; null when a needed value is missing (invalid target, not a
+ * connectivity failure). A literal host is returned unchanged.
+ */
+internal fun expandRoamingTarget(template: String, network: MeasurementNetwork): String? {
+    if ("\${" !in template) return template.ifBlank { null }
+    val link = network.link()
+    var host = template
+    if ("\${gateway}" in host) host = host.replace("\${gateway}", link.gateway ?: return null)
+    if ("\${dns}" in host) host = host.replace("\${dns}", link.dnsServers.firstOrNull()?.hostAddress ?: return null)
+    return host.takeUnless { "\${" in it }
 }

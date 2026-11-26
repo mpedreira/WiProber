@@ -54,7 +54,7 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `WiproberConfigStore.kt`: app-private storage of imported tests/scripts/roaming (`files/private-config/`, excluded from backups by `res/xml` rules).
 - `NetworkTests.kt`: `dns` (UDP query to the network's DNS server), `ping` (system ICMP ping on the Wi-Fi interface, TCP fallback), `tcp` and `http` tests, ping output parser and minimal DNS wire format.
 - `ScriptRunner.kt`: `TimedHttpClient` (HTTP/1.1 client timing DNS/TCP/TLS/TTFB/download separately, one connection per request) and the HTTP script replayer (variables, JSON extraction, cookies, checks).
-- `Roaming.kt`: Android-free `RoamingTracker` turning Continuous-mode probe samples into roam/outage events; the log is kept in `MainViewModel` and saved with the track.
+- `Roaming.kt`: Android-free `RoamingTracker` turning timed Continuous-mode probe attempts (monotonic, session-relative) into association-change and reachability-loss events bounded by observations; the log is kept in `MainViewModel` and saved with the track.
 - `ThroughputProgressDialog.kt`: modal progress of a point's tests (step, phase, countdown, finished values).
 - `WifiChannels.kt`: channel numbers, channel widths, Wi-Fi standard names and the BSS Load element parser.
 - `app/src/main/assets/`: static ESX payloads copied into every export. These files are part of the export contract, not generic sample data.

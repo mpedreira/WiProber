@@ -17,8 +17,12 @@ class MainViewModel @JvmOverloads constructor(
     private val clock: MillisClock = SystemMillisClock,
     private val idSource: IdSource = UuidIdSource,
     /** Scope of active runs; tests pass their own, the app uses [viewModelScope] (survives rotation). */
-    private val runScope: CoroutineScope? = null
+    private val runScope: CoroutineScope? = null,
+    /** Time base of Continuous tracks (waypoints, scans, roaming probe); defaults to monotonic time. */
+    monotonicClock: MillisClock? = null
 ) : ViewModel() {
+    private val monotonic: MillisClock = monotonicClock ?: if (clock === SystemMillisClock) MonotonicMillisClock else clock
+    private var activeSessionStartMono: Long = 0L
     private var activeRunJob: Job? = null
 
     private val _screenState = MutableStateFlow(SurveyScreenState())
@@ -31,18 +35,35 @@ class MainViewModel @JvmOverloads constructor(
     private val activeScanResults = mutableListOf<ScanResultWrapper>()
     private var roamingTracker: RoamingTracker? = null
 
-    /** Starts the roaming log of the active Continuous track (once; kept across recreation). */
-    fun startRoamingLog(target: String, intervalMillis: Int): Boolean {
-        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking || roamingTracker != null) return false
-        roamingTracker = RoamingTracker(target, intervalMillis)
-        return true
+    /**
+     * Starts the roaming log of the active Continuous track (once; kept across recreation) and
+     * returns the session id the probe must send its attempts with, or null without a track.
+     */
+    fun startRoamingLog(target: String, intervalMillis: Int): String? {
+        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
+        if (roamingTracker == null) roamingTracker = RoamingTracker(target, intervalMillis)
+        return activeSessionId
     }
 
-    /** One roaming probe sample at [atMillis] (wall clock); ignored when no track is active. */
-    fun recordRoamingSample(atMillis: Long, bssid: String?, rssi: Int?, ok: Boolean, rttMs: Double?, scanning: Boolean) {
+    /**
+     * One probe attempt; [startMono]/[endMono] are [MonotonicMillisClock] times. Attempts of
+     * another (older) session, from before this session started, or without a track are ignored.
+     */
+    fun recordRoamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?) {
         val tracker = roamingTracker ?: return
-        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return
-        tracker.add((atMillis - activeSessionStartTime).coerceAtLeast(0L), bssid, rssi, ok, rttMs, scanning)
+        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking || sessionId != activeSessionId) return
+        if (startMono < activeSessionStartMono) return
+        tracker.add(
+            ProbeAttempt(
+                startMs = startMono - activeSessionStartMono,
+                endMs = endMono - activeSessionStartMono,
+                result = result,
+                ssid = association?.ssid,
+                bssid = association?.bssid,
+                rssi = association?.rssi,
+                associationKnown = association?.known == true
+            )
+        )
     }
 
     fun loadProject(
@@ -254,22 +275,22 @@ class MainViewModel @JvmOverloads constructor(
 
     fun addContinuousWaypoint(x: Float, y: Float): Boolean {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return false
-        activeWaypoints += RoutePointWrapper(clock.now() - activeSessionStartTime, x, y)
+        activeWaypoints += RoutePointWrapper(monotonic.now() - activeSessionStartMono, x, y)
         publishTrackingState()
         return true
     }
 
     fun beginContinuousScanAttempt(): Long? =
-        if (_screenState.value.interaction is SurveyInteraction.ContinuousTracking) clock.now() else null
+        if (_screenState.value.interaction is SurveyInteraction.ContinuousTracking) monotonic.now() else null
 
     fun completeContinuousScanAttempt(
         startedAt: Long,
         wifiNetworks: List<WifiNetworkInfo>
     ): Boolean {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return false
-        val now = clock.now()
+        val now = monotonic.now()
         activeScanResults += ScanResultWrapper(
-            timestamp = now - activeSessionStartTime,
+            timestamp = now - activeSessionStartMono,
             duration = (now - startedAt).coerceAtLeast(0L),
             wifiNetworks = wifiNetworks.toList()
         )
@@ -279,15 +300,17 @@ class MainViewModel @JvmOverloads constructor(
 
     fun stopContinuousTrack(x: Float, y: Float): ContinuousScanSession? {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
-        val now = clock.now()
-        activeWaypoints += RoutePointWrapper(now - activeSessionStartTime, x, y)
+        val elapsed = monotonic.now() - activeSessionStartMono
+        activeWaypoints += RoutePointWrapper(elapsed, x, y)
+        val scanWindows = activeScanResults.map { (it.timestamp - it.duration)..it.timestamp }
         val session = ContinuousScanSession(
             id = activeSessionId ?: idSource.newId(),
             startTime = activeSessionStartTime,
-            endTime = now,
+            endTime = activeSessionStartTime + elapsed,
             waypoints = activeWaypoints.toList(),
             scanResults = activeScanResults.toList(),
-            roaming = roamingTracker?.finish()
+            roaming = roamingTracker?.finish(scanWindows),
+            timeBase = RoamingTracker.TIME_BASE
         )
         _screenState.update {
             it.copy(
@@ -300,9 +323,9 @@ class MainViewModel @JvmOverloads constructor(
         return session
     }
 
-    fun activeContinuousElapsedMillis(now: Long = clock.now()): Long =
+    fun activeContinuousElapsedMillis(now: Long = monotonic.now()): Long =
         if (_screenState.value.interaction is SurveyInteraction.ContinuousTracking) {
-            (now - activeSessionStartTime).coerceAtLeast(0L)
+            (now - activeSessionStartMono).coerceAtLeast(0L)
         } else {
             0L
         }
@@ -567,6 +590,7 @@ class MainViewModel @JvmOverloads constructor(
     private fun startContinuousTrack(coordinate: SurveyCoordinate) {
         activeSessionId = idSource.newId()
         activeSessionStartTime = clock.now()
+        activeSessionStartMono = monotonic.now()
         activeWaypoints.clear()
         activeScanResults.clear()
         activeWaypoints += RoutePointWrapper(0L, coordinate.x, coordinate.y)
@@ -589,6 +613,7 @@ class MainViewModel @JvmOverloads constructor(
         roamingTracker = null
         activeSessionId = null
         activeSessionStartTime = 0L
+        activeSessionStartMono = 0L
         activeWaypoints.clear()
         activeScanResults.clear()
     }

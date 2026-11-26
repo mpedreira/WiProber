@@ -208,7 +208,25 @@ Scripts from the `scripts` section (or imported from a `.har`): chained requests
 
 ## 3d. Continuous-mode roaming (`roamingSessions`, `roamingEvents`)
 
-When the imported configuration enables `roaming`, during every Continuous track the app reads the associated AP every `intervalMs` (200 ms by default) and tries a TCP connect to the target (`host:port`, e.g. `${gateway}:443`) over Wi-Fi; a refused connection also proves connectivity. Events are placed **on the route marked on the map** by interpolating in time between the taps, like the route's scans in the `.esx`. The `surveyId` is the track's survey in the `.esx` (the session ID, stable across exports).
+When the imported configuration enables `roaming`, during every Continuous track the app tries a TCP connect to the target (`host:port`, e.g. `${gateway}:443`) over the Wi-Fi `Network` every `intervalMs` (200 ms by default) and reads the association of that same network. Each attempt records its monotonic start and end, its result, and the SSID/BSSID/RSSI seen.
+
+**Time base.** Waypoints, scans and probe attempts share one monotonic clock relative to the track start (`timeBase: "monotonic-relative"`); `startedAt` is the UTC anchor, and every `…At` field is that anchor plus the relative time. Tracks recorded by fork release 4 have `timeBase: "wall-clock"`.
+
+**Results of an attempt.** `connected` (port accessible), `refused` (the target answered, so it is reachable, but the port is **not** accessible), `timeout`, `unreachable`, `resolution_failed` (the name did not resolve on Wi-Fi), `invalid_target` (e.g. `${gateway}` without a gateway: configuration, not connectivity), `no_wifi`. Placeholders are evaluated only when present, independently (`${dns}` is not needed by `${gateway}:443`), and the resolution is redone when the network, gateway or DNS server changes. Only `timeout`/`unreachable` count as observed loss of connectivity.
+
+**Events.**
+
+| `type` | Meaning |
+|---|---|
+| `bssid_change` | Another AP of the same SSID |
+| `ssid_change` | The phone joined another SSID |
+| `association_lost` | No Wi-Fi association for at least one attempt |
+| `reachability_loss` | ≥3 consecutive `timeout`/`unreachable` attempts without an association change |
+| `roam` / `outage` | Format 1 (fork release 4) only |
+
+An outage is never inferred from scheduler delays, pauses, gaps without samples or isolated timeouts. Duration is bounded by observations: `outageLowerBoundMs` spans the failed attempts actually seen; `outageUpperBoundMs` is the time between the last reachable attempt before and the first one after (the resolution of the estimate). A change with `outageObserved: false` had no failed attempt, which is **not** proof of a seamless roam: check `outageUpperBoundMs` and `samplingGap`. Events that had not recovered when the track ended are kept with `open: true`.
+
+**Position.** An event gets `x`/`y` only when the track has at least two waypoints and the event time falls between the first and the last; it is interpolated in time along the marked route and is approximate (`positionApproximate: true`). Otherwise `x`/`y` are `null`. The `surveyId` is the track's survey in the `.esx` (the session ID, stable across exports). Stopping a track closes its probe: a new track never receives attempts of the previous one.
 
 `roamingSessions`:
 
@@ -216,26 +234,38 @@ When the imported configuration enables `roaming`, during every Continuous track
 |---|---|---|
 | `surveyId`, `floorPlanId`, `floorName` | | Track and floor |
 | `startedAt`, `endedAt` | ISO-8601 UTC string | Track start and end |
-| `target` | string | Probe target (`gateway:443`, `host:port`) |
-| `intervalMs` | int | Interval between probes |
-| `probes`, `lost` | int | Probes sent / failed |
+| `timeBase` | string | `monotonic-relative` or `wall-clock` (format 1) |
+| `schema` | int | 2, or 1 for logs of fork release 4 |
+| `target` | string | Probe target as configured (`${gateway}:443`, `host:port`) |
+| `intervalMs`, `requestedIntervalMs` | int | Requested interval between attempts |
+| `observedMedianIntervalMs`, `observedMaxIntervalMs` | int \| null | Cadence actually achieved |
+| `samplingGaps` | int \| null | Intervals longer than 3 × the requested interval |
+| `probes`, `lost` | int | Attempts / attempts that did not reach the target |
 | `lossPct` | number \| null | Loss 0–100 % |
-| `avgRttMs` | number \| null | Mean connect time of the successful probes |
-| `roams`, `outages` | int | Events of each type |
+| `avgRttMs` | number \| null | Mean connect time of the `connected` attempts |
+| `connected`, `refused`, `timeouts`, `unreachable`, `resolutionFailures`, `invalidTarget`, `noWifi` | int \| null | Attempts by result |
+| `roams`, `outages` | int | Association changes / other events |
+| `bssid_change`, `ssid_change`, `association_lost`, `reachability_loss` | int | Events of each type |
 
 `roamingEvents`:
 
 | Field | Type | Description |
 |---|---|---|
 | `surveyId`, `floorPlanId`, `floorName` | | Track and floor |
-| `x`, `y` | number \| null | Position on the route (floor-plan pixels) |
-| `at` | ISO-8601 UTC string | Event time |
-| `type` | string | `roam` (BSSID changed) or `outage` (≥3 consecutive failed probes without changing AP) |
-| `fromBssid`, `toBssid` | string \| null | Previous and new AP (equal for an `outage`) |
+| `x`, `y` | number \| null | Approximate position on the route (floor-plan pixels), see above |
+| `positionApproximate` | bool \| null | `true` when `x`/`y` are present |
+| `at` | ISO-8601 UTC string | First attempt that showed the event |
+| `type` | string | See the table above |
+| `fromSsid`, `toSsid`, `fromBssid`, `toBssid` | string \| null | Association before and after |
 | `fromRssi`, `toRssi` | int \| null | Signal before and after, dBm |
-| `outageMs` | int \| null | Time without connectivity beyond one interval (0 = seamless roam); `null` if it had not recovered when the track ended |
-| `lostProbes` | int | Failed probes in the event |
-| `duringScan` | bool | A Wi-Fi scan ran during the outage: the phone was off channel, so part of it may be due to the scan |
+| `lastReachableAt`, `firstReachableAt` | ISO-8601 \| null | Last reachable attempt before, first one after |
+| `failedAttempts` | int \| null | Failed attempts in the event window |
+| `outageObserved` | bool \| null | At least one failed attempt was observed |
+| `outageLowerBoundMs`, `outageUpperBoundMs` | int \| null | Bounds of the outage (see above); `null` when not supported by observations |
+| `open` | bool \| null | Not recovered when the track ended |
+| `samplingGap` | bool \| null | The window contains a gap without samples |
+| `scanOverlap` | bool \| null | A Wi-Fi scan interval overlapped the event window (temporal coincidence, not a cause) |
+| `outageMs`, `lostProbes`, `duringScan` | | Format 1 fields, kept for logs of fork release 4 |
 
 ## 4. Joining with the `.esx`
 
@@ -269,4 +299,4 @@ Data your app can derive from the `.esx` with no WiProber change: APs on the sam
 | `v3.0.0-throughput.2` | Added `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latency from 10 samples |
 | `v3.0.0-throughput.3` | No export changes (survey guide in the app) |
 | `v3.0.0-throughput.4` | Added `networkTests` and `scriptSteps` (imported configuration) and `roamingSessions`/`roamingEvents` (Continuous-mode roaming) |
-| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |
+| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; roaming schema 2 (typed attempt results, bounded outages, association-change types, monotonic time base, grounded approximate positions); measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |

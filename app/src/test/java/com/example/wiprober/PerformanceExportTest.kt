@@ -1,5 +1,6 @@
 package com.example.wiprober
 
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -7,6 +8,7 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -185,5 +187,44 @@ class PerformanceExportTest {
         assertEquals("2023-11-14T22:13:22.500Z", event["at"].asString)
         assertEquals(120, event["outageMs"].asInt)
         assertEquals("aa:02", event["toBssid"].asString)
+    }
+
+    @Test
+    fun roamingEventsWithoutEnoughRouteHaveNoCoordinates() {
+        fun export(waypoints: List<RoutePointWrapper>, at: Long): JsonObject {
+            val session = ContinuousScanSession(
+                id = "6f1c7a52-0000-4000-8000-000000000002", startTime = 1_700_000_000_000L, endTime = 1_700_000_010_000L,
+                waypoints = waypoints,
+                scanResults = listOf(ScanResultWrapper(5_000, 500, listOf(network))),
+                roaming = RoamingTracker("gw:443", 200).apply {
+                    add(ProbeAttempt(at - 200, at - 195, ProbeResult.CONNECTED, "Operativa", "aa:01", -70, true))
+                    add(ProbeAttempt(at, at + 5, ProbeResult.CONNECTED, "Operativa", "aa:02", -60, true))
+                }.finish(),
+                timeBase = RoamingTracker.TIME_BASE
+            )
+            val report = EkahauReportBuilder().build(
+                "Site", listOf(EkahauFloorInput("G", MapInfo("g.png", 100, 80), 0.1, emptyList(), listOf(session), emptyList()))
+            )
+            return PerformanceExport.build(report, "Site.esx", 0L)
+        }
+        val route = listOf(RoutePointWrapper(0, 0f, 50f), RoutePointWrapper(10_000, 100f, 50f))
+
+        val placed = export(route, 5_000).getAsJsonArray("roamingEvents").single().asJsonObject
+        assertEquals(50.0, placed["x"].asDouble, 0.0)
+        assertTrue(placed["positionApproximate"].asBoolean)
+        assertEquals("bssid_change", placed["type"].asString)
+        assertFalse(placed["outageObserved"].asBoolean)
+
+        // Outside the marked span (or a single waypoint): no invented position.
+        listOf(export(route, 12_000), export(route.take(1), 5_000)).forEach { json ->
+            val event = json.getAsJsonArray("roamingEvents").single().asJsonObject
+            assertTrue(event["x"].isJsonNull && event["y"].isJsonNull)
+            assertTrue(event["positionApproximate"].isJsonNull)
+        }
+        val summary = export(route, 5_000).getAsJsonArray("roamingSessions").single().asJsonObject
+        assertEquals(RoamingTracker.TIME_BASE, summary["timeBase"].asString)
+        assertEquals(200, summary["requestedIntervalMs"].asInt)
+        assertEquals(200, summary["observedMedianIntervalMs"].asInt)
+        assertEquals(1, summary["bssid_change"].asInt)
     }
 }

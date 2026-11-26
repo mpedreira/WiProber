@@ -80,8 +80,6 @@ class SurveyActivity : AppCompatActivity() {
     private var continuousScanLoopJob: Job? = null
     private var roamingJob: Job? = null
     private var progressDialog: ThroughputProgressDialog? = null
-    /** True while a Continuous-mode Wi-Fi scan runs: probes then fail because the radio is off channel. */
-    @Volatile private var continuousScanInFlight = false
 
     //<editor-fold desc="Lifecycle & Setup">
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -977,12 +975,7 @@ class SurveyActivity : AppCompatActivity() {
                 }
 
                 val attemptStartedAt = viewModel.beginContinuousScanAttempt() ?: break
-                continuousScanInFlight = true
-                val outcome = try {
-                    wifiScanner.scan()
-                } finally {
-                    continuousScanInFlight = false
-                }
+                val outcome = wifiScanner.scan()
                 when (outcome) {
                     is WifiScanOutcome.Success -> {
                         val wifiInfoList = mapScanResults(outcome.results)
@@ -1038,11 +1031,10 @@ class SurveyActivity : AppCompatActivity() {
     private fun startRoamingProbe() {
         val settings = configStore.load().roamingSettings.sanitized()
         if (!settings.enabled || settings.host.isEmpty() || roamingJob?.isActive == true) return
-        val label = settings.host.replace("\${gateway}", "gateway").replace("\${dns}", "dns")
-        viewModel.startRoamingLog("$label:${settings.port}", settings.intervalMillis)
-        roamingJob = throughputProbe.launchRoamingProbe(lifecycleScope, settings, { continuousScanInFlight }) {
-                at, bssid, rssi, ok, rtt, scanning ->
-            viewModel.recordRoamingSample(at, bssid, rssi, ok, rtt, scanning)
+        // The log lives in the ViewModel: after a recreation the probe resumes into the same session.
+        val sessionId = viewModel.startRoamingLog("${settings.host}:${settings.port}", settings.intervalMillis) ?: return
+        roamingJob = throughputProbe.launchRoamingProbe(lifecycleScope, settings) { start, end, result, association ->
+            viewModel.recordRoamingAttempt(sessionId, start, end, result, association)
         }
     }
 

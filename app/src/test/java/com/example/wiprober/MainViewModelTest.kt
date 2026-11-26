@@ -249,6 +249,35 @@ class MainViewModelTest {
         informationElements = ""
     )
 
+    @Test
+    fun roamingAttemptsOfAnOlderSessionNeverReachTheNewOne() {
+        val clock = FakeClock(10_000L)
+        val viewModel = viewModel(clock, SequenceIdSource("first", "second"))
+        viewModel.setScanMode(SurveyScanMode.CONTINUOUS)
+        viewModel.armContinuousStart()
+        viewModel.requestContinuousStart(1f, 2f)
+        viewModel.grantPendingScanAccess()
+        val first = viewModel.startRoamingLog("gw:443", 200)!!
+        viewModel.recordRoamingAttempt(first, 10_000, 10_005, ProbeResult.CONNECTED, null)
+        clock.now = 11_000L
+        assertEquals(1, viewModel.stopContinuousTrack(1f, 2f)!!.roaming!!.probes)
+
+        viewModel.armContinuousStart()
+        viewModel.requestContinuousStart(1f, 2f)
+        viewModel.grantPendingScanAccess()
+        val second = viewModel.startRoamingLog("gw:443", 200)!!
+        assertTrue(first != second)
+        viewModel.recordRoamingAttempt(first, 11_200, 11_205, ProbeResult.TIMEOUT, null)     // late, old session
+        viewModel.recordRoamingAttempt(second, 10_900, 10_905, ProbeResult.TIMEOUT, null)    // before this start
+        viewModel.recordRoamingAttempt(second, 11_400, 11_405, ProbeResult.CONNECTED, null)
+        clock.now = 12_000L
+        val log = viewModel.stopContinuousTrack(1f, 2f)!!.roaming!!
+        assertEquals(1, log.probes)
+        assertEquals(0, log.lost)
+        // Relative to the session start, on the same time base as the waypoints.
+        assertEquals(RoamingTracker.TIME_BASE, viewModel.screenState.value.continuousScanSessions.last().timeBase)
+    }
+
     private class FakeClock(var now: Long) : MillisClock {
         override fun now(): Long = now
     }

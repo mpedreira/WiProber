@@ -61,7 +61,12 @@ data class ContinuousScanSession(
     val scanResults: List<ScanResultWrapper>, // Все результаты сканирований в процессе ходьбы
     val importedFromEsx: Boolean = false,
     /** Roaming probe of this track, if it was enabled; app/export only, never in the ESX. */
-    val roaming: RoamingLog? = null
+    val roaming: RoamingLog? = null,
+    /**
+     * `monotonic-relative`: waypoint, scan and probe times are monotonic milliseconds since the
+     * session start and [startTime] is the UTC anchor. Null for tracks recorded before (wall clock).
+     */
+    val timeBase: String? = null
 )
 
 @JsonModel

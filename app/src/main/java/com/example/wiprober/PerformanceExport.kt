@@ -24,6 +24,7 @@ object PerformanceExport {
     const val FORMAT = "wiprober-performance"
     /** 2: one row per active run (runId/pointId/scanId, run and phase statuses); see the spec history. */
     const val VERSION = 2
+    private val ROAM_TYPES = setOf(RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ROAM)
 
     fun hasMeasurements(snapshot: ProjectExportSnapshot): Boolean = snapshot.floors.any { floor ->
         floor.survey.activeRuns.isNotEmpty() ||
@@ -97,31 +98,64 @@ object PerformanceExport {
         addProperty("floorName", ref.floorName)
         addProperty("startedAt", isoUtc(ref.session.startTime))
         addProperty("endedAt", isoUtc(ref.session.endTime))
+        addProperty("timeBase", ref.session.timeBase ?: "wall-clock")
+        addProperty("schema", log.schema ?: 1)
         addProperty("target", log.target)
         addProperty("intervalMs", log.intervalMillis)
+        addProperty("requestedIntervalMs", log.intervalMillis)
+        addProperty("observedMedianIntervalMs", log.observedMedianIntervalMs)
+        addProperty("observedMaxIntervalMs", log.observedMaxIntervalMs)
         addProperty("probes", log.probes)
         addProperty("lost", log.lost)
         addProperty("lossPct", if (log.probes > 0) round1(log.lost * 100.0 / log.probes) else null)
         addProperty("avgRttMs", log.avgRttMs)
-        addProperty("roams", log.events.count { it.type == RoamingEvent.ROAM })
-        addProperty("outages", log.events.count { it.type == RoamingEvent.OUTAGE })
+        addProperty("connected", log.connected)
+        addProperty("refused", log.refused)
+        addProperty("timeouts", log.timeouts)
+        addProperty("unreachable", log.unreachable)
+        addProperty("resolutionFailures", log.resolutionFailures)
+        addProperty("invalidTarget", log.invalidTarget)
+        addProperty("noWifi", log.noWifi)
+        addProperty("samplingGaps", log.samplingGaps)
+        addProperty("roams", log.events.count { it.type in ROAM_TYPES })
+        addProperty("outages", log.events.count { it.type !in ROAM_TYPES })
+        listOf(RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ASSOCIATION_LOST, RoamingEvent.REACHABILITY_LOSS)
+            .forEach { type -> addProperty(type, log.events.count { it.type == type }) }
     }
 
-    /** Placed on the marked route by time, like the Continuous scans in the ESX. */
+    /**
+     * Placed on the marked route by time only when at least two waypoints span the event time;
+     * the interpolated position is approximate. Otherwise the event has no coordinates.
+     */
     private fun roamingEventRow(ref: ContinuousSurveyRef, event: RoamingEvent) = JsonObject().apply {
         val route = ref.session.waypoints.sortedBy(RoutePointWrapper::timestamp)
-        val position = SurveyGuide.positionAt(route, event.atMillis)
+        val placeable = route.size >= 2 && event.atMillis in route.first().timestamp..route.last().timestamp
+        val position = if (placeable) SurveyGuide.positionAt(route, event.atMillis) else null
+        fun at(relative: Long?) = relative?.let { isoUtc(ref.session.startTime + it) }
         addProperty("surveyId", ref.surveyId)
         addProperty("floorPlanId", ref.floorPlanId)
         addProperty("floorName", ref.floorName)
         addProperty("x", position?.first?.toDouble())
         addProperty("y", position?.second?.toDouble())
-        addProperty("at", isoUtc(ref.session.startTime + event.atMillis))
+        addProperty("positionApproximate", if (position != null) true else null)
+        addProperty("at", at(event.atMillis))
         addProperty("type", event.type)
+        addProperty("fromSsid", event.fromSsid)
+        addProperty("toSsid", event.toSsid)
         addProperty("fromBssid", event.fromBssid)
         addProperty("toBssid", event.toBssid)
         addProperty("fromRssi", event.fromRssi)
         addProperty("toRssi", event.toRssi)
+        addProperty("lastReachableAt", at(event.lastReachableAtMillis))
+        addProperty("firstReachableAt", at(event.firstReachableAtMillis))
+        addProperty("failedAttempts", event.failedAttempts)
+        addProperty("outageObserved", event.outageObserved)
+        addProperty("outageLowerBoundMs", event.outageLowerBoundMs)
+        addProperty("outageUpperBoundMs", event.outageUpperBoundMs)
+        addProperty("open", event.open)
+        addProperty("samplingGap", event.samplingGap)
+        addProperty("scanOverlap", event.scanOverlap)
+        // Format-1 fields (logs recorded by fork release 4).
         addProperty("outageMs", event.outageMillis)
         addProperty("lostProbes", event.lostProbes)
         addProperty("duringScan", event.duringScan)
