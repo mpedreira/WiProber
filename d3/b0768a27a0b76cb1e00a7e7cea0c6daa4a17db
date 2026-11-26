@@ -1,0 +1,25 @@
+app/src/main/java/com/mpedreira/nimwifi/ScriptRunner.kt
+  s_162f368a1e379c::t_dafd881e3f62ae 354
+app/src/main/java/com/mpedreira/nimwifi/WiproberConfig.kt
+  s_162f368a1e379c::t_aad056fef4a956 106,439,479
+app/src/androidTest/java/com/mpedreira/nimwifi/AndroidRegexInstrumentedTest.kt
+  s_162f368a1e379c::t_6c696b8f564c36 1-23
+app/src/test/java/com/mpedreira/nimwifi/AndroidRegexSyntaxTest.kt
+  s_162f368a1e379c::t_3d0adf82db977c 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d3b0768a27a0b76cb1e00a7e7cea0c6daa4a17db",
+  "prompts": {},
+  "sessions": {
+    "s_162f368a1e379c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7f44c00-a64c-44bc-8421-7f4be6c34441",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel Pedreira Antón <manuelpa@inditex.com>"
+    }
+  }
+}
