@@ -65,6 +65,8 @@ class PerformanceExportTest {
         val row = JsonParser.parseString(text).asJsonObject.getAsJsonArray("measurements")[0].asJsonObject
 
         assertTrue(row.has("upMbps") && row["upMbps"].isJsonNull)
+        listOf("rxLinkMbps", "channel", "channelWidthMhz", "bssChannelUtilizationPct", "jitterMs", "deviceModel")
+            .forEach { field -> assertTrue(field, row.has(field) && row[field].isJsonNull) }
         assertEquals(95.3, row["downMbps"].asDouble, 0.0)
         assertEquals("upload: HTTP 403 from speed.cloudflare.com", row["error"].asString)
     }

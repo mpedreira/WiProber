@@ -37,14 +37,18 @@ class ThroughputRunner(
     private val http: HttpSpeedTest,
     private val socketFactory: SocketFactory,
     private val connection: () -> WifiConnectionInfo?,
+    private val device: DeviceInfo? = null,
     private val clock: MillisClock = SystemMillisClock
 ) {
+    /** TCP handshake times in ms. */
+    private class LatencyStats(val min: Double, val mean: Double, val jitter: Double, val samples: Int)
+
     private class Target(
         val label: String,
         val method: String,
         val durationSeconds: Int,
         val missingConfiguration: String?,
-        val latency: () -> Double,
+        val latency: () -> LatencyStats,
         val download: () -> Double,
         /** Null when the direction is not configured. */
         val upload: (() -> Double)?
@@ -66,7 +70,7 @@ class ThroughputRunner(
         method = ThroughputTestResult.METHOD_IPERF3_TCP,
         durationSeconds = config.iperfDurationSeconds,
         missingConfiguration = "iPerf3 server not configured".takeIf { config.iperfHost.isEmpty() },
-        latency = { tcpConnectMillis(config.iperfHost, config.iperfPort) },
+        latency = { tcpLatency(config.iperfHost, config.iperfPort) },
         download = {
             iperf.run(config.iperfHost, config.iperfPort, config.iperfDurationSeconds, Iperf3Client.Direction.DOWNLOAD)
         },
@@ -83,7 +87,7 @@ class ThroughputRunner(
         latency = {
             val uri = URI(config.internetDownloadUrl.replace("{bytes}", "0"))
             val port = if (uri.port > 0) uri.port else if (uri.scheme.equals("http", true)) 80 else 443
-            tcpConnectMillis(requireNotNull(uri.host) { "invalid download URL" }, port)
+            tcpLatency(requireNotNull(uri.host) { "invalid download URL" }, port)
         },
         download = { http.download(config.internetDownloadUrl, config.internetDurationSeconds) },
         upload = if (config.internetUploadUrl.isEmpty()) null else {
@@ -101,7 +105,16 @@ class ThroughputRunner(
             ssid = before?.ssid,
             bssidStart = before?.bssid,
             rssi = before?.rssi,
-            linkMbps = before?.linkSpeedMbps
+            linkMbps = before?.linkSpeedMbps,
+            rxLinkMbps = before?.rxLinkSpeedMbps,
+            frequencyMhz = before?.frequencyMhz,
+            channel = before?.channel,
+            channelWidthMhz = before?.channelWidthMhz,
+            wifiStandard = before?.wifiStandard,
+            bssStationCount = before?.bssLoad?.stationCount,
+            bssChannelUtilizationPct = before?.bssLoad?.channelUtilizationPct,
+            deviceModel = device?.model,
+            androidVersion = device?.androidVersion
         )
         if (target.missingConfiguration != null || before == null) {
             tracker.skip(target.label)
@@ -113,8 +126,10 @@ class ThroughputRunner(
         }
 
         val errors = mutableListOf<String>()
+        var stats: LatencyStats? = null
         val latency = tracker.run(target.label, ThroughputPhase.LATENCY, null) {
-            attempt("latency", errors, target.latency)?.let(::round)
+            stats = attempt("latency", errors, target.latency)
+            stats?.min?.let(::round)
         }
         var download: Double? = null
         var upload: Double? = null
@@ -139,24 +154,39 @@ class ThroughputRunner(
         return base.copy(
             bssidEnd = connection()?.bssid,
             latencyMs = latency,
+            latencyAvgMs = stats?.mean?.let(::round),
+            jitterMs = stats?.jitter?.let(::round),
+            latencySamples = stats?.samples,
             downMbps = download,
             upMbps = upload,
             error = errors.joinToString("; ").ifEmpty { null }
         )
     }
 
-    /** One network round trip: the lowest TCP handshake time of a few attempts, in ms. */
-    private fun tcpConnectMillis(host: String, port: Int): Double {
+    /**
+     * TCP handshakes (one network round trip each). The first failure aborts: the server is
+     * unreachable, so the caller skips its transfers.
+     */
+    private fun tcpLatency(host: String, port: Int): LatencyStats {
         val address = InetSocketAddress(host, port) // resolve once, outside the timing
         if (address.isUnresolved) throw java.net.UnknownHostException(host)
-        return (1..LATENCY_SAMPLES).minOf {
+        val samples = (1..LATENCY_SAMPLES).map {
             socketFactory.createSocket().use { socket ->
                 val start = System.nanoTime()
                 socket.connect(address, CONNECT_TIMEOUT_MILLIS)
                 (System.nanoTime() - start) / 1_000_000.0
             }
         }
+        return latencyStats(samples)
     }
+
+    private fun latencyStats(samples: List<Double>) = LatencyStats(
+        min = samples.min(),
+        mean = samples.average(),
+        // Mean absolute difference between consecutive samples (as ping tools report jitter).
+        jitter = samples.zipWithNext { a, b -> kotlin.math.abs(b - a) }.average().takeIf { !it.isNaN() } ?: 0.0,
+        samples = samples.size
+    )
 
     private fun <T> attempt(label: String, errors: MutableList<String>, block: () -> T): T? =
         try {
@@ -191,7 +221,7 @@ class ThroughputRunner(
 
     companion object {
         const val NOT_ON_WIFI = "not connected to a Wi-Fi network"
-        private const val LATENCY_SAMPLES = 3
+        private const val LATENCY_SAMPLES = 10
         private const val CONNECT_TIMEOUT_MILLIS = 3_000
     }
 }

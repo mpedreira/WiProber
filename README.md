@@ -168,4 +168,6 @@ Projects with results are exported as a ZIP: the `.esx` (unchanged, opens in Eka
     "downMbps": 212.4, "upMbps": 148.0, "latencyMs": 2.1, "error": null } ] }
 ```
 
+Each row also carries, when Android reports them: `rxLinkMbps` (`linkMbps` is the transmit rate), `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard` of the connected AP; `bssStationCount` and `bssChannelUtilizationPct` from the AP's BSS Load beacon element (only APs that advertise it); `latencyAvgMs`, `jitterMs` and `latencySamples` (10 TCP handshakes; `latencyMs` is the minimum); `deviceModel` and `androidVersion` of the phone. Android does not expose the noise floor, so there is no noise/SNR field.
+
 Values that could not be measured are `null` with the reason in `error`, never `0`. `x`/`y` are original floor-plan pixels, equal to the point's survey route point in the ESX; `surveyId` matches the ESX in the same ZIP only (it changes on every export), `floorPlanId` + `x`/`y` are stable.

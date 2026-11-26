@@ -850,7 +850,7 @@ class SurveyActivity : AppCompatActivity() {
                         val progressDialog = ThroughputProgressDialog(this@SurveyActivity)
                         progressDialog.show()
                         try {
-                            throughputProbe.measure(settings, progressDialog::update)
+                            throughputProbe.measure(settings, outcome.results, progressDialog::update)
                         } finally {
                             progressDialog.dismiss()
                         }

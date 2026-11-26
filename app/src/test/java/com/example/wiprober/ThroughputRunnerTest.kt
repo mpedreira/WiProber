@@ -9,13 +9,18 @@ import org.junit.Test
 
 class ThroughputRunnerTest {
     private val closedPort = ServerSocket(0).use { it.localPort }
-    private val ap = WifiConnectionInfo("CORP", "aa:bb:cc:dd:ee:01", -58, 573)
+    private val ap = WifiConnectionInfo(
+        "CORP", "aa:bb:cc:dd:ee:01", -58, 573,
+        rxLinkSpeedMbps = 649, frequencyMhz = 5_500, channelWidthMhz = 80,
+        wifiStandard = "802.11ax (Wi-Fi 6/6E)", bssLoad = BssLoad(stationCount = 12, channelUtilizationPct = 31)
+    )
 
     private fun runner(connection: () -> WifiConnectionInfo?) = ThroughputRunner(
         iperf = Iperf3Client(connectTimeoutMillis = 1_000),
         http = HttpSpeedTest(),
         socketFactory = SocketFactory.getDefault(),
         connection = connection,
+        device = DeviceInfo("Zebra TC52", "13"),
         clock = { 1_000L }
     )
 
@@ -121,5 +126,38 @@ class ThroughputRunnerTest {
             events[1].finished.map { it.phase }
         )
         assertTrue(events[1].finished.all { it.value == null })
+    }
+
+    @Test
+    fun rowsCarryLinkBeaconDeviceAndLatencyStatistics() {
+        // Reachable but every HTTP request is cut: latency is measured, transfers fail.
+        val server = ServerSocket(0)
+        kotlin.concurrent.thread(isDaemon = true) {
+            while (!server.isClosed) runCatching { server.accept().close() }.onFailure { return@thread }
+        }
+        val test = server.use {
+            runner { ap }.measure(
+                ThroughputSettings(
+                    internetEnabled = true,
+                    internetDownloadUrl = "http://127.0.0.1:${server.localPort}/__down?bytes={bytes}",
+                    internetDurationSeconds = 1
+                )
+            ).tests.single()
+        }
+
+        assertEquals(649, test.rxLinkMbps)
+        assertEquals(5_500, test.frequencyMhz)
+        assertEquals(100, test.channel)
+        assertEquals(80, test.channelWidthMhz)
+        assertEquals("802.11ax (Wi-Fi 6/6E)", test.wifiStandard)
+        assertEquals(12, test.bssStationCount)
+        assertEquals(31, test.bssChannelUtilizationPct)
+        assertEquals("Zebra TC52", test.deviceModel)
+        assertEquals("13", test.androidVersion)
+        assertEquals(10, test.latencySamples)
+        val min = test.latencyMs!!
+        val avg = test.latencyAvgMs!!
+        assertTrue("min $min avg $avg", min <= avg)
+        assertTrue(test.jitterMs!! >= 0.0)
     }
 }

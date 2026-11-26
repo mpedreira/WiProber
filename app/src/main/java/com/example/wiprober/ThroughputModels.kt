@@ -8,9 +8,13 @@ data class PointThroughput(
 )
 
 /**
- * One target measured at a point. Null values were not measured: [error] says why; never 0.
- * Connection fields describe the associated AP when the test started; [bssidEnd] is read again
- * when it finished, so a different value means the device roamed during the test.
+ * One target measured at a point. Null values were not measured or not reported: [error] says
+ * why a test failed; never 0. Connection fields describe the associated AP when the test
+ * started; [bssidEnd] is read again when it finished, so a different value means the device
+ * roamed during the test. [linkMbps] is the transmit link rate, [rxLinkMbps] the receive one.
+ * BSS Load values come from the AP's own beacon (only APs that advertise it).
+ * Latency is the TCP handshake time: [latencyMs] the minimum, [latencyAvgMs] the mean and
+ * [jitterMs] the mean difference between consecutive samples.
  */
 @JsonModel
 data class ThroughputTestResult(
@@ -23,9 +27,21 @@ data class ThroughputTestResult(
     val bssidEnd: String? = null,
     val rssi: Int? = null,
     val linkMbps: Int? = null,
+    val rxLinkMbps: Int? = null,
+    val frequencyMhz: Int? = null,
+    val channel: Int? = null,
+    val channelWidthMhz: Int? = null,
+    val wifiStandard: String? = null,
+    val bssStationCount: Int? = null,
+    val bssChannelUtilizationPct: Int? = null,
     val downMbps: Double? = null,
     val upMbps: Double? = null,
     val latencyMs: Double? = null,
+    val latencyAvgMs: Double? = null,
+    val jitterMs: Double? = null,
+    val latencySamples: Int? = null,
+    val deviceModel: String? = null,
+    val androidVersion: String? = null,
     val error: String? = null
 ) {
     companion object {
@@ -35,13 +51,23 @@ data class ThroughputTestResult(
     }
 }
 
-/** The AP the device is associated with, as Android reports it. */
+/** The AP the device is associated with, as Android reports it (plus its beacon from the last scan). */
 data class WifiConnectionInfo(
     val ssid: String?,
     val bssid: String?,
     val rssi: Int?,
-    val linkSpeedMbps: Int?
-)
+    val linkSpeedMbps: Int?,
+    val rxLinkSpeedMbps: Int? = null,
+    val frequencyMhz: Int? = null,
+    val channelWidthMhz: Int? = null,
+    val wifiStandard: String? = null,
+    val bssLoad: BssLoad? = null
+) {
+    val channel: Int? get() = frequencyMhz?.let(WifiChannels::channel)
+}
+
+/** Phone that ran the tests: RSSI and throughput differ between models. */
+data class DeviceInfo(val model: String, val androidVersion: String)
 
 /**
  * User configuration of the per-point tests; it lives on the device, never in the code.
