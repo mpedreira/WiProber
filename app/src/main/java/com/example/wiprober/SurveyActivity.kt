@@ -78,6 +78,9 @@ class SurveyActivity : AppCompatActivity() {
     private var trackingStatusJob: Job? = null
     private var stopAndGoScanJob: Job? = null
     private var continuousScanLoopJob: Job? = null
+    private var roamingJob: Job? = null
+    /** True while a Continuous-mode Wi-Fi scan runs: probes then fail because the radio is off channel. */
+    @Volatile private var continuousScanInFlight = false
 
     //<editor-fold desc="Lifecycle & Setup">
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -151,6 +154,7 @@ class SurveyActivity : AppCompatActivity() {
         trackingStatusJob?.cancel()
         stopAndGoScanJob?.cancel()
         continuousScanLoopJob?.cancel()
+        roamingJob?.cancel()
         wifiScanner.close()
         androidCoordinator.close()
         super.onDestroy()
@@ -409,6 +413,7 @@ class SurveyActivity : AppCompatActivity() {
             if (state.isTracking) {
                 continuousScanLoopJob?.cancel()
                 continuousScanLoopJob = null
+                stopRoamingProbe()
                 viewModel.stopContinuousTrack(lastTouchX, lastTouchY)
             } else if (state.interaction is SurveyInteraction.AwaitingContinuousStart) {
                 viewModel.cancelContinuousStart()
@@ -926,6 +931,7 @@ class SurveyActivity : AppCompatActivity() {
             return
         }
 
+        startRoamingProbe()
         val scanLoopJob = lifecycleScope.launch {
             while (isActive && viewModel.screenState.value.isTracking) {
                 if (!wifiScanner.isWifiEnabled()) {
@@ -934,7 +940,13 @@ class SurveyActivity : AppCompatActivity() {
                 }
 
                 val attemptStartedAt = viewModel.beginContinuousScanAttempt() ?: break
-                when (val outcome = wifiScanner.scan()) {
+                continuousScanInFlight = true
+                val outcome = try {
+                    wifiScanner.scan()
+                } finally {
+                    continuousScanInFlight = false
+                }
+                when (outcome) {
                     is WifiScanOutcome.Success -> {
                         val wifiInfoList = mapScanResults(outcome.results)
                         if (!viewModel.completeContinuousScanAttempt(
@@ -985,7 +997,25 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
+    /** Roaming probe of the active track, if enabled in the imported configuration. */
+    private fun startRoamingProbe() {
+        val settings = configStore.load().roamingSettings.sanitized()
+        if (!settings.enabled || settings.host.isEmpty() || roamingJob?.isActive == true) return
+        val label = settings.host.replace("\${gateway}", "gateway").replace("\${dns}", "dns")
+        viewModel.startRoamingLog("$label:${settings.port}", settings.intervalMillis)
+        roamingJob = throughputProbe.launchRoamingProbe(lifecycleScope, settings, { continuousScanInFlight }) {
+                at, bssid, rssi, ok, rtt, scanning ->
+            viewModel.recordRoamingSample(at, bssid, rssi, ok, rtt, scanning)
+        }
+    }
+
+    private fun stopRoamingProbe() {
+        roamingJob?.cancel()
+        roamingJob = null
+    }
+
     private fun stopContinuousTrackAfterFailure(messageRes: Int) {
+        stopRoamingProbe()
         if (viewModel.screenState.value.isTracking) {
             viewModel.stopContinuousTrack(lastTouchX, lastTouchY)
         }

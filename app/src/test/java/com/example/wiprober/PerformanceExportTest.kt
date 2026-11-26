@@ -130,4 +130,34 @@ class PerformanceExportTest {
             ))
         ))
     }
+
+    @Test
+    fun roamingEventsArePlacedOnTheMarkedRoute() {
+        val session = ContinuousScanSession(
+            id = "6f1c7a52-0000-4000-8000-000000000001", startTime = 1_700_000_000_000L, endTime = 1_700_000_010_000L,
+            waypoints = listOf(RoutePointWrapper(0, 0f, 50f), RoutePointWrapper(10_000, 100f, 50f)),
+            scanResults = listOf(ScanResultWrapper(5_000, 500, listOf(network))),
+            roaming = RoamingLog(
+                target = "gateway:443", intervalMillis = 200, probes = 50, lost = 2, avgRttMs = 3.1,
+                events = listOf(RoamingEvent(RoamingEvent.ROAM, 2_500, "aa:01", "aa:02", -75, -60, 120, 1))
+            )
+        )
+        val report = EkahauReportBuilder().build(
+            "Site", listOf(EkahauFloorInput("G", MapInfo("g.png", 100, 80), 0.1, emptyList(), listOf(session), emptyList()))
+        )
+
+        val json = PerformanceExport.build(report, "Site.esx", 0L)
+
+        val summary = json.getAsJsonArray("roamingSessions").single().asJsonObject
+        assertEquals(session.id, summary["surveyId"].asString)
+        assertTrue(report.surveys.containsKey(session.id)) // same survey as in the ESX
+        assertEquals(4.0, summary["lossPct"].asDouble, 0.0)
+        assertEquals(1, summary["roams"].asInt)
+        val event = json.getAsJsonArray("roamingEvents").single().asJsonObject
+        assertEquals(25.0, event["x"].asDouble, 0.0) // 2.5 s of a 10 s straight route
+        assertEquals(50.0, event["y"].asDouble, 0.0)
+        assertEquals("2023-11-14T22:13:22.500Z", event["at"].asString)
+        assertEquals(120, event["outageMs"].asInt)
+        assertEquals("aa:02", event["toBssid"].asString)
+    }
 }

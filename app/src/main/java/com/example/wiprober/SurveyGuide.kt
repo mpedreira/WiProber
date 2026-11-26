@@ -155,7 +155,7 @@ object SurveyGuide {
             .maxOfOrNull(WifiNetworkInfo::level)
 
     /** Linear position on the route at [timestamp] (both relative to the session start). */
-    private fun positionAt(route: List<RoutePointWrapper>, timestamp: Long): Pair<Float, Float>? {
+    internal fun positionAt(route: List<RoutePointWrapper>, timestamp: Long): Pair<Float, Float>? {
         if (route.isEmpty()) return null
         if (timestamp <= route.first().timestamp) return route.first().x to route.first().y
         route.zipWithNext().forEach { (a, b) ->

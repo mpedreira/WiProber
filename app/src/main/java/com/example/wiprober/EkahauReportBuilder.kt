@@ -22,7 +22,16 @@ data class EkahauReport(
     val notes: EsxNotesWrapper,
     val pictureNotes: EsxPictureNotesWrapper,
     /** Which generated survey and floor plan each Stop-and-Go point became, in export order. */
-    val stopAndGoSurveys: List<StopAndGoSurveyRef> = emptyList()
+    val stopAndGoSurveys: List<StopAndGoSurveyRef> = emptyList(),
+    /** Continuous tracks and their floor plans (their survey ID is the session ID). */
+    val continuousSurveys: List<ContinuousSurveyRef> = emptyList()
+)
+
+data class ContinuousSurveyRef(
+    val surveyId: String,
+    val floorPlanId: String,
+    val floorName: String,
+    val session: ContinuousScanSession
 )
 
 data class StopAndGoSurveyRef(
@@ -243,7 +252,12 @@ class EkahauReportBuilder(
             measuredRadios = measuredRadiosWrapper,
             notes = EsxNotesWrapper(esxNotes),
             pictureNotes = EsxPictureNotesWrapper(esxPictureNotes),
-            stopAndGoSurveys = stopAndGoSurveys
+            stopAndGoSurveys = stopAndGoSurveys,
+            continuousSurveys = floorContexts.flatMap { context ->
+                context.input.continuousSessions.map { session ->
+                    ContinuousSurveyRef(session.id, context.floorPlan.id, context.floorPlan.name, session)
+                }
+            }
         )
     }
 

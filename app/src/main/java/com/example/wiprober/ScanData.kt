@@ -55,7 +55,9 @@ data class ContinuousScanSession(
     val endTime: Long = 0,
     val waypoints: List<RoutePointWrapper>, // Точки нажатий (повороты)
     val scanResults: List<ScanResultWrapper>, // Все результаты сканирований в процессе ходьбы
-    val importedFromEsx: Boolean = false
+    val importedFromEsx: Boolean = false,
+    /** Roaming probe of this track, if it was enabled; app/export only, never in the ESX. */
+    val roaming: RoamingLog? = null
 )
 
 @JsonModel

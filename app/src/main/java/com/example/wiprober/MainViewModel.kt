@@ -21,6 +21,21 @@ class MainViewModel @JvmOverloads constructor(
     private var activeSessionStartTime: Long = 0L
     private val activeWaypoints = mutableListOf<RoutePointWrapper>()
     private val activeScanResults = mutableListOf<ScanResultWrapper>()
+    private var roamingTracker: RoamingTracker? = null
+
+    /** Starts the roaming log of the active Continuous track (once; kept across recreation). */
+    fun startRoamingLog(target: String, intervalMillis: Int): Boolean {
+        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking || roamingTracker != null) return false
+        roamingTracker = RoamingTracker(target, intervalMillis)
+        return true
+    }
+
+    /** One roaming probe sample at [atMillis] (wall clock); ignored when no track is active. */
+    fun recordRoamingSample(atMillis: Long, bssid: String?, rssi: Int?, ok: Boolean, rttMs: Double?, scanning: Boolean) {
+        val tracker = roamingTracker ?: return
+        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return
+        tracker.add((atMillis - activeSessionStartTime).coerceAtLeast(0L), bssid, rssi, ok, rttMs, scanning)
+    }
 
     fun loadProject(
         mapInfo: MapInfo,
@@ -255,7 +270,8 @@ class MainViewModel @JvmOverloads constructor(
             startTime = activeSessionStartTime,
             endTime = now,
             waypoints = activeWaypoints.toList(),
-            scanResults = activeScanResults.toList()
+            scanResults = activeScanResults.toList(),
+            roaming = roamingTracker?.finish()
         )
         _screenState.update {
             it.copy(
@@ -440,6 +456,7 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     private fun clearActiveSession() {
+        roamingTracker = null
         activeSessionId = null
         activeSessionStartTime = 0L
         activeWaypoints.clear()

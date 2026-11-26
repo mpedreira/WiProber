@@ -24,8 +24,10 @@ object PerformanceExport {
     const val FORMAT = "wiprober-performance"
     const val VERSION = 1
 
-    fun hasMeasurements(snapshot: ProjectExportSnapshot): Boolean =
-        snapshot.floors.any { floor -> floor.survey.scanPoints.any { it.throughput?.isEmpty == false } }
+    fun hasMeasurements(snapshot: ProjectExportSnapshot): Boolean = snapshot.floors.any { floor ->
+        floor.survey.scanPoints.any { it.throughput?.isEmpty == false } ||
+            floor.survey.continuousScanSessions.any { !it.importedFromEsx && it.roaming != null }
+    }
 
     fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long): JsonObject {
         val rows = JsonArray()
@@ -47,6 +49,14 @@ object PerformanceExport {
             add("measurements", rows)
             add("networkTests", networkRows)
             add("scriptSteps", scriptRows)
+            add("roamingSessions", JsonArray().apply {
+                report?.continuousSurveys.orEmpty().forEach { ref -> ref.session.roaming?.let { add(roamingSessionRow(ref, it)) } }
+            })
+            add("roamingEvents", JsonArray().apply {
+                report?.continuousSurveys.orEmpty().forEach { ref ->
+                    ref.session.roaming?.events.orEmpty().forEach { add(roamingEventRow(ref, it)) }
+                }
+            })
         }
     }
 
@@ -64,6 +74,42 @@ object PerformanceExport {
             zip.write(performanceJson)
             zip.closeEntry()
         }
+    }
+
+    private fun roamingSessionRow(ref: ContinuousSurveyRef, log: RoamingLog) = JsonObject().apply {
+        addProperty("surveyId", ref.surveyId)
+        addProperty("floorPlanId", ref.floorPlanId)
+        addProperty("floorName", ref.floorName)
+        addProperty("startedAt", isoUtc(ref.session.startTime))
+        addProperty("endedAt", isoUtc(ref.session.endTime))
+        addProperty("target", log.target)
+        addProperty("intervalMs", log.intervalMillis)
+        addProperty("probes", log.probes)
+        addProperty("lost", log.lost)
+        addProperty("lossPct", if (log.probes > 0) round1(log.lost * 100.0 / log.probes) else null)
+        addProperty("avgRttMs", log.avgRttMs)
+        addProperty("roams", log.events.count { it.type == RoamingEvent.ROAM })
+        addProperty("outages", log.events.count { it.type == RoamingEvent.OUTAGE })
+    }
+
+    /** Placed on the marked route by time, like the Continuous scans in the ESX. */
+    private fun roamingEventRow(ref: ContinuousSurveyRef, event: RoamingEvent) = JsonObject().apply {
+        val route = ref.session.waypoints.sortedBy(RoutePointWrapper::timestamp)
+        val position = SurveyGuide.positionAt(route, event.atMillis)
+        addProperty("surveyId", ref.surveyId)
+        addProperty("floorPlanId", ref.floorPlanId)
+        addProperty("floorName", ref.floorName)
+        addProperty("x", position?.first?.toDouble())
+        addProperty("y", position?.second?.toDouble())
+        addProperty("at", isoUtc(ref.session.startTime + event.atMillis))
+        addProperty("type", event.type)
+        addProperty("fromBssid", event.fromBssid)
+        addProperty("toBssid", event.toBssid)
+        addProperty("fromRssi", event.fromRssi)
+        addProperty("toRssi", event.toRssi)
+        addProperty("outageMs", event.outageMillis)
+        addProperty("lostProbes", event.lostProbes)
+        addProperty("duringScan", event.duringScan)
     }
 
     /** Position fields shared by every row type. */

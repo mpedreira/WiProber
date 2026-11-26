@@ -31,7 +31,9 @@ Nada de WiProber se escribe dentro del `.esx`, y los campos nativos `throughputS
   "esxFile": "Proyecto.esx",
   "measurements": [ { …fila… }, … ],
   "networkTests": [ { …fila… }, … ],
-  "scriptSteps":  [ { …fila… }, … ]
+  "scriptSteps":  [ { …fila… }, … ],
+  "roamingSessions": [ { …fila… }, … ],
+  "roamingEvents":   [ { …fila… }, … ]
 }
 ```
 
@@ -44,8 +46,10 @@ Nada de WiProber se escribe dentro del `.esx`, y los campos nativos `throughputS
 | `measurements` | array | Una fila por **punto Stop-and-Go × destino de rendimiento** (iPerf3 / Internet) |
 | `networkTests` | array | Una fila por **punto × prueba de red importada** (sección 3b) |
 | `scriptSteps` | array | Una fila por **punto × paso de guion HTTP importado** (sección 3c) |
+| `roamingSessions` | array | Una fila por **recorrido continuo con sonda de roaming** (sección 3d) |
+| `roamingEvents` | array | Una fila por **roaming o corte** detectado en esos recorridos (sección 3d) |
 
-Los tres arrays aparecen siempre (vacíos si no hay datos).
+Todos los arrays aparecen siempre (vacíos si no hay datos).
 
 ## 3. Campos de cada fila
 
@@ -159,12 +163,43 @@ Guiones de la sección `scripts` (o importados de un `.har`): peticiones encaden
 | `bytes` | int \| null | Tamaño del cuerpo |
 | `error` | string \| null | P. ej. `status 401`, `response does not contain "A-01"`, `cannot extract token from $.data.token`, `unknown variable token` |
 
+## 3d. Roaming en modo continuo (`roamingSessions`, `roamingEvents`)
+
+Si la configuración importada activa `roaming`, durante cada recorrido continuo la app, cada `intervalMs` (200 ms por defecto), lee el AP conectado y hace una conexión TCP al destino (`host:port`, p. ej. `${gateway}:443`) por la WiFi; una conexión rechazada también prueba conectividad. Los eventos se sitúan **sobre el recorrido marcado en el plano** interpolando por tiempo entre los toques, igual que los escaneos del recorrido en el `.esx`. El `surveyId` es el del survey del recorrido en el `.esx` (el id de la sesión, estable entre exportaciones).
+
+`roamingSessions`:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `surveyId`, `floorPlanId`, `floorName` | | Recorrido y planta |
+| `startedAt`, `endedAt` | string ISO-8601 UTC | Inicio y fin del recorrido |
+| `target` | string | Destino de la sonda (`gateway:443`, `host:puerto`) |
+| `intervalMs` | int | Intervalo entre sondas |
+| `probes`, `lost` | int | Sondas enviadas / fallidas |
+| `lossPct` | number \| null | Pérdida 0–100 % |
+| `avgRttMs` | number \| null | Tiempo medio de conexión de las sondas correctas |
+| `roams`, `outages` | int | Eventos de cada tipo |
+
+`roamingEvents`:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `surveyId`, `floorPlanId`, `floorName` | | Recorrido y planta |
+| `x`, `y` | number \| null | Posición en el recorrido (píxeles del plano) |
+| `at` | string ISO-8601 UTC | Momento del evento |
+| `type` | string | `roam` (cambió el BSSID) u `outage` (≥3 sondas seguidas fallidas sin cambiar de AP) |
+| `fromBssid`, `toBssid` | string \| null | AP anterior y nuevo (iguales en un `outage`) |
+| `fromRssi`, `toRssi` | int \| null | Señal antes y después, dBm |
+| `outageMs` | int \| null | Tiempo sin conexión más allá de un intervalo (0 = roaming sin corte); `null` si no se recuperó antes de acabar el recorrido |
+| `lostProbes` | int | Sondas fallidas en el evento |
+| `duringScan` | bool | Hubo un escaneo WiFi durante el corte: el móvil estaba fuera de canal y parte del corte puede deberse al escaneo |
+
 ## 4. Cómo cruzarlo con el `.esx`
 
 - **Dentro del mismo ZIP**: por `surveyId` → `survey-<surveyId>.json`. El escaneo WiFi completo del punto (todos los APs) está en ese survey (`wifiTracks[0]`) y en su binario `track-<binaryFileId>.bin`.
 - **Entre exportaciones distintas** (histórico, comparativas): por `floorPlanId` + `x` + `y` (tolerancia sugerida 0,5 px). El `surveyId` de los puntos se **regenera en cada exportación**; `floorPlanId` y las coordenadas no cambian.
 - **A metros**: `metros = píxeles × metersPerUnit` (de `floorPlans.json`). Tamaño del plano: `width`/`height`; imagen: `image-<imageId>`.
-- Puntos del **modo continuo** y puntos **importados de otro `.esx`** no tienen filas.
+- Puntos **importados de otro `.esx`** no tienen filas. Los recorridos del **modo continuo** solo aparecen en `roamingSessions`/`roamingEvents`.
 
 Datos que tu app puede derivar del `.esx` sin cambios en WiProber: APs en el mismo canal por encima de −82 dBm (cocanal), APs por encima de −67 dBm (cobertura redundante), diferencia entre el mejor y el segundo AP, y el *BSS Load* de cualquier AP (los elementos del beacon están en `informationElements` de `accessPointMeasurements.json`).
 
@@ -190,10 +225,4 @@ Datos que tu app puede derivar del `.esx` sin cambios en WiProber: APs en el mis
 | `v3.0.0-throughput.1` | Formato 1: ZIP con `.esx` + JSON; posición, `surveyId`, `target`, `method`, `downMbps`, `upMbps`, `latencyMs`, `ssid`, `bssidStart`/`bssidEnd`, `rssi`, `linkMbps`, `error`. Ventana de progreso y salto rápido de servidores caídos |
 | `v3.0.0-throughput.2` | Añadidos `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latencia con 10 muestras |
 | `v3.0.0-throughput.3` | Sin cambios en la exportación (guía de medición en la app) |
-| `v3.0.0-throughput.4` | Añadidos los arrays `networkTests` y `scriptSteps` (configuración importada) |
-
-## 8. Propuesto, aún no implementado
-
-Sujeto a aprobación; cuando se haga se documentará aquí:
-
-- **Roaming en modo continuo**: eventos de cambio de AP y tiempo sin conexión, situados sobre el recorrido marcado en el plano.
+| `v3.0.0-throughput.4` | Añadidos los arrays `networkTests` y `scriptSteps` (configuración importada) y `roamingSessions`/`roamingEvents` (roaming en modo continuo) |
