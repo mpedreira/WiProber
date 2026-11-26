@@ -506,11 +506,12 @@ class SurveyActivity : AppCompatActivity() {
     private fun startActiveTests(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>) {
         val settings = throughputSettingsStore.load()
         val imported = configStore.load()
+        val credentials = configStore.loadCredentials()
         val phases = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts)
         if (phases.isEmpty()) return
         val probe = throughputProbe
         viewModel.startActiveRun(pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS) { control, listener ->
-            probe.measure(settings, imported, scanResults, control, listener)
+            probe.measure(settings, imported, credentials, scanResults, control, listener)
         }
     }
 
@@ -536,8 +537,8 @@ class SurveyActivity : AppCompatActivity() {
         val none = getString(R.string.config_none)
         val message = getString(
             R.string.config_summary,
-            imported.tests.orEmpty().joinToString(", ") { it.name }.ifEmpty { none },
-            imported.scripts.orEmpty().joinToString(", ") { it.name }.ifEmpty { none },
+            imported.tests.orEmpty().joinToString(", ") { it.displayAlias }.ifEmpty { none },
+            imported.scripts.orEmpty().joinToString(", ") { it.displayAlias }.ifEmpty { none },
             imported.roamingSettings.let { if (it.enabled && it.host.isNotEmpty()) "${it.host}:${it.port}" else none }
         )
         MaterialAlertDialogBuilder(this)
@@ -552,9 +553,10 @@ class SurveyActivity : AppCompatActivity() {
             .show()
     }
 
+    /** Parse → preview (nothing saved yet) → explicit activation; a failure keeps the previous profile. */
     private fun importConfiguration(uri: Uri) {
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
+            val parsed = withContext(Dispatchers.IO) {
                 runCatching {
                     val text = requireNotNull(contentResolver.openInputStream(uri)) { "Cannot open the file" }.use { input ->
                         val bytes = java.io.ByteArrayOutputStream()
@@ -568,8 +570,20 @@ class SurveyActivity : AppCompatActivity() {
                         bytes.toString(Charsets.UTF_8.name())
                     }
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "config"
-                    configStore.apply(WiproberConfigParser.parse(text, name), throughputSettingsStore, surveyGuideStore)
+                    val config = WiproberConfigParser.parse(text, name)
+                    config to configStore.preview(config)
                 }
+            }
+            parsed.onSuccess { (config, preview) ->
+                ConfigImportDialogs.showPreview(this@SurveyActivity, preview) { activateConfiguration(config) }
+            }.onFailure(::showConfigImportFailure)
+        }
+    }
+
+    private fun activateConfiguration(config: WiproberConfig) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { configStore.apply(config, throughputSettingsStore, surveyGuideStore) }
             }
             result.onSuccess { summary ->
                 renderSurveyGuide(viewModel.screenState.value)
@@ -584,19 +598,24 @@ class SurveyActivity : AppCompatActivity() {
                             if (summary.guide) yes else unchanged,
                             summary.tests?.toString() ?: unchanged,
                             summary.scripts?.joinToString(", ")?.ifEmpty { "0" } ?: unchanged,
-                            if (summary.roaming) yes else unchanged
+                            if (summary.roaming) yes else unchanged,
+                            summary.credentials
                         )
                     )
                     .setPositiveButton(R.string.action_ok, null)
                     .show()
-            }.onFailure { error ->
-                MaterialAlertDialogBuilder(this@SurveyActivity)
-                    .setTitle(R.string.config_import_failed)
-                    .setMessage(error.message ?: error.javaClass.simpleName)
-                    .setPositiveButton(R.string.action_ok, null)
-                    .show()
-            }
+            }.onFailure(::showConfigImportFailure)
         }
+    }
+
+    private fun showConfigImportFailure(error: Throwable) {
+        // Parser messages never quote credential values; sanitize anything else.
+        val detail = (error as? ConfigException)?.message ?: ErrorClassifier.sanitize(error.message ?: error.javaClass.simpleName)
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.config_import_failed)
+            .setMessage(getString(R.string.config_import_failed_kept, detail))
+            .setPositiveButton(R.string.action_ok, null)
+            .show()
     }
 
     /** Stop-and-Go on a calibrated floor with the guide enabled. */

@@ -165,7 +165,7 @@ class ThroughputRunner(
     private fun runScript(script: HttpScript, tracker: ProgressTracker): ScriptRun {
         val before = network?.association()
         val base = ScriptRun(
-            name = script.name, measuredAt = clock.now(),
+            name = script.name, measuredAt = clock.now(), alias = script.displayAlias, stepsTotal = script.steps.size,
             ssid = before?.ssid, bssidStart = before?.bssid, rssi = before?.rssi
         )
         val runner = scriptRunner
@@ -177,8 +177,8 @@ class ThroughputRunner(
         }
         if (unavailable != null || runner == null) {
             script.steps.indices.forEach { index -> tracker.phaseDone(scriptKey(script, index), RunStatus.SKIPPED, unavailable) }
-            tracker.skipSteps(script.name, script.steps.size)
-            return base.copy(error = if (unavailable == ErrorCodes.NOT_ON_WIFI) NOT_ON_WIFI else unavailable)
+            tracker.skipSteps(script.displayAlias, script.steps.size)
+            return base.copy(error = if (unavailable == ErrorCodes.NOT_ON_WIFI) NOT_ON_WIFI else unavailable, errorCode = unavailable)
         }
         var index = 0
         val results = runner.run(
@@ -186,10 +186,10 @@ class ThroughputRunner(
             onStep = { i, step ->
                 control.checkActive()
                 index = i
-                tracker.startStep(script.name, step.name)
+                tracker.startStep(script.displayAlias, step.name)
             },
             onResult = { result ->
-                tracker.finishStep(script.name, result)
+                tracker.finishStep(script.displayAlias, result)
                 tracker.phaseDone(scriptKey(script, index), if (result.ok) RunStatus.COMPLETED else RunStatus.FAILED, result.errorCode)
             }
         )

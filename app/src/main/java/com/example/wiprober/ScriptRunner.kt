@@ -21,6 +21,11 @@ import kotlin.math.roundToLong
 data class ScriptRun(
     val name: String,
     val measuredAt: Long,
+    val alias: String? = null,
+    /** Steps the script defines; with [steps] it tells how far a run got (0 when skipped). */
+    val stepsTotal: Int? = null,
+    /** Why no step ran, or why the run stopped early (skipped without Wi-Fi, cancelled). */
+    val errorCode: String? = null,
     val ssid: String? = null,
     val bssidStart: String? = null,
     val bssidEnd: String? = null,
@@ -68,7 +73,13 @@ class TimedHttpClient(
     private val connectTimeoutMillis: Int = 5_000,
     private val readTimeoutMillis: Int = 15_000,
     /** Tracks sockets so cancelling or a deadline closes them. */
-    private val control: MeasurementControl = MeasurementControl()
+    private val control: MeasurementControl = MeasurementControl(),
+    /**
+     * Android's cleartext policy (`NetworkSecurityPolicy.isCleartextTrafficPermitted(host)`),
+     * applied to this raw-socket client exactly as the platform applies it to HttpURLConnection.
+     */
+    private val cleartextPermitted: (String) -> Boolean = { true },
+    private val maxBodyBytes: Long = MAX_BODY_BYTES
 ) {
     class Response(val status: Int, val headers: List<Pair<String, String>>, val body: ByteArray, val bytes: Long)
 
@@ -85,6 +96,9 @@ class TimedHttpClient(
         val https = url.scheme.equals("https", ignoreCase = true)
         val host = requireNotNull(url.host) { "URL without host" }
         val port = if (url.port > 0) url.port else if (https) 443 else 80
+        if (!https && !cleartextPermitted(host)) {
+            throw MeasurementException(ErrorCodes.CLEARTEXT_NOT_PERMITTED, "cleartext HTTP is not permitted by the network security policy")
+        }
 
         var mark = System.nanoTime()
         val address = resolve(host).first()
@@ -103,7 +117,7 @@ class TimedHttpClient(
                 val tls = sslSocketFactory.createSocket(plain, host, port, true) as SSLSocket
                 tls.startHandshake()
                 if (!hostnameVerifier.verify(host, tls.session)) {
-                    throw SSLPeerUnverifiedException("certificate does not match $host")
+                    throw MeasurementException(ErrorCodes.HOSTNAME_MISMATCH, "certificate does not match the host name", SSLPeerUnverifiedException(host))
                 }
                 timing.tlsMs = elapsed(mark)
                 socket = tls
@@ -126,7 +140,9 @@ class TimedHttpClient(
                 ?: throw IOException("invalid status line: ${statusLine.take(60)}")
             val responseHeaders = generateSequence { readLine(input).takeIf(String::isNotEmpty) }
                 .map { it.substringBefore(':').trim() to it.substringAfter(':', "").trim() }
+                .take(MAX_HEADERS + 1)
                 .toList()
+            if (responseHeaders.size > MAX_HEADERS) throw MeasurementException(ErrorCodes.RESPONSE_TOO_LARGE, "more than $MAX_HEADERS response headers")
             val (content, bytes) = readBody(input, method, status, responseHeaders)
             timing.downloadMs = elapsed(mark)
             return Response(status, responseHeaders, content, bytes)
@@ -171,6 +187,7 @@ class TimedHttpClient(
                 }
                 if (kept.size() < MAX_KEPT_BODY) kept.write(buffer, 0, minOf(read, MAX_KEPT_BODY - kept.size()))
                 total += read
+                if (total > maxBodyBytes) throw MeasurementException(ErrorCodes.RESPONSE_TOO_LARGE, "response body over $maxBodyBytes bytes")
                 left -= read
             }
         }
@@ -211,19 +228,27 @@ class TimedHttpClient(
 
     private fun elapsed(start: Long): Double = ((System.nanoTime() - start) / 100_000.0).roundToLong() / 10.0
 
-    private companion object {
-        val MANAGED_HEADERS = setOf("host", "connection", "content-length", "accept-encoding", "transfer-encoding")
-        const val MAX_KEPT_BODY = 1_000_000
-        const val MAX_LINE = 16_384
+    companion object {
+        private val MANAGED_HEADERS = setOf("host", "connection", "content-length", "accept-encoding", "transfer-encoding")
+        private const val MAX_KEPT_BODY = 1_000_000
+        private const val MAX_LINE = 16_384
+        private const val MAX_HEADERS = 100
+        /** A script step reads at most this much, then fails with [ErrorCodes.RESPONSE_TOO_LARGE]. */
+        const val MAX_BODY_BYTES = 50L * 1024 * 1024
     }
 }
 
 /**
- * Replays an [HttpScript]: substitutes `${variables}`, keeps cookies between steps, checks the
- * expected status/text and extracts values for later steps. A failed step does not stop the
- * script; steps that need a value that was never extracted fail with that reason.
+ * Replays an [HttpScript]: substitutes `${variables}` and `${secret.NAME}` credentials, keeps
+ * cookies between steps (host-only, bounded), checks the expected status/text and extracts values
+ * for later steps. A failed step does not stop the script; steps that need a value that was never
+ * extracted, or a credential that was never provided, fail with that reason.
+ *
+ * Redirects are not followed (a 3xx is the step's status). Credential and extracted values never
+ * reach the result: hosts and errors are redacted and the exported path comes from the
+ * definition (no query, token-like segments hidden).
  */
-class ScriptRunner(private val http: TimedHttpClient) {
+class ScriptRunner(private val http: TimedHttpClient, private val credentials: Map<String, String> = emptyMap()) {
     fun run(
         script: HttpScript,
         onStep: (index: Int, step: HttpScriptStep) -> Unit = { _, _ -> },
@@ -231,32 +256,41 @@ class ScriptRunner(private val http: TimedHttpClient) {
     ): List<ScriptStepResult> {
         val variables = script.variables.toMutableMap()
         val cookies = mutableMapOf<String, MutableMap<String, String>>()
+        val secrets = credentials.values.toMutableSet()
         return script.steps.mapIndexed { index, step ->
             onStep(index, step)
-            runStep(step, variables, cookies).also(onResult)
+            runStep(step, variables, cookies, secrets).also(onResult)
         }
     }
 
     private fun runStep(
         step: HttpScriptStep,
         variables: MutableMap<String, String>,
-        cookies: MutableMap<String, MutableMap<String, String>>
+        cookies: MutableMap<String, MutableMap<String, String>>,
+        secrets: MutableSet<String>
     ): ScriptStepResult {
         val timing = TimedHttpClient.Timing()
-        var result = ScriptStepResult(name = step.name, method = step.method, host = null, path = null)
+        val templatePath = runCatching { URI(step.url.replace(PLACEHOLDER, "x")).rawPath }.getOrNull()
+        var result = ScriptStepResult(name = step.name, method = step.method, host = null, path = Sensitive.displayPath(templatePath))
         val start = System.nanoTime()
         fun total() = ((System.nanoTime() - start) / 100_000.0).roundToLong() / 10.0
         fun withTiming(r: ScriptStepResult) = r.copy(
             dnsMs = timing.dnsMs, connectMs = timing.connectMs, tlsMs = timing.tlsMs,
             ttfbMs = timing.ttfbMs, downloadMs = timing.downloadMs
         )
+        val redactor = { Redactor(secrets) }
         try {
             if (step.isWrite && !step.allowWrite) {
                 throw MeasurementException(ErrorCodes.WRITE_NOT_ALLOWED, "${step.method} not allowed (allowWrite is false)")
             }
-            val url = URI(substitute(step.url, variables))
-            result = result.copy(host = url.host, path = url.rawPath?.ifEmpty { "/" } ?: "/")
+            val url = try {
+                URI(substitute(step.url, variables))
+            } catch (e: java.net.URISyntaxException) {
+                throw MeasurementException(ErrorCodes.INVALID_TARGET, "resolved URL is not valid")
+            }
+            result = result.copy(host = redactor().redact(url.host))
             val headers = step.headers.mapValues { (_, value) -> substitute(value, variables) }.toMutableMap()
+            ResolvedRequestValidator.check(url, headers)
             cookies[url.host]?.takeIf { it.isNotEmpty() }?.let { jar ->
                 headers["Cookie"] = jar.entries.joinToString("; ") { "${it.key}=${it.value}" }
             }
@@ -265,7 +299,13 @@ class ScriptRunner(private val http: TimedHttpClient) {
             val response = http.execute(step.method, url, headers, body, timing)
             response.headers.filter { it.first.equals("Set-Cookie", true) }.forEach { (_, value) ->
                 val pair = value.substringBefore(';')
-                cookies.getOrPut(url.host) { mutableMapOf() }[pair.substringBefore('=').trim()] = pair.substringAfter('=', "").trim()
+                val name = pair.substringBefore('=').trim()
+                val cookie = pair.substringAfter('=', "").trim()
+                val jar = cookies.getOrPut(url.host) { linkedMapOf() }
+                if (name.isNotEmpty() && name.length <= 128 && cookie.length <= MAX_COOKIE_LENGTH && (name in jar || jar.size < MAX_COOKIES)) {
+                    jar[name] = cookie
+                    secrets += cookie
+                }
             }
             val text = String(response.body, StandardCharsets.UTF_8)
             val problems = mutableListOf<Pair<String, String>>()
@@ -275,7 +315,12 @@ class ScriptRunner(private val http: TimedHttpClient) {
             step.expectContains?.let { if (it !in text) problems += ErrorCodes.EXPECTATION_FAILED to "expected text not found" }
             step.extract.forEach { (name, path) ->
                 val value = JsonPathLite.read(text, path)
-                if (value == null) problems += ErrorCodes.EXTRACT_FAILED to "cannot extract $name from $path" else variables[name] = value
+                if (value == null) {
+                    problems += ErrorCodes.EXTRACT_FAILED to "cannot extract $name from $path"
+                } else {
+                    variables[name] = value
+                    secrets += value
+                }
             }
             return withTiming(result).copy(
                 status = response.status,
@@ -290,18 +335,24 @@ class ScriptRunner(private val http: TimedHttpClient) {
         } catch (e: Exception) {
             return withTiming(result).copy(
                 ok = false, totalMs = total(),
-                error = ErrorClassifier.detail(e), errorCode = ErrorClassifier.code(e)
+                error = redactor().redact(ErrorClassifier.detail(e)), errorCode = ErrorClassifier.code(e)
             )
         }
     }
 
     private fun substitute(text: String, variables: Map<String, String>): String =
-        VARIABLE.replace(text) { match ->
-            variables[match.groupValues[1]]
-                ?: throw MeasurementException(ErrorCodes.UNKNOWN_VARIABLE, "unknown variable ${match.groupValues[1]}")
+        PLACEHOLDER.replace(text) { match ->
+            val name = match.groupValues[2]
+            if (match.groupValues[1].isNotEmpty()) {
+                credentials[name] ?: throw MeasurementException(ErrorCodes.MISSING_CREDENTIAL, "credential $name not provided")
+            } else {
+                variables[name] ?: throw MeasurementException(ErrorCodes.UNKNOWN_VARIABLE, "unknown variable $name")
+            }
         }
 
     private companion object {
-        val VARIABLE = Regex("""\$\{([A-Za-z0-9_]+)}""")
+        val PLACEHOLDER = Regex("""\$\{(secret\.)?([A-Za-z0-9_]+)}""")
+        const val MAX_COOKIES = 30
+        const val MAX_COOKIE_LENGTH = 4_096
     }
 }

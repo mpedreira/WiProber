@@ -15,5 +15,8 @@ class ExampleConfigTest {
         assertEquals(4, config.tests!!.size)
         assertEquals(listOf("login", "location"), config.scripts!!.single().steps.map { it.name })
         assertEquals(true, config.roaming!!.enabled)
+        assertEquals("Item lookup", config.scripts!!.single().displayAlias)
+        assertEquals(setOf("password"), config.scripts!!.single().credentialReferences())
+        assertEquals(setOf("password"), config.credentials!!.keys)
     }
 }

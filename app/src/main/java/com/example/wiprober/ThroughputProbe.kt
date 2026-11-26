@@ -3,6 +3,7 @@ package com.example.wiprober
 import android.content.Context
 import android.net.wifi.ScanResult
 import android.os.Build
+import android.security.NetworkSecurityPolicy
 import java.net.ConnectException
 import java.net.InetSocketAddress
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
     suspend fun measure(
         settings: ThroughputSettings,
         imported: WiproberConfigStore.Imported,
+        credentials: Map<String, String>,
         scanResults: List<ScanResult>,
         control: MeasurementControl,
         listener: RunListener
@@ -50,7 +52,8 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
             val timedHttp = TimedHttpClient(
                 socketFactory = socketFactory,
                 resolve = { host -> network?.resolve(host)?.toTypedArray() ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI) },
-                control = control
+                control = control,
+                cleartextPermitted = NetworkSecurityPolicy.getInstance()::isCleartextTrafficPermitted
             )
             val runner = ThroughputRunner(
                 iperf = Iperf3Client(socketFactory = socketFactory, control = control),
@@ -71,7 +74,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                     clock = clock,
                     control = control
                 ),
-                scriptRunner = ScriptRunner(timedHttp),
+                scriptRunner = ScriptRunner(timedHttp, credentials),
                 clock = clock,
                 control = control
             )

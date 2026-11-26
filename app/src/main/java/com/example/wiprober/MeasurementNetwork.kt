@@ -121,6 +121,8 @@ object ErrorCodes {
     const val EXPECTATION_FAILED = "expectation_failed"
     const val EXTRACT_FAILED = "extract_failed"
     const val UNKNOWN_VARIABLE = "unknown_variable"
+    /** A `${secret.NAME}` credential the user has not provided. */
+    const val MISSING_CREDENTIAL = "missing_credential"
     const val WRITE_NOT_ALLOWED = "write_not_allowed"
     const val IO_ERROR = "io_error"
 }
@@ -142,6 +144,9 @@ object ErrorClassifier {
             if ("refused" in e.message.orEmpty().lowercase()) ErrorCodes.CONNECTION_REFUSED else ErrorCodes.CONNECT_FAILED
         is java.net.NoRouteToHostException, is java.net.PortUnreachableException -> ErrorCodes.CONNECT_FAILED
         is javax.net.ssl.SSLPeerUnverifiedException -> ErrorCodes.HOSTNAME_MISMATCH
+        // HttpURLConnection's refusal under the cleartext policy.
+        is java.net.UnknownServiceException ->
+            if ("cleartext" in e.message.orEmpty().lowercase()) ErrorCodes.CLEARTEXT_NOT_PERMITTED else ErrorCodes.IO_ERROR
         is javax.net.ssl.SSLException -> ErrorCodes.TLS_FAILED
         else -> ErrorCodes.IO_ERROR
     }

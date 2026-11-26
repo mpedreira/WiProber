@@ -38,6 +38,7 @@ object PerformanceExport {
         val rows = JsonArray()
         val networkRows = JsonArray()
         val scriptRows = JsonArray()
+        val scriptRunRows = JsonArray()
         val runRows = JsonArray()
         val surveyByScan = report?.stopAndGoSurveys.orEmpty().mapNotNull { ref -> ref.point.scanId?.let { it to ref.surveyId } }.toMap()
         snapshot?.floors.orEmpty().forEach { floor ->
@@ -52,6 +53,7 @@ object PerformanceExport {
                 results.tests.forEach { test -> rows.add(row(position, run, test)) }
                 results.networkTests.orEmpty().forEach { test -> networkRows.add(networkRow(position, run, test)) }
                 results.scripts.orEmpty().forEach { script ->
+                    scriptRunRows.add(scriptRunRow(position, run, script))
                     script.steps.forEachIndexed { index, step -> scriptRows.add(scriptRow(position, run, script, index, step)) }
                 }
             }
@@ -64,6 +66,7 @@ object PerformanceExport {
             add("activeRuns", runRows)
             add("measurements", rows)
             add("networkTests", networkRows)
+            add("scriptRuns", scriptRunRows)
             add("scriptSteps", scriptRows)
             add("roamingSessions", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref -> ref.session.roaming?.let { add(roamingSessionRow(ref, it)) } }
@@ -236,9 +239,37 @@ object PerformanceExport {
         addProperty("error", test.error)
     }
 
+    /** One row per script per run, also when it was skipped (no Wi-Fi) or failed before its first step. */
+    private fun scriptRunRow(position: Position, activeRun: ActiveRun, run: ScriptRun) = JsonObject().apply {
+        position(position, activeRun, run.measuredAt)
+        val ok = run.steps.count { it.ok }
+        addProperty("script", run.name)
+        addProperty("scriptAlias", run.alias ?: run.name)
+        addProperty(
+            "status",
+            when {
+                run.steps.isEmpty() && run.errorCode != null -> RunStatus.SKIPPED
+                run.steps.isNotEmpty() && ok == run.steps.size && (run.stepsTotal == null || run.steps.size == run.stepsTotal) -> RunStatus.COMPLETED
+                else -> RunStatus.FAILED
+            }
+        )
+        addProperty("stepsTotal", run.stepsTotal ?: run.steps.size)
+        addProperty("stepsRun", run.steps.size)
+        addProperty("stepsOk", ok)
+        addProperty("stepsFailed", run.steps.size - ok)
+        addProperty("totalMs", run.steps.mapNotNull { it.totalMs }.takeIf { it.isNotEmpty() }?.sum()?.let(::round1))
+        addProperty("ssid", run.ssid)
+        addProperty("bssidStart", run.bssidStart)
+        addProperty("bssidEnd", run.bssidEnd)
+        addProperty("rssi", run.rssi)
+        addProperty("errorCode", run.errorCode ?: run.steps.firstOrNull { !it.ok }?.errorCode)
+        addProperty("error", run.error)
+    }
+
     private fun scriptRow(position: Position, activeRun: ActiveRun, run: ScriptRun, index: Int, step: ScriptStepResult) = JsonObject().apply {
         position(position, activeRun, run.measuredAt)
         addProperty("script", run.name)
+        addProperty("scriptAlias", run.alias ?: run.name)
         addProperty("stepIndex", index + 1)
         addProperty("step", step.name)
         addProperty("method", step.method)

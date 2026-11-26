@@ -259,7 +259,7 @@ class NetworkTestRunner(
         val url = URI(substitute(test.url!!, network!!.link()))
         val timing = TimedHttpClient.Timing()
         val start = System.nanoTime()
-        val target = "${url.host}${url.rawPath?.ifEmpty { "/" } ?: "/"}" // no query: it may hold secrets
+        val target = "${url.host}${Sensitive.displayPath(url.rawPath)}" // no query nor token-like segments: they may hold secrets
         fun withTiming(result: NetworkTestResult) = result.copy(
             target = target, method = url.scheme.lowercase(),
             dnsMs = timing.dnsMs, connectMs = timing.connectMs, tlsMs = timing.tlsMs,
@@ -282,6 +282,8 @@ class NetworkTestRunner(
                     else -> ErrorCodes.EXPECTATION_FAILED
                 }
             )
+        } catch (e: MeasurementCancelled) {
+            throw e
         } catch (e: Exception) {
             val code = ErrorClassifier.code(e)
             withTiming(base).copy(error = "$code: ${ErrorClassifier.detail(e)}", errorCode = code)

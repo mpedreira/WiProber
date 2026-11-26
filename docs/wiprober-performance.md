@@ -190,21 +190,49 @@ Configured in the imported file (`tests` section, see the [example](wiprober-con
 
 `${gateway}` and `${dns}` in the configuration are replaced with the default gateway and first DNS server the Wi-Fi network assigned.
 
-## 3c. HTTP script steps (`scriptSteps`)
+## 3c. HTTP scripts (`scriptRuns`, `scriptSteps`)
 
-Scripts from the `scripts` section (or imported from a `.har`): chained requests with variables, values extracted from responses (e.g. a token) and cookies kept between steps. Only GET/HEAD unless the step has `"allowWrite": true`. Every step opens a new connection, so DNS/TCP/TLS are always measured. Each row carries the position fields.
+Scripts from the `scripts` section (or imported from a `.har`): chained requests with variables, `${secret.NAME}` credentials, values extracted from responses (e.g. a token) and cookies kept between steps. Only GET/HEAD unless the step has `"allowWrite": true`. Each row carries the position fields. See [wiprober-config.md](wiprober-config.md) for how credentials are kept out of definitions, the screen and this file.
+
+**Timing semantics.** Every step opens a new connection (`Connection: close`), so each phase is measured every time, on the Wi-Fi network:
+
+| Field | Measures |
+|---|---|
+| `dnsMs` | Name resolution on the Wi-Fi network (an IP literal resolves in ~0 ms) |
+| `connectMs` | TCP handshake to the first resolved address |
+| `tlsMs` | TLS handshake and host-name verification (https only) |
+| `ttfbMs` | From the end of sending the request to the first response byte |
+| `downloadMs` | From the first byte to the end of the body (status line and headers included) |
+| `totalMs` | Whole step, including variable resolution and checks |
+
+A phase that was not reached is `null`. Redirects are not followed: a 3xx is the step's status. A step reads at most 50 MB (`response_too_large`), 100 response headers and keeps at most 30 cookies per host; the step deadline (20 s) bounds its time.
+
+`scriptRuns` — one row per script per active run, **also** when it was skipped (no Wi-Fi) or stopped before its first step:
 
 | Field | Type | Description |
 |---|---|---|
-| `script`, `stepIndex`, `step` | | Script, step number (from 1) and name |
-| `method`, `host`, `path` | | Request (without query string) |
+| `script`, `scriptAlias` | string | Stable name and display alias |
+| `status` | string | `completed`, `failed` or `skipped` |
+| `stepsTotal`, `stepsRun`, `stepsOk`, `stepsFailed` | int | Steps defined / run / correct / failed |
+| `totalMs` | number \| null | Sum of the steps' `totalMs` |
+| `ssid`, `bssidStart`, `bssidEnd`, `rssi` | | Connected AP when the script started/ended |
+| `errorCode` | string \| null | Why it was skipped (`not_on_wifi`, `wifi_lost`), else the first failed step's code |
+| `error` | string \| null | Sanitized reason |
+
+`scriptSteps` — one row per step that ran:
+
+| Field | Type | Description |
+|---|---|---|
+| `script`, `scriptAlias`, `stepIndex`, `step` | | Script, step number (from 1) and name |
+| `method`, `host` | | Request method and resolved host (credential values redacted) |
+| `path` | string | Path **from the definition**: no query string, no extracted or credential values, token-like segments shown as `…` |
 | `status` | int \| null | HTTP status |
 | `ok` | bool | Status, expected text and extractions all correct |
 | `ssid`, `bssidStart`, `bssidEnd`, `rssi` | | Connected AP when the script started/ended |
-| `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`, `downloadMs`, `totalMs` | number \| null | Timing breakdown of the step, ms |
+| `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`, `downloadMs`, `totalMs` | number \| null | Timing breakdown, see above |
 | `bytes` | int \| null | Body size |
-| `errorCode` | string \| null | Structured cause |
-| `error` | string \| null | E.g. `status 401`, `response does not contain "A-01"`, `cannot extract token from $.data.token`, `unknown variable token` |
+| `errorCode` | string \| null | Structured cause: `http_status`, `expectation_failed`, `extract_failed`, `unknown_variable`, `missing_credential`, `invalid_target`, `cleartext_not_permitted`, `tls_failed`, `hostname_mismatch`, `response_too_large`, `timeout`, `resolution_failed`, `connect_failed`, `write_not_allowed`, … |
+| `error` | string \| null | E.g. `status 401`, `expected text not found`, `cannot extract token from $.data.token`. Never contains credential, cookie or extracted values, query strings or the expected text |
 
 ## 3d. Continuous-mode roaming (`roamingSessions`, `roamingEvents`)
 
@@ -299,4 +327,4 @@ Data your app can derive from the `.esx` with no WiProber change: APs on the sam
 | `v3.0.0-throughput.2` | Added `rxLinkMbps`, `frequencyMhz`, `channel`, `channelWidthMhz`, `wifiStandard`, `bssStationCount`, `bssChannelUtilizationPct`, `latencyAvgMs`, `jitterMs`, `latencySamples`, `deviceModel`, `androidVersion`. Latency from 10 samples |
 | `v3.0.0-throughput.3` | No export changes (survey guide in the app) |
 | `v3.0.0-throughput.4` | Added `networkTests` and `scriptSteps` (imported configuration) and `roamingSessions`/`roamingEvents` (Continuous-mode roaming) |
-| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; roaming schema 2 (typed attempt results, bounded outages, association-change types, monotonic time base, grounded approximate positions); measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |
+| next (format 2) | Rows per active run with `pointId`/`scanId`/`runId`, `activeRuns` with run and phase statuses, per-phase status and error codes, bytes and real duration, `latencyFailures`/`latencyMethod`, `rttKind`; `scriptRuns` and `scriptAlias`; script paths from the definition; roaming schema 2 (typed attempt results, bounded outages, association-change types, monotonic time base, grounded approximate positions); measured-network and association fields (`networkId`, `associationSource`, `ssidEnd`, `associationChange`, `resolvedAddress`, endpoints, `targetId`, `category`, aliases) |
