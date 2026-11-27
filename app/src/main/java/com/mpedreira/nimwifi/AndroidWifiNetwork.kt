@@ -46,6 +46,9 @@ class AndroidWifiNetworks(context: Context) {
         return AndroidMeasurementNetwork(network, chosen.second, cm, wifiManager, monitor, candidates.map { it.ssid })
     }
 
+    /** rc.3 · 2: whether any eligible Wi-Fi network exists, without opening or binding anything. */
+    fun hasWifi(): Boolean = connectivity?.let { wifiNetworks(it).isNotEmpty() } ?: false
+
     /**
      * rc.2 · 3: the Wi-Fi network with handle [id] (the one approved in the preflight), or null
      * when it no longer exists. Never falls back to another network.

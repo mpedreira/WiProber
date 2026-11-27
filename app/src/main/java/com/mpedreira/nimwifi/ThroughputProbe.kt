@@ -44,10 +44,11 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         /** The preflight the technician accepted: the run is bound to that very network (rc.2 · 3). */
         approved: NetworkPreflight? = null
     ): PointThroughput = runCancellable(control, "active-tests") {
-        // The approved network by its handle, revalidated before any traffic; without a usable
-        // preflight, the same choice the preflight would make. Never another Wi-Fi or mobile data.
+        // Only the network checked in the preflight, by its handle, revalidated before any traffic.
+        // A Wi-Fi that appeared after a check without one is checked first (rc.3 · 2); never
+        // another Wi-Fi or mobile data.
         val expected = settings.sanitized().expectedSsid
-        val selected = NetworkRevalidation.open(approved, wifiNetworks::selectById, { wifiNetworks.select(expected) }) { it.close() }
+        val selected = NetworkRevalidation.open(approved, wifiNetworks::selectById, wifiNetworks::hasWifi) { it.close() }
         selected?.let { bound ->
             val association = runCatching { bound.association() }.getOrNull()
             listener.onNetwork(bound.id, association?.ssid, NetworkVerification.of(expected, true, association))

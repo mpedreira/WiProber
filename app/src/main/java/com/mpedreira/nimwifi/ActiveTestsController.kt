@@ -43,21 +43,28 @@ class ActiveTestsController(
         if (ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isEmpty()) return
         // Mejora 13: before sending anything, which Wi-Fi the tests would use and whether it is the declared one.
         activity.lifecycleScope.launch {
-            val preflight = withContext(Dispatchers.IO) { runCatching { probe.preflight(settings.sanitized().expectedSsid) }.getOrNull() }
-            if (preflight != null && NetworkVerification.needsDecision(preflight.verification)) {
-                MaterialAlertDialogBuilder(activity)
-                    .setTitle(R.string.network_check_title)
-                    .setMessage(activity.getString(
-                        if (preflight.verification == NetworkVerification.UNKNOWN) R.string.network_check_unknown else R.string.network_check_mismatch,
-                        preflight.expectedSsid.orEmpty(), preflight.observedSsid ?: "?",
-                        preflight.eligible.joinToString(", ") { it ?: "?" }
-                    ))
-                    .setCancelable(false)
-                    .setPositiveButton(R.string.network_check_test_anyway) { _, _ -> run(pointId, scanId, scanResults, preflight, DECISION_CONFIRMED) }
-                    .setNegativeButton(R.string.network_check_skip, null)
-                    .show()
-            } else {
-                run(pointId, scanId, scanResults, preflight, null)
+            val step = withContext(Dispatchers.IO) { NetworkCheckFlow.begin { probe.preflight(settings.sanitized().expectedSsid) } }
+            when (step) {
+                is NetworkCheckFlow.Step.AskDecision -> {
+                    val preflight = step.preflight
+                    MaterialAlertDialogBuilder(activity)
+                        .setTitle(R.string.network_check_title)
+                        .setMessage(activity.getString(
+                            if (preflight.verification == NetworkVerification.UNKNOWN) R.string.network_check_unknown else R.string.network_check_mismatch,
+                            preflight.expectedSsid.orEmpty(), preflight.observedSsid ?: "?",
+                            preflight.eligible.joinToString(", ") { it ?: "?" }
+                        ))
+                        .setCancelable(false)
+                        .setPositiveButton(R.string.network_check_test_anyway) { _, _ ->
+                            val run = NetworkCheckFlow.confirmed(step)
+                            run(pointId, scanId, scanResults, run.preflight, run.decision)
+                        }
+                        .setNegativeButton(R.string.network_check_skip, null)
+                        .show()
+                }
+                // Also without Wi-Fi in the check: the run then sends nothing and records why,
+                // unless a Wi-Fi appeared meanwhile, which is checked again first (rc.3 · 2).
+                is NetworkCheckFlow.Step.Run -> run(pointId, scanId, scanResults, step.preflight, step.decision)
             }
         }
     }

@@ -82,6 +82,11 @@ object NetworkRevalidation {
     const val REPLACED = "replaced"
     /** Same handle, but it now reports another SSID than the one approved. */
     const val SSID_CHANGED = "ssid_changed"
+    /**
+     * rc.3 · 2: the check found no Wi-Fi (or could not run) and a Wi-Fi is there now: it has not
+     * been checked, so it is not used until it goes through the check and decision.
+     */
+    const val UNCHECKED = "unchecked"
 
     fun check(approved: NetworkPreflight, current: MeasurementNetwork?, association: Association?): String = when {
         current == null -> GONE
@@ -92,12 +97,19 @@ object NetworkRevalidation {
     }
 
     /**
-     * Opens the run's network: the approved one by handle ([byId]), or the fresh choice ([select])
-     * when there was no usable preflight. Throws [NetworkChangedException] (closing what it
-     * looked up) when the approved network changed. Nothing is sent here.
+     * Opens the run's network: only the one checked in the preflight, by its handle ([byId]).
+     * There is never a silent choice of another network (rc.3 · 2): without a checked network,
+     * [wifiPresent] (which opens nothing) decides between "no Wi-Fi" (null: nothing is sent and
+     * every target reports it) and [UNCHECKED] (a Wi-Fi appeared after the check: check it
+     * first). Throws [NetworkChangedException] (closing what it looked up) when the checked
+     * network is gone or changed. Nothing is sent here.
      */
-    fun <N : MeasurementNetwork> open(approved: NetworkPreflight?, byId: (String) -> N?, select: () -> N?, close: (N) -> Unit): N? {
-        val approvedId = approved?.networkId ?: return select()
+    fun <N : MeasurementNetwork> open(approved: NetworkPreflight?, byId: (String) -> N?, wifiPresent: () -> Boolean, close: (N) -> Unit): N? {
+        val approvedId = approved?.networkId
+        if (approvedId == null) {
+            if (wifiPresent()) throw NetworkChangedException(UNCHECKED, approved)
+            return null
+        }
         val current = byId(approvedId)
         val state = check(approved, current, current?.let { runCatching { it.association() }.getOrNull() })
         if (state != SAME) {
@@ -109,5 +121,29 @@ object NetworkRevalidation {
 }
 
 /** The approved Wi-Fi network changed before the run started; nothing was sent. */
-class NetworkChangedException(val state: String, val approved: NetworkPreflight) :
-    MeasurementException(ErrorCodes.NETWORK_CHANGED, "approved Wi-Fi network ${approved.observedSsid ?: approved.networkId}: $state")
+class NetworkChangedException(val state: String, val approved: NetworkPreflight?) :
+    MeasurementException(ErrorCodes.NETWORK_CHANGED, "checked Wi-Fi network ${approved?.observedSsid ?: approved?.networkId ?: "none"}: $state")
+
+/**
+ * rc.3 · 2: the start of an active run as an Android-free flow. [check] is the preflight (null
+ * when it could not run). A network that needs a decision is never run without one; the run
+ * itself only opens the network this check returned ([NetworkRevalidation.open]).
+ */
+object NetworkCheckFlow {
+    sealed class Step {
+        /** Run with this check (and the technician's decision, if one was needed). */
+        data class Run(val preflight: NetworkPreflight?, val decision: String?) : Step()
+        /** Show the check and wait: run only if the technician confirms. */
+        data class AskDecision(val preflight: NetworkPreflight) : Step()
+    }
+
+    const val DECISION_CONFIRMED = "confirmed"
+
+    fun begin(check: () -> NetworkPreflight?): Step {
+        val preflight = runCatching(check).getOrNull()
+        return if (preflight != null && NetworkVerification.needsDecision(preflight.verification)) Step.AskDecision(preflight)
+        else Step.Run(preflight, null)
+    }
+
+    fun confirmed(step: Step.AskDecision): Step.Run = Step.Run(step.preflight, DECISION_CONFIRMED)
+}
