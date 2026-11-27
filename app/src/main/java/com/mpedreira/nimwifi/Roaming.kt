@@ -77,7 +77,13 @@ data class RoamingEvent(
     val open: Boolean? = null,
     /** The event window contains a gap without samples longer than [RoamingTracker.GAP_FACTOR] intervals. */
     val samplingGap: Boolean? = null,
-    val scanOverlap: Boolean? = null
+    val scanOverlap: Boolean? = null,
+    /** Mejora 12: events of one reachability incident (e.g. two AP hops in one cut) share it. */
+    val incidentId: String? = null,
+    /** Outcomes (success, failed, cancelled) of the scans that overlapped the event window. */
+    val scanOverlapOutcomes: List<String>? = null,
+    /** `bounded`, `lower_bound_only` (not recovered), `upper_bound_only` (no failure seen) or `unknown` (gap without samples). */
+    val durationEvidence: String? = null
 ) {
     companion object {
         /** BSSID changed within the same SSID. */
@@ -119,7 +125,33 @@ data class RoamingLog(
     val resolutionFailures: Int? = null,
     val invalidTarget: Int? = null,
     val noWifi: Int? = null,
-    val samplingGaps: Int? = null
+    val samplingGaps: Int? = null,
+    /** Mejora 12: display alias of the target and the probe method. */
+    val targetAlias: String? = null,
+    val method: String? = null,
+    /** Attempts actually made against a valid target (connected, refused, timeout, unreachable): the TCP denominator. */
+    val tcpAttempts: Int? = null,
+    /** Timeouts and unreachable over [tcpAttempts]; DNS, invalid-target and no-Wi-Fi attempts are not in it. */
+    val tcpLossPct: Double? = null,
+    /** Spans without attempts longer than [RoamingTracker.GAP_FACTOR] intervals: not observed. */
+    val unobserved: List<RouteInterruption>? = null,
+    val incidents: List<RoamingIncident>? = null,
+    /** Optional bounded diagnostic trace of the attempts (enable it in the roaming settings). */
+    val trace: List<ProbeAttempt>? = null
+)
+
+/** Mejora 12: several events (AP hops, loss) inside one span between reachable attempts. */
+@JsonModel
+data class RoamingIncident(
+    val id: String,
+    val startMs: Long,
+    val endMs: Long?,
+    val events: Int,
+    /** Failed attempts of the incident, each counted once. */
+    val failedAttempts: Int,
+    val lowerBoundMs: Long?,
+    val upperBoundMs: Long?,
+    val open: Boolean
 )
 
 /**
@@ -128,7 +160,12 @@ data class RoamingLog(
  * actually observed. Scheduler delays, pauses, isolated timeouts and gaps without samples are
  * never reported as outages by themselves.
  */
-class RoamingTracker(private val target: String, private val intervalMillis: Int) {
+class RoamingTracker(
+    private val target: String,
+    private val intervalMillis: Int,
+    private val targetAlias: String? = null,
+    private val traceLimit: Int = 0
+) {
     private val attempts = mutableListOf<ProbeAttempt>()
 
     /** Attempts so far (for the route draft). */
@@ -143,8 +180,12 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
         attempts += attempt
     }
 
-    /** [scanWindows]: start..end of every Wi-Fi scan of the track, on the same time base. */
-    fun finish(scanWindows: List<LongRange> = emptyList()): RoamingLog {
+    /** [scanWindows]: start..end of every successful Wi-Fi scan of the track, on the same time base. */
+    fun finish(scanWindows: List<LongRange> = emptyList()): RoamingLog =
+        finishWindows(scanWindows.map { ScanWindow(it.first, it.last, ScanWindow.SUCCESS) })
+
+    /** [scanWindows]: every scan attempt of the track with its outcome, on the same time base. */
+    fun finishWindows(scanWindows: List<ScanWindow>): RoamingLog {
         val events = mutableListOf<RoamingEvent>()
         val covered = BooleanArray(attempts.size)
 
@@ -195,15 +236,18 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
         }
         closeRun(attempts.size)
 
+        val withIncidents = incidents(events.sortedWith(compareBy({ it.atMillis }, { it.type })))
         val intervals = attempts.zipWithNext { a, b -> b.startMs - a.startMs }.sorted()
         val connectedTimes = attempts.filter { it.result == ProbeResult.CONNECTED }.map { it.endMs - it.startMs }
+        val tcp = attempts.count { it.result in TCP_RESULTS }
+        val tcpLost = attempts.count { ProbeResult.connectivityFailure(it.result) }
         return RoamingLog(
             target = target,
             intervalMillis = intervalMillis,
             probes = attempts.size,
             lost = attempts.count { !ProbeResult.reachable(it.result) },
             avgRttMs = connectedTimes.takeIf { it.isNotEmpty() }?.average()?.let { (it * 10).roundToLong() / 10.0 },
-            events = events.sortedBy { it.atMillis },
+            events = withIncidents.first,
             schema = 2,
             timeBase = TIME_BASE,
             observedMedianIntervalMs = intervals.getOrNull(intervals.size / 2),
@@ -215,8 +259,55 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
             resolutionFailures = attempts.count { it.result == ProbeResult.RESOLUTION_FAILED },
             invalidTarget = attempts.count { it.result == ProbeResult.INVALID_TARGET },
             noWifi = attempts.count { it.result == ProbeResult.NO_WIFI },
-            samplingGaps = intervals.count { it > gapThreshold() }
+            samplingGaps = intervals.count { it > gapThreshold() },
+            targetAlias = targetAlias,
+            method = METHOD,
+            tcpAttempts = tcp,
+            tcpLossPct = if (tcp > 0) (tcpLost * 1000.0 / tcp).roundToLong() / 10.0 else null,
+            unobserved = attempts.zipWithNext().filter { (a, b) -> b.startMs - a.startMs > gapThreshold() }
+                .map { (a, b) -> RouteInterruption(a.endMs, b.startMs) },
+            incidents = withIncidents.second,
+            trace = if (traceLimit > 0) attempts.take(traceLimit) else null
         )
+    }
+
+    /**
+     * Events whose windows (last reachable attempt before → first one after) overlap belong to
+     * one incident. Their failed attempts were assigned once (see [associationEvent]).
+     */
+    private fun incidents(events: List<RoamingEvent>): Pair<List<RoamingEvent>, List<RoamingIncident>> {
+        val out = mutableListOf<RoamingEvent>()
+        val incidents = mutableListOf<RoamingIncident>()
+        var current: MutableList<RoamingEvent>? = null
+        var currentEnd = Long.MIN_VALUE
+        fun close() {
+            val group = current ?: return
+            val id = "inc-${incidents.size + 1}"
+            val failed = group.sumOf { it.failedAttempts ?: 0 }
+            val start = group.minOf { it.lastReachableAtMillis ?: it.atMillis }
+            val end = group.mapNotNull { it.firstReachableAtMillis }.maxOrNull()
+            val open = group.any { it.open == true }
+            val lower = group.mapNotNull { it.outageLowerBoundMs }.maxOrNull()
+            incidents += RoamingIncident(id, start, if (open) null else end, group.size, failed,
+                if (failed > 0) lower else lower, if (open) null else end?.let { it - start }, open)
+            out += group.map { it.copy(incidentId = if (group.size > 1 || failed > 0) id else null) }
+            current = null
+        }
+        events.forEach { event ->
+            val start = event.lastReachableAtMillis ?: event.atMillis
+            val end = event.firstReachableAtMillis ?: Long.MAX_VALUE
+            if (current != null && start <= currentEnd) {
+                current!! += event
+                currentEnd = maxOf(currentEnd, end)
+            } else {
+                close()
+                current = mutableListOf(event)
+                currentEnd = end
+            }
+        }
+        close()
+        // Single events without failures are not incidents of reachability.
+        return out to incidents.filter { it.events > 1 || it.failedAttempts > 0 }
     }
 
     /**
@@ -231,7 +322,7 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
         changeIndex: Int,
         afterIndex: Int,
         covered: BooleanArray,
-        scans: List<LongRange>
+        scans: List<ScanWindow>
     ): RoamingEvent {
         val lastReachable = lastReachableBefore(changeIndex)
         val firstReachable = firstReachableFrom(afterIndex)
@@ -239,11 +330,15 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
         val windowEnd = firstReachable?.let { attempts[it].startMs } ?: attempts.last().endMs
         val from = (lastReachable ?: 0)
         val to = firstReachable ?: attempts.size
-        val failed = (from until to).filter { i ->
+        val windowFailed = (from until to).filter { i ->
             ProbeResult.connectivityFailure(attempts[i].result) || attempts[i].result == ProbeResult.NO_WIFI
         }
-        failed.forEach { covered[it] = true }
+        // Mejora 12: a failed attempt already explained by an earlier event of the same span is
+        // not counted again (two AP hops in one cut share its failures).
+        val failed = windowFailed.filterNot { covered[it] }
+        windowFailed.forEach { covered[it] = true }
         val gap = hasGap(from, to)
+        val overlapping = overlapping(windowStart, windowEnd, scans)
         return RoamingEvent(
             type = type,
             atMillis = attempts[changeIndex.coerceAtMost(attempts.lastIndex)].startMs,
@@ -265,12 +360,22 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
             outageUpperBoundMs = if (lastReachable != null && firstReachable != null) windowEnd - windowStart else null,
             open = firstReachable == null,
             samplingGap = gap,
-            scanOverlap = overlaps(windowStart, windowEnd, scans),
-            lostProbes = failed.size
+            scanOverlap = overlapping.isNotEmpty(),
+            scanOverlapOutcomes = overlapping.map { it.outcome }.distinct().takeIf { it.isNotEmpty() },
+            lostProbes = failed.size,
+            durationEvidence = evidence(windowFailed.isNotEmpty(), firstReachable == null, gap, lastReachable != null && firstReachable != null)
         )
     }
 
-    private fun failureEvent(start: Int, endExclusive: Int, scans: List<LongRange>): RoamingEvent {
+    private fun evidence(failures: Boolean, open: Boolean, gap: Boolean, bothSides: Boolean): String = when {
+        open -> if (failures) LOWER_BOUND_ONLY else UNKNOWN_DURATION
+        !failures && gap -> UNKNOWN_DURATION
+        !failures -> UPPER_BOUND_ONLY
+        bothSides -> BOUNDED
+        else -> LOWER_BOUND_ONLY
+    }
+
+    private fun failureEvent(start: Int, endExclusive: Int, scans: List<ScanWindow>): RoamingEvent {
         val first = attempts[start]
         val last = attempts[endExclusive - 1]
         val lastReachable = lastReachableBefore(start)
@@ -291,8 +396,10 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
             outageUpperBoundMs = if (lastReachable != null && firstReachable != null) windowEnd - windowStart else null,
             open = firstReachable == null,
             samplingGap = hasGap(start, endExclusive),
-            scanOverlap = overlaps(windowStart, windowEnd, scans),
-            lostProbes = endExclusive - start
+            scanOverlap = overlapping(windowStart, windowEnd, scans).isNotEmpty(),
+            scanOverlapOutcomes = overlapping(windowStart, windowEnd, scans).map { it.outcome }.distinct().takeIf { it.isNotEmpty() },
+            lostProbes = endExclusive - start,
+            durationEvidence = evidence(true, firstReachable == null, hasGap(start, endExclusive), lastReachable != null && firstReachable != null)
         )
     }
 
@@ -307,9 +414,9 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
 
     private fun gapThreshold(): Long = GAP_FACTOR * intervalMillis.toLong()
 
-    /** Whole-interval overlap: any scan that intersects [start, end]. */
-    private fun overlaps(start: Long, end: Long, scans: List<LongRange>): Boolean =
-        scans.any { scan -> scan.first <= end && scan.last >= start }
+    /** Whole-interval overlap: every scan attempt (any outcome) that intersects [start, end]. */
+    private fun overlapping(start: Long, end: Long, scans: List<ScanWindow>): List<ScanWindow> =
+        scans.filter { scan -> scan.startMs <= end && scan.endMs >= start }
 
     companion object {
         const val TIME_BASE = "monotonic-relative"
@@ -318,5 +425,13 @@ class RoamingTracker(private val target: String, private val intervalMillis: Int
         /** An interval between attempts longer than this many requested intervals is a sampling gap. */
         const val GAP_FACTOR = 3L
         private const val MAX_ATTEMPTS = 100_000
+        const val METHOD = "tcp-connect"
+        /** Upper bound of the optional trace. */
+        const val MAX_TRACE = 3_000
+        const val BOUNDED = "bounded"
+        const val LOWER_BOUND_ONLY = "lower_bound_only"
+        const val UPPER_BOUND_ONLY = "upper_bound_only"
+        const val UNKNOWN_DURATION = "unknown"
+        private val TCP_RESULTS = setOf(ProbeResult.CONNECTED, ProbeResult.REFUSED, ProbeResult.TIMEOUT, ProbeResult.UNREACHABLE)
     }
 }

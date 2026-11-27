@@ -229,4 +229,66 @@ class RoamingTrackerTest {
         assertEquals("gw.example.com", expandRoamingTarget("gw.example.com", FakeMeasurementNetwork()))
         assertNull(expandRoamingTarget("\${unknown}", gatewayOnly))
     }
+
+    // --- Mejora 12 ---------------------------------------------------------------------------
+
+    @Test
+    fun twoApHopsInOneCutAreOneIncidentAndItsFailuresCountOnce() {
+        val log = track(200, emptyList(),
+            attempt(0),
+            attempt(200, ProbeResult.TIMEOUT),
+            attempt(400, ProbeResult.TIMEOUT, bssid = b),
+            attempt(600, ProbeResult.TIMEOUT, bssid = c),
+            attempt(800, bssid = c))
+
+        assertEquals(listOf(RoamingEvent.BSSID_CHANGE, RoamingEvent.BSSID_CHANGE), log.events.map { it.type })
+        assertEquals(1, log.events.map { it.incidentId }.distinct().size)
+        assertEquals(3, log.events.sumOf { it.failedAttempts ?: 0 })
+        val incident = log.incidents!!.single()
+        assertEquals(2, incident.events)
+        assertEquals(3, incident.failedAttempts)
+        assertEquals(false, incident.open)
+        assertEquals(RoamingTracker.BOUNDED, log.events.first().durationEvidence)
+    }
+
+    @Test
+    fun attemptsNeverMadeAgainstAValidTargetAreOutOfTheTcpDenominator() {
+        val log = track(200, emptyList(),
+            attempt(0),
+            attempt(200, ProbeResult.RESOLUTION_FAILED),
+            attempt(400, ProbeResult.INVALID_TARGET),
+            attempt(600, ProbeResult.NO_WIFI, bssid = null, ssid = null),
+            attempt(800, ProbeResult.REFUSED),
+            attempt(1_000, ProbeResult.TIMEOUT))
+        assertEquals(3, log.tcpAttempts) // connected, refused, timeout
+        assertEquals(33.3, log.tcpLossPct!!, 0.0)
+        assertEquals(RoamingTracker.METHOD, log.method)
+    }
+
+    @Test
+    fun aCancelledScanInsideTheEventWindowIsReportedWithItsOutcome() {
+        val log = RoamingTracker("gw:443", 1_000, targetAlias = "Gateway").apply {
+            add(attempt(0)); add(attempt(1_000, bssid = b))
+        }.finishWindows(listOf(ScanWindow(300, 700, ScanWindow.CANCELLED), ScanWindow(5_000, 5_400, ScanWindow.SUCCESS)))
+        val roam = log.events.single()
+        assertEquals(true, roam.scanOverlap)
+        assertEquals(listOf(ScanWindow.CANCELLED), roam.scanOverlapOutcomes)
+        assertEquals("Gateway", log.targetAlias)
+        assertEquals(RoamingTracker.UPPER_BOUND_ONLY, roam.durationEvidence)
+    }
+
+    @Test
+    fun missingDataIsSaidAsSuchAndTheTraceIsBounded() {
+        val delayed = track(200, emptyList(), attempt(0), attempt(5_000, bssid = b))
+        assertEquals(RoamingTracker.UNKNOWN_DURATION, delayed.events.single().durationEvidence)
+        assertEquals(listOf(RouteInterruption(5, 5_000)), delayed.unobserved)
+
+        val cut = track(200, emptyList(), attempt(0), attempt(200, ProbeResult.TIMEOUT), attempt(400, ProbeResult.TIMEOUT), attempt(600, ProbeResult.TIMEOUT))
+        assertEquals(RoamingTracker.LOWER_BOUND_ONLY, cut.events.single().durationEvidence)
+        assertEquals(true, cut.incidents!!.single().open)
+
+        val traced = RoamingTracker("gw:443", 200, traceLimit = 2).apply { (0..4).forEach { add(attempt(it * 200L)) } }.finish()
+        assertEquals(2, traced.trace!!.size)
+        assertNull(track(200, emptyList(), attempt(0)).trace)
+    }
 }

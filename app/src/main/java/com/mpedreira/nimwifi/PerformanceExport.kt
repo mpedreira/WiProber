@@ -77,6 +77,40 @@ object PerformanceExport {
             add("roamingSessions", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref -> ref.session.roaming?.let { add(roamingSessionRow(ref, it)) } }
             })
+            add("roamingIncidents", JsonArray().apply {
+                report?.continuousSurveys.orEmpty().forEach { ref ->
+                    ref.session.roaming?.incidents.orEmpty().forEach { incident ->
+                        add(JsonObject().apply {
+                            addProperty("surveyId", ref.surveyId)
+                            addProperty("incidentId", incident.id)
+                            addProperty("start", isoUtc(ref.session.startTime + incident.startMs))
+                            addProperty("end", incident.endMs?.let { isoUtc(ref.session.startTime + it) })
+                            addProperty("events", incident.events)
+                            addProperty("failedAttempts", incident.failedAttempts)
+                            addProperty("lowerBoundMs", incident.lowerBoundMs)
+                            addProperty("upperBoundMs", incident.upperBoundMs)
+                            addProperty("open", incident.open)
+                        })
+                    }
+                }
+            })
+            // Optional diagnostic trace (roaming.trace): bounded, alias only, no hosts.
+            add("roamingTrace", JsonArray().apply {
+                report?.continuousSurveys.orEmpty().forEach { ref ->
+                    ref.session.roaming?.trace.orEmpty().forEach { attempt ->
+                        add(JsonObject().apply {
+                            addProperty("surveyId", ref.surveyId)
+                            addProperty("startMs", attempt.startMs)
+                            addProperty("endMs", attempt.endMs)
+                            addProperty("start", isoUtc(ref.session.startTime + attempt.startMs))
+                            addProperty("result", attempt.result)
+                            addProperty("ssid", attempt.ssid)
+                            addProperty("bssid", attempt.bssid)
+                            addProperty("rssi", attempt.rssi)
+                        })
+                    }
+                }
+            })
             add("roamingEvents", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref ->
                     ref.session.roaming?.events.orEmpty().forEach { add(roamingEventRow(ref, it)) }
@@ -172,6 +206,20 @@ object PerformanceExport {
         addProperty("invalidTarget", log.invalidTarget)
         addProperty("noWifi", log.noWifi)
         addProperty("samplingGaps", log.samplingGaps)
+        addProperty("targetAlias", log.targetAlias)
+        addProperty("method", log.method)
+        // TCP denominator: only attempts made against a valid target (mejora 12).
+        addProperty("tcpAttempts", log.tcpAttempts)
+        addProperty("tcpLossPct", log.tcpLossPct)
+        addProperty("incidents", log.incidents?.size)
+        add("unobserved", JsonArray().apply {
+            log.unobserved.orEmpty().forEach { gap ->
+                add(JsonObject().apply {
+                    addProperty("from", isoUtc(ref.session.startTime + gap.fromMs)); addProperty("to", isoUtc(ref.session.startTime + gap.toMs))
+                    addProperty("durationMs", gap.toMs - gap.fromMs)
+                })
+            }
+        })
         addProperty("roams", log.events.count { it.type in ROAM_TYPES })
         addProperty("outages", log.events.count { it.type !in ROAM_TYPES })
         listOf(RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ASSOCIATION_LOST, RoamingEvent.REACHABILITY_LOSS)
@@ -210,6 +258,10 @@ object PerformanceExport {
         addProperty("open", event.open)
         addProperty("samplingGap", event.samplingGap)
         addProperty("scanOverlap", event.scanOverlap)
+        addProperty("scanOverlapOutcomes", event.scanOverlapOutcomes?.joinToString(","))
+        addProperty("incidentId", event.incidentId)
+        addProperty("durationEvidence", event.durationEvidence)
+        addProperty("atMs", event.atMillis)
         // Format-1 fields (logs recorded by fork release 4).
         addProperty("outageMs", event.outageMillis)
         addProperty("lostProbes", event.lostProbes)

@@ -36,6 +36,9 @@ class MainViewModel @JvmOverloads constructor(
     private val activeScanResults = mutableListOf<ScanResultWrapper>()
     private var roamingTracker: RoamingTracker? = null
     private var roamingTarget: String? = null
+    /** Alias and trace option of the roaming probe (set by the capture before it starts). */
+    var roamingAlias: String? = null
+    var roamingTrace: Boolean = false
     private var roamingInterval: Int? = null
     /** UTC start of the route (of its first stretch when it was resumed). */
     private var activeRouteStartUtc: Long = 0L
@@ -82,7 +85,11 @@ class MainViewModel @JvmOverloads constructor(
             routeChanged()
         }
 
-        override fun roamingSession(target: String, intervalMillis: Int): String? = startRoamingLog(target, intervalMillis)
+        override fun roamingSession(target: String, intervalMillis: Int, alias: String?, trace: Boolean): String? {
+            roamingAlias = alias
+            roamingTrace = trace
+            return startRoamingLog(target, intervalMillis)
+        }
 
         override fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?) =
             recordRoamingAttempt(sessionId, startMono, endMono, result, association)
@@ -179,7 +186,7 @@ class MainViewModel @JvmOverloads constructor(
     fun startRoamingLog(target: String, intervalMillis: Int): String? {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
         if (roamingTracker == null) {
-            roamingTracker = RoamingTracker(target, intervalMillis)
+            roamingTracker = RoamingTracker(target, intervalMillis, roamingAlias, if (roamingTrace) RoamingTracker.MAX_TRACE else 0)
             roamingTarget = target
             roamingInterval = intervalMillis
         }
@@ -495,7 +502,7 @@ class MainViewModel @JvmOverloads constructor(
                 endTime = activeSessionStartTime + elapsed,
                 waypoints = activeWaypoints.toList(),
                 scanResults = activeScanResults.toList(),
-                roaming = roamingTracker?.finish(scanWindows),
+                roaming = roamingTracker?.finishWindows(activeScanWindows),
                 timeBase = RoamingTracker.TIME_BASE,
                 segments = 1,
                 scanWindows = activeScanWindows.toList(),

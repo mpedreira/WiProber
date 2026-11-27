@@ -80,7 +80,7 @@ object RouteDrafts {
         val roaming = draft.roamingTarget?.let { target ->
             RoamingTracker(target, draft.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS).apply {
                 attempts.sortedBy(ProbeAttempt::startMs).forEach(::add)
-            }.finish(scans.map { (it.timestamp - it.duration)..it.timestamp })
+            }.finishWindows(windows.ifEmpty { scans.map { ScanWindow(it.timestamp - it.duration, it.timestamp, ScanWindow.SUCCESS) } })
         }
         val allWindows = windows.ifEmpty { scans.map { ScanWindow(it.timestamp - it.duration, it.timestamp, ScanWindow.SUCCESS) } }
         return ContinuousScanSession(

@@ -104,7 +104,9 @@ class ActiveTestsController(
             foreground = AndroidCaptureForeground(activity, projectId),
             roaming = roaming?.let { config -> RoamingProbeSource { scope, onAttempt -> probe.launchRoamingProbe(scope, config, onAttempt) } },
             roamingTarget = roaming?.let { "${it.host}:${it.port}" },
-            roamingIntervalMillis = roaming?.intervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS
+            roamingIntervalMillis = roaming?.intervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS,
+            roamingAlias = roaming?.alias,
+            roamingTrace = roaming?.trace == true
         )
     }
 

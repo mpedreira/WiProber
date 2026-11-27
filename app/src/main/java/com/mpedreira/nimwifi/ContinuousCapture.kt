@@ -44,7 +44,9 @@ class CaptureSources(
     val foreground: CaptureForeground,
     val roaming: RoamingProbeSource? = null,
     val roamingTarget: String? = null,
-    val roamingIntervalMillis: Int = RoamingSettings.DEFAULT_INTERVAL_MILLIS
+    val roamingIntervalMillis: Int = RoamingSettings.DEFAULT_INTERVAL_MILLIS,
+    val roamingAlias: String? = null,
+    val roamingTrace: Boolean = false
 )
 
 /** What the capture is really doing, for the screen (also after a recreation). */
@@ -81,7 +83,7 @@ class ContinuousCaptureController(
         fun beginScan(sessionId: String): Long?
         fun scanSucceeded(sessionId: String, startedAt: Long, networks: List<WifiNetworkInfo>): Boolean
         fun scanFailed(sessionId: String, startedAt: Long, outcome: String, reason: String)
-        fun roamingSession(target: String, intervalMillis: Int): String?
+        fun roamingSession(target: String, intervalMillis: Int, alias: String? = null, trace: Boolean = false): String?
         fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?)
         fun stopBecause(sessionId: String, reason: String)
     }
@@ -113,7 +115,7 @@ class ContinuousCaptureController(
         scanJob = scope.launch { scanLoop(session, newSources.rf) }
         val target = newSources.roamingTarget
         if (newSources.roaming != null && target != null) {
-            val roamingSession = sink.roamingSession(target, newSources.roamingIntervalMillis)
+            val roamingSession = sink.roamingSession(target, newSources.roamingIntervalMillis, newSources.roamingAlias, newSources.roamingTrace)
             if (roamingSession == session) {
                 _status.update { it.copy(roamingEnabled = true) }
                 roamingJob = newSources.roaming.launch(scope) { start, end, result, association ->

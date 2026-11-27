@@ -72,7 +72,11 @@ data class RoamingSettings(
     val enabled: Boolean = false,
     val host: String = "",
     val port: Int = 443,
-    val intervalMillis: Int = DEFAULT_INTERVAL_MILLIS
+    val intervalMillis: Int = DEFAULT_INTERVAL_MILLIS,
+    /** Mejora 12: name of the target in reports. */
+    val alias: String? = null,
+    /** Keep a bounded diagnostic trace of every attempt (off by default). */
+    val trace: Boolean = false
 ) {
     fun sanitized(): RoamingSettings = copy(
         host = host.trim(),
@@ -270,7 +274,9 @@ object WiproberConfigParser {
             enabled = json.bool("enabled") ?: d.enabled,
             host = json.string("host") ?: d.host,
             port = json.int("port") ?: d.port,
-            intervalMillis = json.int("intervalMs") ?: d.intervalMillis
+            intervalMillis = json.int("intervalMs") ?: d.intervalMillis,
+            alias = json.string("alias")?.trim()?.take(60),
+            trace = json.bool("trace") ?: false
         ).sanitized()
     }
 

@@ -279,6 +279,8 @@ An outage is never inferred from scheduler delays, pauses, gaps without samples 
 
 **Position.** An event gets `x`/`y` only when the track has at least two waypoints and the event time falls between the first and the last; it is interpolated in time along the marked route and is approximate (`positionApproximate: true`). Otherwise `x`/`y` are `null`. The `surveyId` is the track's survey in the `.esx` (the session ID, stable across exports). Stopping a track closes its probe: a new track never receives attempts of the previous one.
 
+**Evidence limits (mejora 12).** `tcpAttempts` counts only attempts made against a valid target (connected, refused, timeout, unreachable) and `tcpLossPct` is computed over them: DNS failures, invalid targets and attempts without Wi-Fi are reported but never in that denominator. `unobserved` lists spans without attempts (longer than 3 intervals). Every RF scan attempt (successful, failed, cancelled) is compared with each event window; `scanOverlapOutcomes` says which kinds overlapped. Events whose windows overlap (e.g. two AP hops in one cut) share an `incidentId` and their failed attempts are counted once; `roamingIncidents` lists them with bounds. `durationEvidence` says how far the observations go: `bounded` (failures seen and reachable attempts on both sides), `upper_bound_only` (change without failures: only the resolution is known), `lower_bound_only` (not recovered) or `unknown` (a gap without samples). With `"roaming": {"trace": true}` a bounded trace of up to 3 000 attempts is exported as `roamingTrace` (result, association, times; no hosts). `targetAlias` (from `roaming.alias`) and `method` (`tcp-connect`) describe the probe.
+
 `roamingSessions`:
 
 | Field | Type | Description |
