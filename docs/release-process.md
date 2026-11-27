@@ -25,7 +25,7 @@ Every RC sorts below its stable release, and the stable release below the next v
 
 1. runs the unit tests with a real `iperf3` (`IPERF3_BIN`) and **fails if the iPerf3 integration tests were skipped**, lint, the debug, release and instrumentation-test builds;
 2. builds the R8 validation variant (persistence keep rules);
-3. checks the APK against the tag: package `com.mpedreira.nimwifi.debug`, `versionName`, `versionCode` (from `printVersionInfo`), and records the APK SHA-256 and the signer certificate SHA-256;
+3. checks the APK against the tag with `scripts/verify-apk.sh` (self-tested first by `scripts/test-verify-apk.sh`, taken from the workflow's own commit so older tags can be verified too; any `aapt`/`apksigner` failure fails the step): package `com.mpedreira.nimwifi.debug`, `versionName`, `versionCode` (from `printVersionInfo`), and records the APK SHA-256 and the signer certificate SHA-256;
 4. uploads one of two artifacts, never both:
    - `nimwifi-<version>-field` when it was signed with the field key — the only kind that can update field installations;
    - `nimwifi-<version>-development-only` when the field key is not configured (the runner's throwaway debug key) — for testing, never for the field.

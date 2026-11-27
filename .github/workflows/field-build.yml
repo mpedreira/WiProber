@@ -23,6 +23,10 @@ jobs:
     name: Build and verify the tag's APK
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    defaults:
+      run:
+        # Explicit bash: GitHub then runs `bash -eo pipefail`, so a failing tool in a pipe fails the step.
+        shell: bash
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
@@ -97,24 +101,29 @@ jobs:
           -PgitSha=${{ steps.version.outputs.sha }}
           assembleR8Validation assembleR8ValidationAndroidTest
 
+      - name: APK identity verifier (from this workflow's commit, also for older tags)
+        run: |
+          mkdir -p "$RUNNER_TEMP/verifier"
+          git fetch --no-tags --depth=1 origin "${{ github.sha }}"
+          for f in verify-apk.sh test-verify-apk.sh; do git show "FETCH_HEAD:scripts/$f" > "$RUNNER_TEMP/verifier/$f"; done
+          chmod +x "$RUNNER_TEMP/verifier/"*.sh
+          "$RUNNER_TEMP/verifier/test-verify-apk.sh"
+
       - name: Verify the APK identity against the tag
         id: verify
         run: |
-          BT="$ANDROID_HOME/build-tools/36.0.0"
           APK=app/build/outputs/apk/debug/app-debug.apk
-          EXPECTED=$(./gradlew -q --no-daemon :app:printVersionInfo -PappVersionName=${{ steps.version.outputs.name }})
-          EXPECTED_CODE=$(echo "$EXPECTED" | sed -n 's/^versionCode=//p')
-          BADGING=$("$BT/aapt" dump badging "$APK" | head -1)
-          echo "$BADGING"
-          PACKAGE=$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
-          CODE=$(echo "$BADGING" | sed -n "s/.* versionCode='\([^']*\)'.*/\1/p")
-          NAME=$(echo "$BADGING" | sed -n "s/.* versionName='\([^']*\)'.*/\1/p")
-          test "$PACKAGE" = "com.mpedreira.nimwifi.debug" || { echo "::error::Package $PACKAGE"; exit 1; }
-          test "$NAME" = "${{ steps.version.outputs.name }}-debug" || { echo "::error::versionName $NAME"; exit 1; }
-          test "$CODE" = "$EXPECTED_CODE" || { echo "::error::versionCode $CODE, expected $EXPECTED_CODE"; exit 1; }
-          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee signer.txt
-          CERT=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signer.txt)
-          APK_SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          EXPECTED="$(./gradlew -q --no-daemon :app:printVersionInfo -PappVersionName=${{ steps.version.outputs.name }})"
+          EXPECTED_CODE="$(sed -n 's/^versionCode=//p' <<<"$EXPECTED")"
+          test -n "$EXPECTED_CODE" || { echo "::error::printVersionInfo gave no versionCode"; exit 1; }
+          # Package, versionName, versionCode, signature, signer and APK hash (fails on any tool error).
+          IDENTITY="$("$RUNNER_TEMP/verifier/verify-apk.sh" --apk "$APK" --package com.mpedreira.nimwifi.debug \
+            --version-name "${{ steps.version.outputs.name }}-debug" --version-code "$EXPECTED_CODE" \
+            --source-sha "${{ steps.version.outputs.sha }}")"
+          echo "$IDENTITY"
+          field() { sed -n "s/^$1=//p" <<<"$IDENTITY"; }
+          PACKAGE="$(field package)"; NAME="$(field versionName)"; CODE="$(field versionCode)"
+          APK_SHA="$(field apkSha256)"; CERT="$(field signerCertificateSha256)"
           if [ "${{ steps.key.outputs.field }}" = "true" ]; then KIND=field; else KIND=development; fi
           mkdir -p out
           cp "$APK" "out/nimWifi-${{ steps.version.outputs.name }}-debug.apk"
