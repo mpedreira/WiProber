@@ -51,7 +51,9 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `SsidCoverage.kt`: Android-free per-SSID point states (ok, weak, SSID not detected in a valid scan, no local measurement), point labels and tap hit-testing.
 - `SurveyReport.kt`: readable per-floor/per-SSID report model and its self-contained HTML.
 - `Requirements.kt`: Android-free report verdict: optional `requirements` thresholds and `VerdictEvaluator` (meets / does not meet / missing data per point and per SSID/floor; null is missing data, never 0).
-- `ApNames.kt`: the user's BSSID → AP name table (`apNames` / `ap-names.csv`), BSSID normalization; display only, never inferred or merged.
+- `ApNames.kt`: the user's BSSID → AP name table (`apNames` / `ap-names.csv`), BSSID normalization, and `ApLabels` (name, band, channel, inferred vendor of one radio); display only, never inferred or merged.
+- `BeaconIdentity.kt`: what a beacon says about its AP (vendor elements, WPS, advertised name), extracted when scanning; the ESX keeps its own 512-byte elements.
+- `ApIdentity.kt`: bundled IEEE OUI registry (`res/raw/oui_registry.gz`, not an ESX asset) and the inferred vendor/model of each radio with its source, plus the per-floor AP inventory. Inferences are labelled as such and never group BSSIDs.
 - `PointTemplate.kt`: parser of point templates (`wiprober-points` JSON or CSV) with plan-size scaling and repeatable ids.
 - `PointActionsDialogs.kt`: point actions (measure again / active tests only / new point), template preview and map-SSID picker dialogs.
 - `SurveyGuide.kt`: Android-free survey guide: grid next-point suggestion (needs a calibrated scale), coverage samples (Continuous scans placed along the route by time) and the RSSI colour gradient.

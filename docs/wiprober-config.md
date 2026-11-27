@@ -110,6 +110,7 @@ The preview lists what was stripped and which credentials must be provided for t
 | `networkTests[].alias` | A network test by alias (or name without alias); `maxMedianMs`: its time at the point (DNS lookup, ping average RTT, TCP connect, HTTP total), `maxP95Ms` over the floor, `maxLossPct`: ping loss |
 | `roaming.maxOutageMs` | Upper bound of each observed outage window of the SSID on the floor (an open outage fails; one whose duration cannot be bounded is *missing data*) |
 | `roaming.maxLossesPerFloor` | Reachability/association losses of the SSID on the floor |
+| `bands[]` | `{"band": "5", "minRssiDbm": -67}` (bands `2.4`, `5`, `6`; one entry per band; −120..0 dBm): the SSID's strongest AP **in that band** at the point must reach it, on top of the profile threshold. A valid scan that did not hear the SSID in that band does not meet it; a point without a valid scan lacks data |
 
 Signal uses the **signal profile's threshold** (`guide.profile`), the same as the map. Limits are inclusive (a value equal to the threshold meets it). Aliases are unique; numbers must be ≥ 0 and percentages ≤ 100, otherwise the import is refused with the reason.
 

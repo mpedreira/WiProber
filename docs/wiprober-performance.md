@@ -40,7 +40,8 @@ Nothing from nimWifi is written inside the `.esx`, and Ekahau's native `throughp
   "roamingEvents":   [ { …row… }, … ],
   "requirements":    { … },            // only with requirements configured
   "verdicts":        [ { …row… }, … ], // only with requirements configured
-  "apNames":         [ { …row… }, … ]  // only with an AP table
+  "apNames":         [ { …row… }, … ], // only with an AP table
+  "apInventory":     [ { …row… }, … ]  // every radio of the floors' local scans
 }
 ```
 
@@ -76,6 +77,8 @@ Every array is always present (empty when there is no data), except the additive
 | `points[]` | `pointId`, `label`, `state`, `checks[]` |
 
 Each check: `requirement` (e.g. `rssi`, `iperf3:corporate:download`, `service:ERP:time`, `outage-during-measurement`, `roaming:outage`), `label`, `state`, `value` (`null` when not measured validly — never 0), `threshold`, `unit`, `runId` (the `activeRuns` row the value comes from) and `reason`.
+
+`apInventory` (4.0.0-rc.5): one row per radio heard in the floors' local scans — `floorName`, `floorPlanId`, `bssid`, `ssids`, `frequencyMhz`, `band` (`2.4`, `5`, `6`), `channel`, `bestRssi`, and what is **inferred** about its AP: `inferredVendor` with `inferredVendorSource` (`wps`: the AP's WPS manufacturer; `oui`: the IEEE assignment of the BSSID's OUI; `vendor-ie`: the OUI of a vendor element, ignoring WMM/WPS, Wi-Fi Alliance and chipsets), `inferredModel` (WPS model, mostly consumer gear), `advertisedName` (name the AP advertises: Cisco element 133, Aruba element) and `locallyAdministered` (such a BSSID has no vendor OUI). Every BSSID is its own row: nothing is grouped. Scans saved before rc.5 only keep the first 512 bytes of their elements, so vendor elements are often missing there.
 
 `apNames`: the user's BSSID → AP table (`bssid`, `name`, `location`, `floor`). With a table, every mapped BSSID field of the arrays above gets its name next to it: `bssid` → `apName`, `bssidStart` → `apNameStart`, `bssidEnd` → `apNameEnd`, `fromBssid` → `fromApName`, `toBssid` → `toApName`. Unmapped BSSIDs get no name; existing fields never change. The `.esx` is not touched.
 
@@ -385,6 +388,8 @@ The report is a self-contained HTML page **in Spanish** (no scripts) for Operati
 - **roaming and outages**: time in UTC with milliseconds, the observed window (last reachable → first reachable), the association before and after, the incident, and the approximate position on the route when there is one. Events in the same second keep their order.
 
 The SSIDs reported are the map SSID, the SSIDs used by the tests and the three most widely detected (at most five).
+
+Each SSID section tells the **bands** apart (4.0.0-rc.5): a per-band summary (good, weak, not heard over the measured points), a *Por banda* column in the worst points, band and channel next to every AP, and *cambio de banda* on AP changes between bands. Each floor ends with a collapsed **AP inventory**: every radio with band, best signal, the user's AP name and the inferred vendor/model with its source.
 
 With **requirements** configured, the report starts with a **verdict** per floor and SSID: meets / does not meet / missing data, points meeting over points with valid data (explicit denominator) and how many lack data, and the floor checks; each SSID section then lists what fails (point, requirement, value, threshold, `runId`, detail), the points without enough data and why, and the outages of the floor. The requirements applied are listed. With an **AP table**, AP names are shown next to the BSSIDs (worst points, associated AP, roaming, verdict). Without either, the report is as before.
 

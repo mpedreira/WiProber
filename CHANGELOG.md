@@ -2,6 +2,15 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
+## Next release candidate (after 4.0.0-rc.4, not tagged)
+
+### Added
+- **Bands in the report**: 2.4, 5 and 6 GHz are told apart inside each SSID (per-band summary, *Por banda* column, band and channel next to every AP, band changes marked). Optional `requirements.bands` asks for a minimum signal in one band.
+- **Inferred AP vendor and model**: from the AP's WPS data, the BSSID's IEEE OUI (registry bundled) or a vendor element, always marked as inferred with its source; per-floor AP inventory in the report and `apInventory` in the export. BSSIDs are never grouped.
+
+### Changed
+- Scanning keeps a small summary of what each beacon says about its AP (vendor elements, WPS, advertised name), read from all its elements; the ESX keeps the same 512-byte elements as before.
+
 ## 4.0.0-rc.4
 
 ### Added

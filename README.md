@@ -190,5 +190,6 @@ This project uses some third-party libraries and assets. Here are their licenses
 *   **Gson by Google:** Licensed under the [Apache License Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 *   **Coil (Coil-kt):** Licensed under the [Apache License Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 *   **AndroidX Libraries:** Licensed under the [Apache License Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+*   **IEEE MA-L (OUI) registry:** `app/src/main/res/raw/oui_registry.gz` is the public IEEE Registration Authority list ([standards-oui.ieee.org/oui/oui.csv](https://standards-oui.ieee.org/oui/oui.csv), downloaded 2026-11-27), reduced to assignment and organization name; used only to infer AP vendors in the report.
 
 This project itself is licensed under the MIT license.
