@@ -2,6 +2,18 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
+## 4.0.0-rc.2
+
+Fixes over `v4.0.0-rc.1`.
+
+### Fixed
+- **Restore and replace** can no longer lose the project if Android kills the app midway: each restore keeps a journal (`prepared` → `parking` → `installed`), the original is kept until the installed copy opens, and an interrupted restore is finished or rolled back on the next start (idempotent). `.deleting-*` is only used by explicit deletion.
+- **Route drafts** are saved while the roaming probe keeps sending samples: a first draft when the route starts, then at most every 5 s while it changes (the 1.5 s debounce could be postponed for ever). A route saved or discarded is never brought back by a late write.
+- **Active tests run on the Wi-Fi the technician approved**: the run is bound to that network and revalidated before any traffic; if it is gone or replaced nothing is sent (`network_changed`) and a new decision is asked. AP changes inside the same network are still recorded. Runs export the network they were really bound to (`networkId`).
+- **Roaming**: each route stretch keeps the probe it used (method, target, alias, interval); a route resumed with another probe exports one log per probe (`stretch`) instead of mixing them. Drafts from before show the method as unknown. ICMP `avgRttMs` is the echo's `time=` (not the `ping` process duration, now `avgAttemptMs`); a `ping` that cannot run is `probe_error`, not a lost probe.
+- **Report**: roaming events without any SSID are shown once under «SSID desconocido» (also on floors without active tests) and the floor total counts each event once.
+- A connection opened after a phase deadline is closed at once instead of blocking until its read timeout (the rc.1 field build failed on this in CI).
+
 ## 4.0.0
 
 ### Added
