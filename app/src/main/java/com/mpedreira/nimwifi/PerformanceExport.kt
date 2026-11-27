@@ -28,7 +28,7 @@ object PerformanceExport {
 
     fun hasMeasurements(snapshot: ProjectExportSnapshot): Boolean = snapshot.floors.any { floor ->
         floor.survey.activeRuns.isNotEmpty() ||
-            floor.survey.continuousScanSessions.any { !it.importedFromEsx && it.roaming != null }
+            floor.survey.continuousScanSessions.any { !it.importedFromEsx && it.roamingLogs.isNotEmpty() }
     }
 
     /** Where a run's point is: exact floor-plan pixels plus the survey of the run's scan in this ESX, if any. */
@@ -75,13 +75,17 @@ object PerformanceExport {
                 report?.continuousSurveys.orEmpty().forEach { ref -> add(continuousSessionRow(ref)) }
             })
             add("roamingSessions", JsonArray().apply {
-                report?.continuousSurveys.orEmpty().forEach { ref -> ref.session.roaming?.let { add(roamingSessionRow(ref, it)) } }
+                // rc.2 · 4: one row per probe; a resumed route with two probes has two rows (`stretch`).
+                report?.continuousSurveys.orEmpty().forEach { ref ->
+                    ref.session.roamingLogs.forEachIndexed { index, log -> add(roamingSessionRow(ref, log).also { stretch(it, ref, index, log) }) }
+                }
             })
             add("roamingIncidents", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref ->
-                    ref.session.roaming?.incidents.orEmpty().forEach { incident ->
+                    ref.session.roamingLogs.forEachIndexed { index, log -> log.incidents.orEmpty().forEach { incident ->
                         add(JsonObject().apply {
                             addProperty("surveyId", ref.surveyId)
+                            stretch(this, ref, index, log)
                             addProperty("incidentId", incident.id)
                             addProperty("start", isoUtc(ref.session.startTime + incident.startMs))
                             addProperty("end", incident.endMs?.let { isoUtc(ref.session.startTime + it) })
@@ -91,15 +95,16 @@ object PerformanceExport {
                             addProperty("upperBoundMs", incident.upperBoundMs)
                             addProperty("open", incident.open)
                         })
-                    }
+                    } }
                 }
             })
             // Optional diagnostic trace (roaming.trace): bounded, alias only, no hosts.
             add("roamingTrace", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref ->
-                    ref.session.roaming?.trace.orEmpty().forEach { attempt ->
+                    ref.session.roamingLogs.forEachIndexed { index, log -> log.trace.orEmpty().forEach { attempt ->
                         add(JsonObject().apply {
                             addProperty("surveyId", ref.surveyId)
+                            stretch(this, ref, index, log)
                             addProperty("startMs", attempt.startMs)
                             addProperty("endMs", attempt.endMs)
                             addProperty("start", isoUtc(ref.session.startTime + attempt.startMs))
@@ -107,13 +112,18 @@ object PerformanceExport {
                             addProperty("ssid", attempt.ssid)
                             addProperty("bssid", attempt.bssid)
                             addProperty("rssi", attempt.rssi)
+                            // rc.2 · 4: the probe's own RTT (ICMP `time=`) and the attempt's full duration.
+                            addProperty("rttMs", attempt.rttMs)
+                            addProperty("durationMs", attempt.endMs - attempt.startMs)
                         })
-                    }
+                    } }
                 }
             })
             add("roamingEvents", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref ->
-                    ref.session.roaming?.events.orEmpty().forEach { add(roamingEventRow(ref, it)) }
+                    ref.session.roamingLogs.forEachIndexed { index, log ->
+                        log.events.forEach { add(roamingEventRow(ref, it).also { row -> stretch(row, ref, index, log) }) }
+                    }
                 }
             })
         }
@@ -162,7 +172,7 @@ object PerformanceExport {
                 })
             }
         })
-        addProperty("roamingProbe", session.roaming != null)
+        addProperty("roamingProbe", session.roamingLogs.isNotEmpty())
         session.scanWindows?.let { windows ->
             addProperty("rfScanAttempts", windows.size)
             addProperty("rfScansSucceeded", windows.count { it.outcome == ScanWindow.SUCCESS })
@@ -181,6 +191,14 @@ object PerformanceExport {
         })
     }
 
+    /** rc.2 · 4: which probe of a resumed route a row belongs to (only with more than one). */
+    private fun stretch(row: JsonObject, ref: ContinuousSurveyRef, index: Int, log: RoamingLog) {
+        if (ref.session.roamingLogs.size < 2) return
+        row.addProperty("stretch", index + 1)
+        log.stretchStartMs?.let { row.addProperty("stretchStart", isoUtc(ref.session.startTime + it)) }
+        log.stretchEndMs?.let { row.addProperty("stretchEnd", isoUtc(ref.session.startTime + it)) }
+    }
+
     private fun roamingSessionRow(ref: ContinuousSurveyRef, log: RoamingLog) = JsonObject().apply {
         addProperty("surveyId", ref.surveyId)
         addProperty("floorPlanId", ref.floorPlanId)
@@ -197,7 +215,10 @@ object PerformanceExport {
         addProperty("probes", log.probes)
         addProperty("lost", log.lost)
         addProperty("lossPct", if (log.probes > 0) round1(log.lost * 100.0 / log.probes) else null)
+        // rc.2 · 4: ICMP `time=` for icmp-echo (null without a valid reply), the handshake for tcp-connect.
         addProperty("avgRttMs", log.avgRttMs)
+        addProperty("avgAttemptMs", log.avgAttemptMs)
+        addProperty("probeErrors", log.probeErrors)
         addProperty("connected", log.connected)
         addProperty("refused", log.refused)
         addProperty("timeouts", log.timeouts)

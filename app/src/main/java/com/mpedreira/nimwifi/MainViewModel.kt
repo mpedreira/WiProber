@@ -41,6 +41,7 @@ class MainViewModel @JvmOverloads constructor(
     var roamingTrace: Boolean = false
     var roamingMethod: String = RoamingTracker.METHOD
     private var roamingInterval: Int? = null
+    private var segmentRoaming: RoamingProfile? = null
     /** UTC start of the route (of its first stretch when it was resumed). */
     private var activeRouteStartUtc: Long = 0L
     /** Stretches recorded before an interruption, when the route was resumed. */
@@ -93,8 +94,8 @@ class MainViewModel @JvmOverloads constructor(
             return startRoamingLog(target, intervalMillis)
         }
 
-        override fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?) =
-            recordRoamingAttempt(sessionId, startMono, endMono, result, association)
+        override fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?, rttMs: Double?) =
+            recordRoamingAttempt(sessionId, startMono, endMono, result, association, rttMs)
 
         override fun stopBecause(sessionId: String, reason: String) {
             if (!current(sessionId)) return
@@ -140,6 +141,7 @@ class MainViewModel @JvmOverloads constructor(
         waypoints = activeWaypoints.toList(),
         scanResults = activeScanResults.toList(),
         probeAttempts = roamingTracker?.attempts().orEmpty(),
+        roaming = segmentRoaming,
         scanWindows = activeScanWindows.toList(),
         lastObservedMs = (monotonic.now() - activeSessionStartMono).coerceAtLeast(0L)
     )
@@ -195,6 +197,8 @@ class MainViewModel @JvmOverloads constructor(
             roamingTracker = RoamingTracker(target, intervalMillis, roamingAlias, if (roamingTrace) RoamingTracker.MAX_TRACE else 0, roamingMethod)
             roamingTarget = target
             roamingInterval = intervalMillis
+            // rc.2 · 4: kept with this stretch, so a resumed route never mixes two probes.
+            segmentRoaming = RoamingProfile(target, intervalMillis, roamingMethod, roamingAlias, roamingTrace)
         }
         return activeSessionId
     }
@@ -203,7 +207,7 @@ class MainViewModel @JvmOverloads constructor(
      * One probe attempt; [startMono]/[endMono] are [MonotonicMillisClock] times. Attempts of
      * another (older) session, from before this session started, or without a track are ignored.
      */
-    fun recordRoamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?) {
+    fun recordRoamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?, rttMs: Double? = null) {
         val tracker = roamingTracker ?: return
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking || sessionId != activeSessionId) return
         if (startMono < activeSessionStartMono) return
@@ -215,7 +219,8 @@ class MainViewModel @JvmOverloads constructor(
                 ssid = association?.ssid,
                 bssid = association?.bssid,
                 rssi = association?.rssi,
-                associationKnown = association?.known == true
+                associationKnown = association?.known == true,
+                rttMs = rttMs
             )
         )
         routeChanged()
@@ -844,11 +849,10 @@ class MainViewModel @JvmOverloads constructor(
         activeSessionStartMono = monotonic.now()
         activeRouteStartUtc = resumed?.startTime ?: activeSessionStartTime
         previousSegments = resumed?.segments.orEmpty()
-        if (resumed?.roamingTarget != null) {
-            roamingTarget = resumed.roamingTarget
-            roamingInterval = resumed.roamingIntervalMillis
-            roamingTracker = RoamingTracker(resumed.roamingTarget, resumed.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS)
-        }
+        // rc.2 · 4: the new stretch gets its own probe (and profile) when the capture starts it;
+        // the earlier stretches keep theirs in their segments.
+        roamingTracker = null
+        segmentRoaming = null
         activeWaypoints.clear()
         activeScanResults.clear()
         activeScanWindows.clear()
@@ -876,6 +880,7 @@ class MainViewModel @JvmOverloads constructor(
         roamingTracker = null
         roamingTarget = null
         roamingInterval = null
+        segmentRoaming = null
         previousSegments = emptyList()
         activeRouteStartUtc = 0L
         activeScanWindows.clear()

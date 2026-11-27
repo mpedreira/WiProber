@@ -20,6 +20,11 @@ object ProbeResult {
     const val INVALID_TARGET = "invalid_target"
     /** No Wi-Fi network: association lost. */
     const val NO_WIFI = "no_wifi"
+    /**
+     * rc.2 · 4: the probe itself could not be made or read (e.g. `ping` did not run, no source
+     * address, unparsable output): a measurement problem, not a probe without answer.
+     */
+    const val PROBE_ERROR = "probe_error"
 
     fun reachable(result: String) = result == CONNECTED || result == REFUSED || result == REPLIED
     /** Only these count as observed loss of connectivity towards the target. */
@@ -38,10 +43,27 @@ data class ProbeAttempt(
     val ssid: String? = null,
     val bssid: String? = null,
     val rssi: Int? = null,
-    val associationKnown: Boolean = false
+    val associationKnown: Boolean = false,
+    /**
+     * rc.2 · 4: round-trip time reported by the probe itself (ICMP `time=`), ms. The attempt's
+     * full duration ([endMs] − [startMs]) also counts process start-up and is kept apart. Null
+     * for TCP attempts and for attempts saved before.
+     */
+    val rttMs: Double? = null
 ) {
     val hasBssid: Boolean get() = associationKnown && bssid != null
 }
+
+/** rc.2 · 4: the roaming probe a stretch of a route really used. */
+@JsonModel
+data class RoamingProfile(
+    val target: String,
+    val intervalMillis: Int,
+    /** [RoamingTracker.METHOD], [RoamingTracker.METHOD_ICMP] or [RoamingTracker.METHOD_UNKNOWN] (older drafts). */
+    val method: String,
+    val alias: String? = null,
+    val trace: Boolean = false
+)
 
 /**
  * An association change or a reachability loss observed during a Continuous track. [atMillis] is
@@ -139,7 +161,14 @@ data class RoamingLog(
     val unobserved: List<RouteInterruption>? = null,
     val incidents: List<RoamingIncident>? = null,
     /** Optional bounded diagnostic trace of the attempts (enable it in the roaming settings). */
-    val trace: List<ProbeAttempt>? = null
+    val trace: List<ProbeAttempt>? = null,
+    /** rc.2 · 4: mean full duration of the reachable attempts (cadence and overlap analysis), ms. */
+    val avgAttemptMs: Double? = null,
+    /** rc.2 · 4: attempts that could not be made or read ([ProbeResult.PROBE_ERROR]). */
+    val probeErrors: Int? = null,
+    /** rc.2 · 4: span of the route stretch(es) this log covers, on the session time base (resumed routes). */
+    val stretchStartMs: Long? = null,
+    val stretchEndMs: Long? = null
 )
 
 /** Mejora 12: several events (AP hops, loss) inside one span between reachable attempts. */
@@ -242,14 +271,23 @@ class RoamingTracker(
 
         val withIncidents = incidents(events.sortedWith(compareBy({ it.atMillis }, { it.type })))
         val intervals = attempts.zipWithNext { a, b -> b.startMs - a.startMs }.sorted()
-        val connectedTimes = attempts.filter { it.result == ProbeResult.CONNECTED || it.result == ProbeResult.REPLIED }.map { it.endMs - it.startMs }
+        // rc.2 · 4: the RTT is what the probe measured: ICMP `time=`, or the TCP handshake (the
+        // attempt's duration). An ICMP attempt's duration includes starting `ping`, so it is never
+        // used as an RTT; an attempt of unknown method counts only with its own RTT or a handshake.
+        val reachableAttempts = attempts.filter { ProbeResult.reachable(it.result) && it.result != ProbeResult.REFUSED }
+        val connectedTimes = when (method) {
+            METHOD_ICMP -> reachableAttempts.mapNotNull { it.rttMs }
+            METHOD -> reachableAttempts.map { it.rttMs ?: (it.endMs - it.startMs).toDouble() }
+            else -> reachableAttempts.mapNotNull { it.rttMs ?: if (it.result == ProbeResult.CONNECTED) (it.endMs - it.startMs).toDouble() else null }
+        }
         val tcp = attempts.count { it.result in TCP_RESULTS }
         val tcpLost = attempts.count { ProbeResult.connectivityFailure(it.result) }
         return RoamingLog(
             target = target,
             intervalMillis = intervalMillis,
             probes = attempts.size,
-            lost = attempts.count { !ProbeResult.reachable(it.result) },
+            // A probe error is a measurement problem, not an attempt that failed to reach the target.
+            lost = attempts.count { !ProbeResult.reachable(it.result) && it.result != ProbeResult.PROBE_ERROR },
             avgRttMs = connectedTimes.takeIf { it.isNotEmpty() }?.average()?.let { (it * 10).roundToLong() / 10.0 },
             events = withIncidents.first,
             schema = 2,
@@ -271,7 +309,9 @@ class RoamingTracker(
             unobserved = attempts.zipWithNext().filter { (a, b) -> b.startMs - a.startMs > gapThreshold() }
                 .map { (a, b) -> RouteInterruption(a.endMs, b.startMs) },
             incidents = withIncidents.second,
-            trace = if (traceLimit > 0) attempts.take(traceLimit) else null
+            trace = if (traceLimit > 0) attempts.take(traceLimit) else null,
+            avgAttemptMs = reachableAttempts.map { (it.endMs - it.startMs).toDouble() }.takeIf { it.isNotEmpty() }?.average()?.let { (it * 10).roundToLong() / 10.0 },
+            probeErrors = attempts.count { it.result == ProbeResult.PROBE_ERROR }
         )
     }
 
@@ -431,6 +471,8 @@ class RoamingTracker(
         private const val MAX_ATTEMPTS = 100_000
         const val METHOD = "tcp-connect"
         const val METHOD_ICMP = "icmp-echo"
+        /** rc.2 · 4: drafts saved before the method was recorded per stretch. */
+        const val METHOD_UNKNOWN = "unknown"
         /** Upper bound of the optional trace. */
         const val MAX_TRACE = 3_000
         const val BOUNDED = "bounded"

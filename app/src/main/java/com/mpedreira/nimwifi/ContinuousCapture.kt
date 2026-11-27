@@ -28,7 +28,7 @@ interface RfScanSource {
 
 /** The roaming probe of a capture. */
 fun interface RoamingProbeSource {
-    fun launch(scope: CoroutineScope, onAttempt: (startMono: Long, endMono: Long, result: String, association: Association?) -> Unit): Job
+    fun launch(scope: CoroutineScope, onAttempt: (startMono: Long, endMono: Long, result: String, association: Association?, rttMs: Double?) -> Unit): Job
 }
 
 /** Keeps the process in the foreground while capturing (wake and Wi-Fi locks). */
@@ -85,7 +85,7 @@ class ContinuousCaptureController(
         fun scanSucceeded(sessionId: String, startedAt: Long, networks: List<WifiNetworkInfo>): Boolean
         fun scanFailed(sessionId: String, startedAt: Long, outcome: String, reason: String)
         fun roamingSession(target: String, intervalMillis: Int, alias: String? = null, trace: Boolean = false, method: String = RoamingTracker.METHOD): String?
-        fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?)
+        fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?, rttMs: Double? = null)
         fun stopBecause(sessionId: String, reason: String)
     }
 
@@ -119,9 +119,9 @@ class ContinuousCaptureController(
             val roamingSession = sink.roamingSession(target, newSources.roamingIntervalMillis, newSources.roamingAlias, newSources.roamingTrace, newSources.roamingMethod)
             if (roamingSession == session) {
                 _status.update { it.copy(roamingEnabled = true) }
-                roamingJob = newSources.roaming.launch(scope) { start, end, result, association ->
+                roamingJob = newSources.roaming.launch(scope) { start, end, result, association, rttMs ->
                     if (sessionId != session) return@launch // a late attempt of an earlier session
-                    sink.roamingAttempt(session, start, end, result, association)
+                    sink.roamingAttempt(session, start, end, result, association, rttMs)
                     _status.update { it.copy(roamingAttempts = it.roamingAttempts + 1, lastRoamingResult = result) }
                 }
             }

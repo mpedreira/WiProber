@@ -77,6 +77,11 @@ data class ContinuousScanSession(
     /** Roaming probe of this track, if it was enabled; app/export only, never in the ESX. */
     val roaming: RoamingLog? = null,
     /**
+     * rc.2 · 4: a resumed route whose stretches used different probes (method, target, alias or
+     * interval) keeps one log per probe here, each with its span; [roaming] is then null.
+     */
+    val roamingStretches: List<RoamingLog>? = null,
+    /**
      * `monotonic-relative`: waypoint, scan and probe times are monotonic milliseconds since the
      * session start and [startTime] is the UTC anchor. Null for tracks recorded before (wall clock).
      */
@@ -91,7 +96,10 @@ data class ContinuousScanSession(
     val scanWindows: List<ScanWindow>? = null,
     /** Spans without a successful RF scan (pauses, throttling, failures), relative to [startTime]. */
     val rfGaps: List<RouteInterruption>? = null
-)
+) {
+    /** Every roaming log of the route: one, or one per probe of a resumed route (rc.2 · 4). */
+    val roamingLogs: List<RoamingLog> get() = roamingStretches ?: listOfNotNull(roaming)
+}
 
 /** One RF scan attempt of a Continuous capture (times relative to the session start). */
 @JsonModel

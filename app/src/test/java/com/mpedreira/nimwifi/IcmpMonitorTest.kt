@@ -23,14 +23,16 @@ class IcmpMonitorTest {
     @Test
     fun echoRepliesAreReachableAndCountInTheProbeDenominator() {
         val log = RoamingTracker("10.0.0.5", 1_000, "ERP", method = RoamingTracker.METHOD_ICMP).apply {
-            add(ProbeAttempt(0, 3, ProbeResult.REPLIED, "Ops", "aa:01", -60, true))
+            add(ProbeAttempt(0, 3, ProbeResult.REPLIED, "Ops", "aa:01", -60, true, rttMs = 1.2))
             add(ProbeAttempt(1_000, 2_000, ProbeResult.TIMEOUT, "Ops", "aa:01", -70, true))
-            add(ProbeAttempt(2_000, 2_004, ProbeResult.REPLIED, "Ops", "aa:02", -58, true))
+            add(ProbeAttempt(2_000, 2_004, ProbeResult.REPLIED, "Ops", "aa:02", -58, true, rttMs = 1.8))
         }.finish()
         assertEquals(RoamingTracker.METHOD_ICMP, log.method)
         assertEquals(3, log.tcpAttempts)
         assertEquals(33.3, log.tcpLossPct!!, 0.0)
-        assertEquals(3.5, log.avgRttMs)
+        // rc.2 · 4: the RTT is the echo's `time=`; the attempts' durations are reported apart.
+        assertEquals(1.5, log.avgRttMs)
+        assertEquals(3.5, log.avgAttemptMs)
         assertEquals(RoamingEvent.BSSID_CHANGE, log.events.single().type)
     }
 }

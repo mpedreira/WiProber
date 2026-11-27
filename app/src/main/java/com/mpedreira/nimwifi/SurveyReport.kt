@@ -311,8 +311,9 @@ object SurveyReport {
                 fromSsid = it.ssid, toSsid = it.ssidEnd, seq = apChanges.size, source = "run") }
         survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { session ->
             val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
-            session.roaming?.events.orEmpty().filter { it.fromSsid == ssid || it.toSsid == ssid || (it.fromSsid == null && it.toSsid == null) }
-                .forEachIndexed { index, event ->
+            session.roamingLogs.flatMap { log -> log.events.map { log to it } }
+                .filter { (_, it) -> it.fromSsid == ssid || it.toSsid == ssid || (it.fromSsid == null && it.toSsid == null) }
+                .forEachIndexed { index, (log, event) ->
                     val at = session.startTime + event.atMillis
                     val position = if (route.size >= 2 && event.atMillis in route.first().timestamp..route.last().timestamp) SurveyGuide.positionAt(route, event.atMillis) else null
                     val detail = when {
@@ -320,7 +321,7 @@ object SurveyReport {
                         event.outageObserved == false -> "sin fallos observados" + (event.outageUpperBoundMs?.let { " (resolución ≤ $it ms)" } ?: "")
                         event.outageLowerBoundMs != null -> "corte de ${event.outageLowerBoundMs} a ${event.outageUpperBoundMs ?: "?"} ms"
                         else -> "duración no estimable (hueco sin muestras)"
-                    }
+                    } + " · sonda " + probeLabel(log)
                     val built = Event(event.type, at, event.fromBssid, event.toBssid, detail,
                         windowFrom = event.lastReachableAtMillis?.let { session.startTime + it },
                         windowTo = event.firstReachableAtMillis?.let { session.startTime + it },
@@ -342,6 +343,16 @@ object SurveyReport {
      * Continuous scans only where the route has enough geometry (two waypoints around the scan
      * time), marked approximate; the others are counted, never drawn.
      */
+    /** rc.2 · 4: the probe of a route stretch; drafts saved before rc.2 have no method: «desconocido». */
+    internal fun probeLabel(log: RoamingLog): String {
+        val method = when (log.method) {
+            RoamingTracker.METHOD -> "TCP"
+            RoamingTracker.METHOD_ICMP -> "ICMP"
+            else -> "método desconocido"
+        }
+        return "${log.targetAlias ?: "destino"} · $method · cada ${log.intervalMillis} ms"
+    }
+
     private fun marks(ssid: String, survey: ProjectSnapshot, coverage: List<PointCoverage>, weakDbm: Int): Pair<List<MapMark>, SourceCounts> {
         val marks = coverage.map { p ->
             val source = when {

@@ -83,6 +83,25 @@ data class ProbeStats(val samples: List<Double?>) {
 internal fun round1(value: Double): Double = (value * 10).roundToLong() / 10.0
 
 /** Parses `ping` output (iputils/toybox): per-reply `time=` values and the transmitted count. */
+/** rc.2 · 4: one roaming ICMP attempt read from `ping`'s output. Android-free. */
+object IcmpProbe {
+    data class Outcome(val result: String, val rttMs: Double?)
+
+    fun once(ping: () -> String): Outcome = try {
+        val stats = PingOutputParser.parse(ping())
+        when {
+            stats == null || stats.sent == 0 -> Outcome(ProbeResult.PROBE_ERROR, null)
+            stats.received > 0 -> Outcome(ProbeResult.REPLIED, stats.samples.firstOrNull { it != null })
+            else -> Outcome(ProbeResult.TIMEOUT, null)
+        }
+    } catch (e: MeasurementException) {
+        // The process ran out of time waiting for a reply: no answer. Anything else: it did not run.
+        Outcome(if (e.code == ErrorCodes.TIMEOUT) ProbeResult.TIMEOUT else ProbeResult.PROBE_ERROR, null)
+    } catch (e: Exception) {
+        Outcome(ProbeResult.PROBE_ERROR, null)
+    }
+}
+
 object PingOutputParser {
     private val REPLY = Regex("""icmp_seq=(\d+).*?time[=<]([\d.]+)\s*ms""")
     private val SUMMARY = Regex("""(\d+) packets transmitted, (\d+) (?:packets )?received""")

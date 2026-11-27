@@ -135,7 +135,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
     fun launchRoamingProbe(
         scope: CoroutineScope,
         settings: RoamingSettings,
-        onAttempt: (startMono: Long, endMono: Long, result: String, association: Association?) -> Unit
+        onAttempt: (startMono: Long, endMono: Long, result: String, association: Association?, rttMs: Double?) -> Unit
     ): Job = scope.launch(Dispatchers.IO) {
         val config = settings.sanitized()
         var network: AndroidMeasurementNetwork? = null
@@ -151,6 +151,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                 }
                 val net = network
                 var association: Association? = null
+                var rttMs: Double? = null
                 val result = if (net == null) {
                     ProbeResult.NO_WIFI
                 } else {
@@ -172,13 +173,13 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                         val target = address
                         when {
                             target == null -> ProbeResult.RESOLUTION_FAILED
-                            config.isIcmp -> pingOnce(net, target)
+                            config.isIcmp -> pingOnce(net, target).also { rttMs = it.rttMs }.result
                             else -> connectOnce(net, target, config.port)
                         }
                     }
                 }
                 val end = MonotonicMillisClock.now()
-                withContext(Dispatchers.Main) { onAttempt(start, end, result, association) }
+                withContext(Dispatchers.Main) { onAttempt(start, end, result, association, rttMs) }
                 delay((config.intervalMillis - (MonotonicMillisClock.now() - start)).coerceAtLeast(0L))
             }
         } finally {
@@ -189,25 +190,14 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
 
     /**
      * One ICMP echo from the measured network's address of the same family (binding to that
-     * address needs no privilege). No reply in [ICMP_TIMEOUT_SECONDS] is a timeout; a ping that
-     * cannot run is reported as unreachable (see the log's method).
+     * address needs no privilege). rc.2 · 4: the reply's `time=` is the RTT (the process takes
+     * much longer than the echo). No reply is a timeout; a `ping` that cannot run or be read is
+     * a [ProbeResult.PROBE_ERROR], a measurement problem rather than a lost probe.
      */
-    private fun pingOnce(network: MeasurementNetwork, target: InetAddress): String {
+    private fun pingOnce(network: MeasurementNetwork, target: InetAddress): IcmpProbe.Outcome {
         val source = network.link().localAddresses.firstOrNull { it.javaClass == target.javaClass }?.hostAddress
-            ?: return ProbeResult.UNREACHABLE
-        return try {
-            val output = NetworkTestRunner.runSystemPing(target.hostAddress!!, 1, source, MeasurementControl())
-            val stats = PingOutputParser.parse(output)
-            when {
-                stats == null || stats.sent == 0 -> ProbeResult.UNREACHABLE
-                stats.received > 0 -> ProbeResult.REPLIED
-                else -> ProbeResult.TIMEOUT
-            }
-        } catch (e: MeasurementException) {
-            if (e.code == ErrorCodes.TIMEOUT) ProbeResult.TIMEOUT else ProbeResult.UNREACHABLE
-        } catch (e: Exception) {
-            ProbeResult.UNREACHABLE
-        }
+            ?: return IcmpProbe.Outcome(ProbeResult.PROBE_ERROR, null)
+        return IcmpProbe.once { NetworkTestRunner.runSystemPing(target.hostAddress!!, 1, source, MeasurementControl()) }
     }
 
     private fun connectOnce(network: MeasurementNetwork, target: InetAddress, port: Int): String = try {

@@ -17,7 +17,9 @@ data class RouteSegment(
     val probeAttempts: List<ProbeAttempt> = emptyList(),
     val scanWindows: List<ScanWindow> = emptyList(),
     /** Last observation (waypoint, scan or probe) relative to [startUtc]'s stretch start. */
-    val lastObservedMs: Long = 0L
+    val lastObservedMs: Long = 0L,
+    /** rc.2 · 4: the roaming probe this stretch used; null in drafts saved before (see [RoamingTracker.METHOD_UNKNOWN]). */
+    val roaming: RoamingProfile? = null
 )
 
 /**
@@ -62,6 +64,8 @@ object RouteDrafts {
         val attempts = mutableListOf<ProbeAttempt>()
         val interruptions = mutableListOf<RouteInterruption>()
         val windows = mutableListOf<ScanWindow>()
+        // rc.2 · 4: each stretch's probe attempts, with the profile it used and its span.
+        val stretches = mutableListOf<Triple<RoamingProfile?, List<ProbeAttempt>, LongRange>>()
         var previousEnd = -1L
         draft.segments.forEach { segment ->
             val anchored = segment.startUtc - draft.startTime
@@ -69,27 +73,48 @@ object RouteDrafts {
             if (previousEnd >= 0) interruptions += RouteInterruption(previousEnd, offset)
             segment.waypoints.forEach { waypoints += it.copy(timestamp = it.timestamp + offset) }
             segment.scanResults.forEach { scans += it.copy(timestamp = it.timestamp + offset) }
-            segment.probeAttempts.forEach { attempts += it.copy(startMs = it.startMs + offset, endMs = it.endMs + offset) }
+            val shifted = segment.probeAttempts.map { it.copy(startMs = it.startMs + offset, endMs = it.endMs + offset) }
+            attempts += shifted
             segment.scanWindows.orEmpty().forEach { windows += it.copy(startMs = it.startMs + offset, endMs = it.endMs + offset) }
             val last = maxOf(segment.lastObservedMs, segment.waypoints.maxOfOrNull { it.timestamp } ?: 0L,
                 segment.scanResults.maxOfOrNull { it.timestamp } ?: 0L, segment.probeAttempts.maxOfOrNull { it.endMs } ?: 0L)
             previousEnd = offset + last
+            // Drafts saved before rc.2 only had one route-wide target: its method is unknown.
+            val profile = segment.roaming ?: draft.roamingTarget?.let {
+                RoamingProfile(it, draft.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS, RoamingTracker.METHOD_UNKNOWN)
+            }
+            stretches += Triple(profile, shifted, offset..previousEnd)
         }
         end?.let { waypoints += it.copy(timestamp = maxOf(it.timestamp, previousEnd)) }
         val elapsed = maxOf(previousEnd, waypoints.maxOfOrNull { it.timestamp } ?: 0L)
-        val roaming = draft.roamingTarget?.let { target ->
-            RoamingTracker(target, draft.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS).apply {
-                attempts.sortedBy(ProbeAttempt::startMs).forEach(::add)
-            }.finishWindows(windows.ifEmpty { scans.map { ScanWindow(it.timestamp - it.duration, it.timestamp, ScanWindow.SUCCESS) } })
-        }
         val allWindows = windows.ifEmpty { scans.map { ScanWindow(it.timestamp - it.duration, it.timestamp, ScanWindow.SUCCESS) } }
+        // Consecutive stretches with the same probe make one log; different probes are never
+        // combined under one target or method.
+        val groups = mutableListOf<Triple<RoamingProfile, MutableList<ProbeAttempt>, LongRange>>()
+        stretches.forEach { (profile, list, span) ->
+            if (profile == null) return@forEach
+            val last = groups.lastOrNull()
+            if (last != null && last.first == profile) {
+                last.second += list
+                groups[groups.lastIndex] = Triple(profile, last.second, last.third.first..span.last)
+            } else {
+                groups += Triple(profile, list.toMutableList(), span)
+            }
+        }
+        val logs = groups.map { (profile, list, span) ->
+            RoamingTracker(profile.target, profile.intervalMillis, profile.alias, if (profile.trace) RoamingTracker.MAX_TRACE else 0, profile.method).apply {
+                list.sortedBy(ProbeAttempt::startMs).forEach(::add)
+            }.finishWindows(allWindows.filter { it.endMs >= span.first && it.startMs <= span.last })
+                .let { if (groups.size > 1) it.copy(stretchStartMs = span.first, stretchEndMs = span.last) else it }
+        }
         return ContinuousScanSession(
             id = draft.sessionId,
             startTime = draft.startTime,
             endTime = draft.startTime + elapsed,
             waypoints = waypoints,
             scanResults = scans,
-            roaming = roaming,
+            roaming = logs.singleOrNull(),
+            roamingStretches = logs.takeIf { it.size > 1 },
             timeBase = RoamingTracker.TIME_BASE,
             segments = draft.segments.size,
             interruptions = interruptions,
