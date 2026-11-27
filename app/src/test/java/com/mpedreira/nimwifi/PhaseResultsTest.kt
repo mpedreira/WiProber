@@ -27,8 +27,13 @@ class PhaseResultsTest {
     }
 
     /** Accepts connections and never answers: a phase that would block until cancelled. */
+    /**
+     * Accepts and never answers. The accepted sockets are kept referenced: a discarded Socket is
+     * closed when garbage-collected, which reset the upload mid-test under the full suite.
+     */
     private fun silentServer(): ServerSocket = ServerSocket(0).also { server ->
-        thread(isDaemon = true) { while (!server.isClosed) runCatching { server.accept() } }
+        val accepted = java.util.Collections.synchronizedList(mutableListOf<java.net.Socket>())
+        thread(isDaemon = true) { while (!server.isClosed) runCatching { accepted += server.accept() } }
     }
 
     private fun awaitFinished(vm: MainViewModel, runId: String): ActiveRun {
