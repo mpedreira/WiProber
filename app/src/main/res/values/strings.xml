@@ -397,6 +397,24 @@
     <string name="export_format_title">Export</string>
     <string name="export_format_bundle">ESX + report and results (ZIP)</string>
     <string name="export_format_esx">ESX only</string>
+    <string name="export_format_source">Exact copy of the source ESX (no local changes)</string>
+    <string name="export_changes_title">Working export of an imported ESX</string>
+    <string name="export_changes_message">The original entries of the source ESX are kept intact, except for these changes:
+
+%1$s
+
+Catalogues that may be rewritten: %2$s.
+
+The unchanged source ESX is a separate option in the export menu, and the analysis files (results JSON and report) are separate entries of the ZIP.</string>
+    <string name="change_new_floor">new floor</string>
+    <string name="change_scale_assumed">assumed scale of %1$s m/px written (accepted)</string>
+    <string name="change_scale_changed">scale changed</string>
+    <string name="change_local_scans">local scans added</string>
+    <string name="change_local_routes">local routes added</string>
+    <string name="change_local_notes">local notes added</string>
+    <string name="export_source_complete">The source ESX was written unchanged.
+SHA-256: %1$s</string>
+    <string name="action_continue">Continue</string>
     <string name="config_change_failed">The configuration was not changed: %1$s</string>
     <string name="config_corrupt">The stored configuration cannot be read (%1$s). It is not used; remove it and import it again.</string>
     <string name="config_export_shareable">Export shareable summary</string>

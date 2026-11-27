@@ -20,6 +20,23 @@ class EsxExportService(
     private val appContext = context.applicationContext
     private val contentResolver = appContext.contentResolver
 
+    /**
+     * Mejora 21: the imported source ESX byte for byte (same SHA-256), without any local change.
+     * Staged, verified and then copied like any export; returns the SHA-256.
+     */
+    fun exportSourceCopy(destinationUri: Uri, snapshot: ProjectExportSnapshot): String {
+        val source = requireNotNull(snapshot.sourceArchive) { "This project was not imported from an ESX" }
+        StagedExport.removeStale(appContext.cacheDir)
+        val staged = File(appContext.cacheDir, "${StagedExport.STAGING_PREFIX}source-${System.nanoTime()}.esx")
+        try {
+            val sha = EsxSourceChanges.stageExactCopy(source, staged, DEFAULT_ESX_LIMITS.maxSourceBytes)
+            StagedExport.deliver(staged) { contentResolver.openOutputStream(destinationUri, "wt") }
+            return sha
+        } finally {
+            staged.delete()
+        }
+    }
+
     /** [reportSsid]: SSID chosen on the map, reported first (empty = automatic). */
     fun export(
         destinationUri: Uri,

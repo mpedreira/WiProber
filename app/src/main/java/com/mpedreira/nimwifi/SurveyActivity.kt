@@ -686,6 +686,7 @@ class SurveyActivity : AppCompatActivity() {
                     ProjectAutosave.saveNow(SaveKey(projectId, floorId)) { projectRepository.saveProject(projectId, floorId, activeSnapshot) }
                     ProjectAutosave.saver.cancelPending(projectId)
                     val projectSnapshot = projectRepository.snapshotProject(projectId)
+                    sourceChanges = projectSnapshot.sourceArchive?.let { EsxSourceChanges.plan(projectSnapshot) }
                     FloorScalePolicy.uncalibratedFloors(projectSnapshot) to
                         PerformanceExport.hasMeasurements(projectSnapshot)
                 }
@@ -720,14 +721,55 @@ class SurveyActivity : AppCompatActivity() {
      * get their per-SSID maps too); the plain ESX stays available.
      */
     private fun chooseExportFormat() {
+        val changes = sourceChanges
+        val items = buildList {
+            add(getString(R.string.export_format_bundle))
+            add(getString(R.string.export_format_esx))
+            // Mejora 21: an imported project can always give back its source ESX unchanged.
+            if (changes != null) add(getString(R.string.export_format_source))
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.export_format_title)
-            .setItems(arrayOf(getString(R.string.export_format_bundle), getString(R.string.export_format_esx))) { _, which ->
-                selectExportDestination(bundle = which == 0)
+            .setItems(items.toTypedArray()) { _, which ->
+                when {
+                    which == 2 -> {
+                        exportSourceCopy = true
+                        selectExportDestination(bundle = false)
+                    }
+                    changes != null && !changes.exact -> showSourceChanges(changes) { selectExportDestination(bundle = which == 0) }
+                    else -> selectExportDestination(bundle = which == 0)
+                }
             }
             .setOnCancelListener { viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT) }
             .show()
     }
+
+    /** Before a working export of an imported ESX: which floors and catalogues change. */
+    private fun showSourceChanges(plan: EsxSourceChanges.Plan, onContinue: () -> Unit) {
+        val floors = plan.floors.joinToString("\n") { floor ->
+            "• ${floor.floorName}: " + floor.reasons.joinToString(", ") { reason ->
+                when (reason) {
+                    EsxSourceChanges.Reason.NEW_FLOOR -> getString(R.string.change_new_floor)
+                    EsxSourceChanges.Reason.SCALE_ASSUMED -> getString(R.string.change_scale_assumed, FloorScalePolicy.ASSUMED_METERS_PER_PIXEL.toString())
+                    EsxSourceChanges.Reason.SCALE_CHANGED -> getString(R.string.change_scale_changed)
+                    EsxSourceChanges.Reason.LOCAL_SCANS -> getString(R.string.change_local_scans)
+                    EsxSourceChanges.Reason.LOCAL_ROUTES -> getString(R.string.change_local_routes)
+                    else -> getString(R.string.change_local_notes)
+                }
+            }
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.export_changes_title)
+            .setMessage(getString(R.string.export_changes_message, floors, plan.catalogs.joinToString(", ")))
+            .setPositiveButton(R.string.action_continue) { _, _ -> onContinue() }
+            .setNegativeButton(R.string.cancel_export) { _, _ -> viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT) }
+            .setOnCancelListener { viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT) }
+            .show()
+    }
+
+    @Volatile
+    private var sourceChanges: EsxSourceChanges.Plan? = null
+    private var exportSourceCopy = false
 
     /** [bundle]: export a ZIP with the ESX, the results JSON and the report; else the plain ESX. */
     private fun selectExportDestination(bundle: Boolean) {
@@ -737,7 +779,7 @@ class SurveyActivity : AppCompatActivity() {
         ) return
         if (viewModel.beginProjectOperation(ProjectOperation.EXPORT_DESTINATION)) {
             if (bundle) androidCoordinator.createExportBundleDocument("${exportFileTitle()}.zip")
-            else androidCoordinator.createEsxDocument("${exportFileTitle()}.esx")
+            else androidCoordinator.createEsxDocument(if (exportSourceCopy) "${exportFileTitle()}-origen.esx" else "${exportFileTitle()}.esx")
         }
     }
 
@@ -746,6 +788,8 @@ class SurveyActivity : AppCompatActivity() {
         .ifBlank { "nimWifi-project" }
 
     private fun exportProject(destination: Uri, bundle: Boolean) {
+        val sourceCopy = exportSourceCopy && !bundle
+        exportSourceCopy = false
         val activeSnapshot = createProjectSnapshot()
         val projectId = currentProjectId
         val floorId = currentFloorId
@@ -765,13 +809,18 @@ class SurveyActivity : AppCompatActivity() {
                     ProjectAutosave.saveNow(SaveKey(projectId, floorId)) { projectRepository.saveProject(projectId, floorId, activeSnapshot) }
                     ProjectAutosave.saver.cancelPending(projectId)
                     val projectSnapshot = projectRepository.snapshotProject(projectId)
-                    EsxExportService(applicationContext).export(
-                        destination,
-                        projectSnapshot,
-                        bundleEsxName = if (bundle) "${exportFileTitle()}.esx" else null,
-                        reportSsid = surveyGuideStore.load().ssidFilter,
-                        reportProfile = surveyGuideStore.load().signal
-                    )
+                    if (sourceCopy) {
+                        sourceCopySha = EsxExportService(applicationContext).exportSourceCopy(destination, projectSnapshot)
+                    } else {
+                        sourceCopySha = null
+                        EsxExportService(applicationContext).export(
+                            destination,
+                            projectSnapshot,
+                            bundleEsxName = if (bundle) "${exportFileTitle()}.esx" else null,
+                            reportSsid = surveyGuideStore.load().ssidFilter,
+                            reportProfile = surveyGuideStore.load().signal
+                        )
+                    }
                     projectSnapshot.surveySummary()
                 }
             }
@@ -786,7 +835,19 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
+    @Volatile
+    private var sourceCopySha: String? = null
+
     private fun showExportSuccess(summary: ProjectSurveySummary) {
+        sourceCopySha?.let { sha ->
+            sourceCopySha = null
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.export_complete_title)
+                .setMessage(getString(R.string.export_source_complete, sha))
+                .setPositiveButton(R.string.action_ok, null)
+                .show()
+            return
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.export_complete_title)
             .setMessage(

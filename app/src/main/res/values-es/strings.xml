@@ -397,6 +397,24 @@
     <string name="export_format_title">Exportar</string>
     <string name="export_format_bundle">ESX + informe y resultados (ZIP)</string>
     <string name="export_format_esx">Solo ESX</string>
+    <string name="export_format_source">Copia exacta del ESX de origen (sin cambios locales)</string>
+    <string name="export_changes_title">Export de trabajo de un ESX importado</string>
+    <string name="export_changes_message">Las entradas originales del ESX de origen se mantienen intactas, salvo estos cambios:
+
+%1$s
+
+Catálogos que pueden reescribirse: %2$s.
+
+El ESX de origen sin cambios es otra opción del menú de exportación, y los archivos de análisis (JSON de resultados e informe) son entradas separadas del ZIP.</string>
+    <string name="change_new_floor">planta nueva</string>
+    <string name="change_scale_assumed">se escribe la escala asumida de %1$s m/px (aceptada)</string>
+    <string name="change_scale_changed">escala cambiada</string>
+    <string name="change_local_scans">se añaden escaneos locales</string>
+    <string name="change_local_routes">se añaden rutas locales</string>
+    <string name="change_local_notes">se añaden notas locales</string>
+    <string name="export_source_complete">Se ha escrito el ESX de origen sin cambios.
+SHA-256: %1$s</string>
+    <string name="action_continue">Continuar</string>
     <string name="config_change_failed">No se ha cambiado la configuración: %1$s</string>
     <string name="config_corrupt">No se puede leer la configuración guardada (%1$s). No se usa; quítala y vuelve a importarla.</string>
     <string name="config_export_shareable">Exportar resumen compartible</string>
