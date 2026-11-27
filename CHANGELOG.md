@@ -14,6 +14,7 @@ nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (M
 - Foreground service while a Continuous track or active tests run, so they continue with the screen off.
 
 ### Changed
+- Spanish and English interface (English is the default).
 - Version scheme: semantic versioning (`vX.Y.Z` tags), versionCode 4000000.
 - About: description, build identity and links to nimWifi and to WiProber.
 - Autosave runs outside the survey screen, retries and warns when saving keeps failing.

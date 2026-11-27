@@ -132,7 +132,7 @@ When changing ESX handling, add fixture-based tests that validate JSON relations
 
 ## UI and resources
 
-- Put new user-visible text in `res/values/strings.xml`; do not add more hard-coded UI strings.
+- Put new user-visible text in `res/values/strings.xml` (English, the default) and its Spanish translation in `res/values-es/strings.xml`; do not add more hard-coded UI strings.
 - Keep overlay geometry aligned through PhotoView pan/zoom and test coordinate conversion when changing either view.
 - Do not decode full-resolution floor plans or note photos on the main thread without size limits/downsampling.
 - Preserve accessibility labels and usable layouts on small screens when adding controls.

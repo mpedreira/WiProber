@@ -1,5 +1,5 @@
-<!-- Russian currently covers privacy and review-related explanations, not the whole survey UI.
-     Keep English fallback for legacy strings; locale-specific UI tests cover the translated set. -->
+<!-- English is the default and the reference. Spanish (values-es) covers the whole UI; keep it in
+     step when adding strings. Russian (values-ru) only covers a few legacy explanations. -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <string name="app_name">nimWifi</string>
 
@@ -296,7 +296,7 @@
     <string name="config_preview_writes">Requests that may write: %1$d</string>
     <string name="config_preview_stripped">Removed from the definitions (credentials and session data are never stored with them):\n%1$s</string>
     <string name="config_preview_credentials">Credentials stored separately (not shown, not exported, not backed up): %1$s</string>
-    <string name="config_preview_missing">Credentials needed but not provided (those steps will fail with missing_credential until a file with a \"credentials\" section is imported): %1$s</string>
+    <string name="config_preview_missing">Credentials needed but not provided (those steps will fail with missing_credential until they are set in Configuration or a file with a \"credentials\" section is imported): %1$s</string>
     <string name="config_writes_title">This profile sends write requests</string>
     <string name="config_writes_message">These steps replay POST/PUT/PATCH/DELETE requests at every point and may create or change real records:\n\n%1$s\n\nActivate them anyway?</string>
     <string name="config_writes_confirm">Activate with writes</string>
