@@ -1,0 +1,178 @@
+name: Field build
+
+# Builds and verifies the exact APK of a tag. It never publishes a release: publishing that APK
+# (with its build-info.json) is a separate, manual step (docs/release-process.md).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v4.0.0-rc.1)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: field-build-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  field:
+    name: Build and verify the tag's APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Derive the version from the tag
+        id: version
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::Not a version tag: $TAG"; exit 1 ;;
+          esac
+          echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Install Android SDK packages and iperf3
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+          sudo apt-get update -q && sudo apt-get install -y -q iperf3
+
+      - name: Field signing key
+        id: key
+        env:
+          FIELD_KEYSTORE_B64: ${{ secrets.FIELD_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$FIELD_KEYSTORE_B64" ]; then
+            echo "$FIELD_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/field.p12"
+            echo "FIELD_KEYSTORE_FILE=$RUNNER_TEMP/field.p12" >> "$GITHUB_ENV"
+            echo "field=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::FIELD_KEYSTORE_B64 is not set: the APK is signed with this runner's throwaway debug key and is a development build only (it cannot update field installations)."
+            echo "field=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Unit tests (iPerf3 integration against a real iperf3), lint and builds
+        env:
+          IPERF3_BIN: /usr/bin/iperf3
+          FIELD_KEYSTORE_PASSWORD: ${{ secrets.FIELD_KEYSTORE_PASSWORD }}
+          FIELD_KEY_ALIAS: ${{ secrets.FIELD_KEY_ALIAS }}
+          FIELD_KEY_PASSWORD: ${{ secrets.FIELD_KEY_PASSWORD }}
+        run: >-
+          ./gradlew --no-daemon --continue
+          -PappVersionName=${{ steps.version.outputs.name }}
+          -PgitSha=${{ steps.version.outputs.sha }}
+          -PbuildChannel=field
+          testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+
+      - name: The iPerf3 integration test ran (not skipped)
+        run: |
+          for suite in Iperf3ClientTest ThroughputRunnerTest; do
+            f="app/build/test-results/testDebugUnitTest/TEST-com.mpedreira.nimwifi.$suite.xml"
+            test -f "$f" || { echo "::error::$suite did not run"; exit 1; }
+            if grep -q '<skipped' "$f"; then echo "::error::$suite skipped a real-iperf3 test"; exit 1; fi
+          done
+
+      - name: R8 validation build (persistence rules)
+        run: >-
+          ./gradlew --no-daemon -Pr8Validation
+          -PappVersionName=${{ steps.version.outputs.name }}
+          -PgitSha=${{ steps.version.outputs.sha }}
+          assembleR8Validation assembleR8ValidationAndroidTest
+
+      - name: Verify the APK identity against the tag
+        id: verify
+        run: |
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          EXPECTED=$(./gradlew -q --no-daemon :app:printVersionInfo -PappVersionName=${{ steps.version.outputs.name }})
+          EXPECTED_CODE=$(echo "$EXPECTED" | sed -n 's/^versionCode=//p')
+          BADGING=$("$BT/aapt" dump badging "$APK" | head -1)
+          echo "$BADGING"
+          PACKAGE=$(echo "$BADGING" | sed -n "s/.*name='\([^']*\)'.*/\1/p")
+          CODE=$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          NAME=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          test "$PACKAGE" = "com.mpedreira.nimwifi.debug" || { echo "::error::Package $PACKAGE"; exit 1; }
+          test "$NAME" = "${{ steps.version.outputs.name }}-debug" || { echo "::error::versionName $NAME"; exit 1; }
+          test "$CODE" = "$EXPECTED_CODE" || { echo "::error::versionCode $CODE, expected $EXPECTED_CODE"; exit 1; }
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee signer.txt
+          CERT=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signer.txt)
+          APK_SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          if [ "${{ steps.key.outputs.field }}" = "true" ]; then KIND=field; else KIND=development; fi
+          mkdir -p out
+          cp "$APK" "out/nimWifi-${{ steps.version.outputs.name }}-debug.apk"
+          cp app/build/outputs/apk/debug/output-metadata.json out/
+          (cd out && sha256sum "nimWifi-${{ steps.version.outputs.name }}-debug.apk" > SHA256SUMS)
+          cat > out/build-info.json <<EOF
+          {
+            "tag": "$TAG",
+            "sourceSha": "${{ steps.version.outputs.sha }}",
+            "package": "$PACKAGE",
+            "versionName": "$NAME",
+            "versionCode": $CODE,
+            "apkSha256": "$APK_SHA",
+            "signerCertificateSha256": "$CERT",
+            "channel": "$KIND",
+            "fieldKey": ${{ steps.key.outputs.field }},
+            "instrumentation": "built, not executed (no device in CI)",
+            "workflowRun": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          {
+            echo "### $TAG"
+            echo "| | |"; echo "|---|---|"
+            echo "| Package | \`$PACKAGE\` |"
+            echo "| Version | \`$NAME\` ($CODE) |"
+            echo "| Source | \`${{ steps.version.outputs.sha }}\` |"
+            echo "| APK SHA-256 | \`$APK_SHA\` |"
+            echo "| Signer SHA-256 | \`$CERT\` |"
+            echo "| Channel | **$KIND** |"
+            echo "| Instrumentation tests | built, **not executed** (no device) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload field-channel APK
+        if: ${{ steps.verify.outputs.kind == 'field' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nimwifi-${{ steps.version.outputs.name }}-field
+          path: out/
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload development APK (cannot update field installations)
+        if: ${{ steps.verify.outputs.kind == 'development' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nimwifi-${{ steps.version.outputs.name }}-development-only
+          path: out/
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload verification reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: field-verification-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/*.xml
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: warn
