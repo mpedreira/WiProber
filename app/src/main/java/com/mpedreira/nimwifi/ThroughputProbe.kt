@@ -101,6 +101,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         var network: AndroidMeasurementNetwork? = null
         var resolvedKey: String? = null
         var address: InetAddress? = null
+        val resolver = NonBlockingResolver(waitMillis = config.intervalMillis.toLong().coerceIn(50L, 500L))
         try {
             while (isActive) {
                 val start = MonotonicMillisClock.now()
@@ -119,9 +120,13 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                         ProbeResult.INVALID_TARGET
                     } else {
                         // Resolve again when the network or the expanded host (gateway/DNS) changed.
+                        // A slow or failing DNS never holds the cadence: the attempt is recorded as
+                        // resolution_failed at once while the lookup goes on in the background.
                         val key = "${net.id}|$host"
                         if (key != resolvedKey) {
-                            address = runCatching { AddressPolicy.candidates(net.resolve(host)).firstOrNull() }.getOrNull()
+                            address = resolver.lookup(key, MonotonicMillisClock.now()) {
+                                AddressPolicy.candidates(net.resolve(host)).firstOrNull()
+                            }
                             resolvedKey = key.takeIf { address != null }
                         }
                         val target = address
@@ -133,6 +138,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                 delay((config.intervalMillis - (MonotonicMillisClock.now() - start)).coerceAtLeast(0L))
             }
         } finally {
+            resolver.close()
             network?.close()
         }
     }
@@ -155,6 +161,53 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
 
     private companion object {
         const val ROAMING_CONNECT_TIMEOUT_MILLIS = 1_000
+    }
+}
+
+/**
+ * Name lookups for the roaming probe that never block longer than [waitMillis]. A lookup that has
+ * not finished keeps running in the background and its answer is used by a later attempt; after a
+ * failure the same key is retried at most every [retryMillis].
+ */
+internal class NonBlockingResolver(
+    private val waitMillis: Long,
+    private val retryMillis: Long = 5_000L
+) : java.io.Closeable {
+    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "roaming-dns").apply { isDaemon = true }
+    }
+    private var pendingKey: String? = null
+    private var pending: java.util.concurrent.Future<InetAddress?>? = null
+    private val failedAt = mutableMapOf<String, Long>()
+
+    /** The address, or null (failed, still resolving, or waiting to retry). */
+    fun lookup(key: String, now: Long, resolve: () -> InetAddress?): InetAddress? {
+        if (pendingKey != key) {
+            pending?.cancel(true)
+            pending = null
+            pendingKey = null
+            val failed = failedAt[key]
+            if (failed != null && now - failed < retryMillis) return null
+            pending = executor.submit<InetAddress?> { runCatching(resolve).getOrNull() }
+            pendingKey = key
+        }
+        val future = pending ?: return null
+        val result = try {
+            future.get(waitMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            return null // still resolving: this attempt counts as resolution_failed
+        } catch (e: Exception) {
+            null
+        }
+        pending = null
+        pendingKey = null
+        if (result == null) failedAt[key] = now else failedAt.remove(key)
+        return result
+    }
+
+    override fun close() {
+        pending?.cancel(true)
+        executor.shutdownNow()
     }
 }
 
