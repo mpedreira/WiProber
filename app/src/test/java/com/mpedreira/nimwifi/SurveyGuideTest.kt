@@ -131,4 +131,13 @@ class SurveyGuideTest {
     }
 
     private fun net(ssid: String, level: Int) = WifiNetworkInfo(ssid, "00:11:22:33:44:${level + 100}", level, 5_180, "WPA2", emptyList(), "")
+
+    @Test
+    fun signalProfilesMatchTheAnalysisReport() {
+        assertEquals(-67, SignalProfile.of("pda").primaryDbm)
+        assertEquals(-67, SignalProfile.of("VOZ").secondaryDbm)
+        assertEquals(-75, SignalProfile.of("datos").secondaryDbm)
+        assertEquals(SignalProfile.PDA, SignalProfile.of("unknown"))
+        assertEquals("datos", SurveyGuideSettings(profile = " Datos ").sanitized().profile)
+    }
 }

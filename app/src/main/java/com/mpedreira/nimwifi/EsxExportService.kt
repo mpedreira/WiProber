@@ -21,7 +21,13 @@ class EsxExportService(
     private val contentResolver = appContext.contentResolver
 
     /** [reportSsid]: SSID chosen on the map, reported first (empty = automatic). */
-    fun export(destinationUri: Uri, snapshot: ProjectExportSnapshot, bundleEsxName: String? = null, reportSsid: String = "") {
+    fun export(
+        destinationUri: Uri,
+        snapshot: ProjectExportSnapshot,
+        bundleEsxName: String? = null,
+        reportSsid: String = "",
+        reportProfile: SignalProfile = SignalProfile.DEFAULT
+    ) {
         val exportDirectory = File(appContext.cacheDir, "esx-export-${System.nanoTime()}")
         val completeArchive = File(appContext.cacheDir, "${exportDirectory.name}.esx")
         require(exportDirectory.mkdirs()) { "Cannot create the ESX export workspace" }
@@ -64,7 +70,7 @@ class EsxExportService(
                         bundleEsxName,
                         completeArchive,
                         PerformanceExport.toBytes(performance),
-                        SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid)).toByteArray(Charsets.UTF_8)
+                        SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id)).toByteArray(Charsets.UTF_8)
                     )
                     return@use
                 }

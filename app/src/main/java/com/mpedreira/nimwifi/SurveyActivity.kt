@@ -654,7 +654,7 @@ class SurveyActivity : AppCompatActivity() {
                 state.scanPoints.map { PointsOverlayView.PointMarker(it.x, it.y, null) } +
                     state.plannedPoints.map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED) }
             } else {
-                SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid).map { PointsOverlayView.PointMarker(it.x, it.y, it.state) } +
+                SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid, surveyGuideStore.load().signal.primaryDbm).map { PointsOverlayView.PointMarker(it.x, it.y, it.state) } +
                     state.scanPoints.filter { it.pointId == null }.map { PointsOverlayView.PointMarker(it.x, it.y, null) }
             }
         )
@@ -907,7 +907,8 @@ class SurveyActivity : AppCompatActivity() {
                         destination,
                         projectSnapshot,
                         bundleEsxName = if (bundle) "${exportFileTitle()}.esx" else null,
-                        reportSsid = surveyGuideStore.load().ssidFilter
+                        reportSsid = surveyGuideStore.load().ssidFilter,
+                        reportProfile = surveyGuideStore.load().signal
                     )
                     projectSnapshot.surveySummary()
                 }

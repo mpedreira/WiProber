@@ -45,6 +45,7 @@ object SurveyReport {
         val generatedAt: Long,
         val selection: RunSelection,
         val weakDbm: Int,
+        val profile: String = SignalProfile.DEFAULT.id,
         val floors: List<FloorSection>
     )
 
@@ -53,8 +54,10 @@ object SurveyReport {
         generatedAt: Long,
         chosenSsid: String = "",
         selection: RunSelection = RunSelection.LATEST_PER_POINT,
-        weakDbm: Int = SsidCoverage.DEFAULT_WEAK_DBM
+        weakDbm: Int = SsidCoverage.DEFAULT_WEAK_DBM,
+        profile: String = SignalProfile.DEFAULT.id
     ): Model = Model(
+        profile = profile,
         title = snapshot.title,
         generatedAt = generatedAt,
         selection = selection,
@@ -167,7 +170,7 @@ object SurveyReport {
         append("<h1>").append(e(model.title)).append("</h1>")
         append("<p class=\"muted\">Generated ").append(e(at(model.generatedAt))).append(". Service figures use ")
         append(if (model.selection == RunSelection.ALL) "every run" else "the latest run at each point")
-        append(". Weak signal: strongest AP of the SSID below ").append(model.weakDbm).append(" dBm in the latest valid scan. ")
+        append(". Weak signal (profile ").append(e(model.profile)).append("): strongest AP of the SSID below ").append(model.weakDbm).append(" dBm in the latest valid scan. ")
         append("Signal values are the strongest AP of each SSID seen by the passive scan, not necessarily the AP the phone was connected to during the tests. ")
         append("Points imported from an ESX have no local measurement (their Ekahau data is kept untouched in the .esx).</p>")
         model.floors.forEach { floor ->

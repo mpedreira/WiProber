@@ -19,7 +19,8 @@ class SurveyGuideSettingsStore(context: Context) {
             enabled = prefs.getBoolean(ENABLED, defaults.enabled),
             spacingMeters = prefs.getFloat(SPACING, defaults.spacingMeters.toFloat()).toDouble(),
             coverageRadiusMeters = prefs.getFloat(RADIUS, defaults.coverageRadiusMeters.toFloat()).toDouble(),
-            ssidFilter = prefs.getString(SSID, null) ?: defaults.ssidFilter
+            ssidFilter = prefs.getString(SSID, null) ?: defaults.ssidFilter,
+            profile = prefs.getString(PROFILE, null) ?: defaults.profile
         ).sanitized()
     }
 
@@ -30,6 +31,7 @@ class SurveyGuideSettingsStore(context: Context) {
             putFloat(SPACING, clean.spacingMeters.toFloat())
             putFloat(RADIUS, clean.coverageRadiusMeters.toFloat())
             putString(SSID, clean.ssidFilter)
+            putString(PROFILE, clean.profile)
         }
     }
 
@@ -39,6 +41,7 @@ class SurveyGuideSettingsStore(context: Context) {
         const val SPACING = "spacing_m"
         const val RADIUS = "radius_m"
         const val SSID = "ssid_filter"
+        const val PROFILE = "signal_profile"
     }
 }
 
@@ -51,12 +54,17 @@ object SurveyGuideSettingsDialog {
         val spacing = view.findViewById<TextInputEditText>(R.id.guideSpacing)
         val radius = view.findViewById<TextInputEditText>(R.id.guideRadius)
         val ssid = view.findViewById<TextInputEditText>(R.id.guideSsid)
+        val profiles = view.findViewById<android.widget.RadioGroup>(R.id.guideProfile)
+        val profileButtons = mapOf(
+            SignalProfile.PDA to R.id.guideProfilePda, SignalProfile.VOICE to R.id.guideProfileVoice, SignalProfile.DATA to R.id.guideProfileData
+        )
 
         fun fill(settings: SurveyGuideSettings) {
             enabled.isChecked = settings.enabled
             spacing.setText(meters(settings.spacingMeters))
             radius.setText(meters(settings.coverageRadiusMeters))
             ssid.setText(settings.ssidFilter)
+            profiles.check(profileButtons.getValue(settings.signal))
         }
 
         val current = store.load()
@@ -70,7 +78,9 @@ object SurveyGuideSettingsDialog {
                         enabled = enabled.isChecked,
                         spacingMeters = parse(spacing) ?: current.spacingMeters,
                         coverageRadiusMeters = parse(radius) ?: current.coverageRadiusMeters,
-                        ssidFilter = ssid.text?.toString().orEmpty()
+                        ssidFilter = ssid.text?.toString().orEmpty(),
+                        profile = profileButtons.entries.firstOrNull { it.value == profiles.checkedRadioButtonId }?.key?.id
+                            ?: current.profile
                     )
                 )
                 onSaved()

@@ -317,4 +317,8 @@
     <string name="point_details_not_detected">not detected</string>
     <string name="point_details_runs">Test runs: %1$d</string>
     <string name="point_details_active_only">active tests only</string>
+    <string name="guide_profile">Signal profile (weak signal threshold)</string>
+    <string name="guide_profile_pda">Handheld scanners: −67 dBm, second AP −72 dBm</string>
+    <string name="guide_profile_voice">Voice: −67 dBm, second AP −67 dBm</string>
+    <string name="guide_profile_data">Data: −70 dBm, second AP −75 dBm</string>
 </resources>

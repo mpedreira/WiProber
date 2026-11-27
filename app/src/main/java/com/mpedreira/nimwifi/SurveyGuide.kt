@@ -11,18 +11,39 @@ data class SurveyGuideSettings(
     val spacingMeters: Double = DEFAULT_SPACING_METERS,
     val coverageRadiusMeters: Double = DEFAULT_RADIUS_METERS,
     /** Only networks with this SSID count for the coverage colour; empty = every network. */
-    val ssidFilter: String = ""
+    val ssidFilter: String = "",
+    /** Signal profile ([SignalProfile]) that decides when a point's signal is weak. */
+    val profile: String = SignalProfile.DEFAULT.id
 ) {
+    val signal: SignalProfile get() = SignalProfile.of(profile)
+
     fun sanitized(): SurveyGuideSettings = copy(
         spacingMeters = spacingMeters.takeIf { it.isFinite() }?.coerceIn(1.0, 100.0) ?: DEFAULT_SPACING_METERS,
         coverageRadiusMeters = coverageRadiusMeters.takeIf { it.isFinite() }?.coerceIn(0.5, 50.0)
             ?: DEFAULT_RADIUS_METERS,
-        ssidFilter = ssidFilter.trim()
+        ssidFilter = ssidFilter.trim(),
+        profile = SignalProfile.of(profile).id
     )
 
     companion object {
         const val DEFAULT_SPACING_METERS = 10.0
         const val DEFAULT_RADIUS_METERS = 5.0
+    }
+}
+
+/**
+ * Signal requirements per use, the same profiles as the wifianalisys report: a point is weak when
+ * the strongest AP of the SSID is below [primaryDbm]; [secondaryDbm] is the second AP needed for
+ * roaming. Starting values; validate them with the real devices.
+ */
+enum class SignalProfile(val id: String, val primaryDbm: Int, val secondaryDbm: Int) {
+    PDA("pda", -67, -72),
+    VOICE("voz", -67, -67),
+    DATA("datos", -70, -75);
+
+    companion object {
+        val DEFAULT = PDA
+        fun of(id: String?): SignalProfile = entries.firstOrNull { it.id == id?.trim()?.lowercase() } ?: DEFAULT
     }
 }
 

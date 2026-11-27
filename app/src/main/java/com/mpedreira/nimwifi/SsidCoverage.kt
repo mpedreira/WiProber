@@ -37,7 +37,8 @@ data class PointCoverage(
  * never makes a point look covered for the operational one.
  */
 object SsidCoverage {
-    const val DEFAULT_WEAK_DBM = -70
+    /** The default profile's primary threshold ([SignalProfile.DEFAULT]). */
+    val DEFAULT_WEAK_DBM = SignalProfile.DEFAULT.primaryDbm
 
     /** SSIDs detected in local scans of the floor, most widely detected first. */
     fun ssids(scanPoints: List<ScanPoint>, sessions: List<ContinuousScanSession> = emptyList()): List<String> {

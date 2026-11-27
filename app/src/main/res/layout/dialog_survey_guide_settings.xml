@@ -81,5 +81,39 @@
                 android:maxLength="32"
                 android:singleLine="true" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/guide_profile"
+            android:textAppearance="?attr/textAppearanceLabelLarge" />
+
+        <RadioGroup
+            android:id="@+id/guideProfile"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <RadioButton
+                android:id="@+id/guideProfilePda"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/guide_profile_pda" />
+
+            <RadioButton
+                android:id="@+id/guideProfileVoice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/guide_profile_voice" />
+
+            <RadioButton
+                android:id="@+id/guideProfileData"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/guide_profile_data" />
+        </RadioGroup>
     </LinearLayout>
 </ScrollView>
