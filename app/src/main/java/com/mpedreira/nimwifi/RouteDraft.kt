@@ -53,6 +53,21 @@ data class RouteInterruption(val fromMs: Long, val toMs: Long)
 
 object RouteDrafts {
     /**
+     * rc.3 · 3: drafts written by 4.0.0-rc.1 keep the probe only route-wide
+     * ([RouteDraft.roamingTarget]/[RouteDraft.roamingIntervalMillis]). Their stretches that hold
+     * probe attempts get that original target and interval (method [RoamingTracker.METHOD_UNKNOWN],
+     * it was not saved); stretches without probes stay without a probe. Applied when a draft is
+     * loaded, before anything can overwrite the route-wide fields; idempotent (a migrated draft,
+     * saved and read again, migrates to itself).
+     */
+    fun migrateLegacy(draft: RouteDraft): RouteDraft {
+        val target = draft.roamingTarget ?: return draft
+        if (draft.segments.none { it.roaming == null && it.probeAttempts.isNotEmpty() }) return draft
+        val profile = RoamingProfile(target, draft.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS, RoamingTracker.METHOD_UNKNOWN)
+        return draft.copy(segments = draft.segments.map { if (it.roaming == null && it.probeAttempts.isNotEmpty()) it.copy(roaming = profile) else it })
+    }
+
+    /**
      * Joins the stretches into one session on the route's relative time base. Each stretch keeps
      * its own clock: it is placed by its UTC anchor (never before the previous stretch ended,
      * so a monotonic reset or a wall-clock jump cannot reorder data) and the gap between two
@@ -63,6 +78,7 @@ object RouteDrafts {
         val scans = mutableListOf<ScanResultWrapper>()
         val attempts = mutableListOf<ProbeAttempt>()
         val interruptions = mutableListOf<RouteInterruption>()
+        @Suppress("NAME_SHADOWING") val draft = migrateLegacy(draft)
         val windows = mutableListOf<ScanWindow>()
         // rc.2 · 4: each stretch's probe attempts, with the profile it used and its span.
         val stretches = mutableListOf<Triple<RoamingProfile?, List<ProbeAttempt>, LongRange>>()
@@ -79,11 +95,8 @@ object RouteDrafts {
             val last = maxOf(segment.lastObservedMs, segment.waypoints.maxOfOrNull { it.timestamp } ?: 0L,
                 segment.scanResults.maxOfOrNull { it.timestamp } ?: 0L, segment.probeAttempts.maxOfOrNull { it.endMs } ?: 0L)
             previousEnd = offset + last
-            // Drafts saved before rc.2 only had one route-wide target: its method is unknown.
-            val profile = segment.roaming ?: draft.roamingTarget?.let {
-                RoamingProfile(it, draft.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS, RoamingTracker.METHOD_UNKNOWN)
-            }
-            stretches += Triple(profile, shifted, offset..previousEnd)
+            // Legacy stretches were migrated above; a stretch without a probe has no profile.
+            stretches += Triple(segment.roaming, shifted, offset..previousEnd)
         }
         end?.let { waypoints += it.copy(timestamp = maxOf(it.timestamp, previousEnd)) }
         val elapsed = maxOf(previousEnd, waypoints.maxOfOrNull { it.timestamp } ?: 0L)

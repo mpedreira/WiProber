@@ -253,7 +253,9 @@ class MainViewModel @JvmOverloads constructor(
             activeRuns = SurveyIds.reconcile(activeRuns, clock.now()),
             plannedPoints = plannedPoints.toList(),
             // A draft whose route is already saved was finished (its cleanup failed): not interrupted.
-            interruptedRoutes = routeDrafts.filter { draft -> continuousSessions.none { it.id == draft.sessionId } },
+            // rc.3 · 3: rc.1 drafts get their original probe per stretch before anything is resumed.
+            interruptedRoutes = routeDrafts.filter { draft -> continuousSessions.none { it.id == draft.sessionId } }
+                .map(RouteDrafts::migrateLegacy),
             scanMode = selectedScanMode,
             actionHistory = buildList {
                 repeat(scanPoints.count { !it.importedFromEsx }) { add(LastAction.SCAN) }
