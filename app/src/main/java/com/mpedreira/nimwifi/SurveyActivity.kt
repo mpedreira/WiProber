@@ -674,6 +674,11 @@ class SurveyActivity : AppCompatActivity() {
         PointActionsDialogs.showPointActions(
             this, label,
             canRunActiveTests = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isNotEmpty(),
+            onDetails = {
+                val current = viewModel.screenState.value
+                val ssid = mapSsid(current)
+                PointDetails.of(current, pointId, ssid)?.let { PointActionsDialogs.showPointDetails(this, it, ssid) }
+            },
             onMeasure = {
                 if (prepareForScan() && viewModel.requestMeasureAtPoint(pointId)) androidCoordinator.ensureWifiScanAccess()
             },
