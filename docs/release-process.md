@@ -1,21 +1,19 @@
-# Field builds: version, identity and signing
+# Releases: version, identity and signing
 
 ## Version scheme
 
-The field channel is the **debug** build type (`com.mpedreira.nimwifi.debug`), built from tags `vX.Y.Z-throughput.N`:
+From **4.0.0** versions follow semantic versioning and releases are built from tags `vX.Y.Z` (test builds `vX.Y.Z-rc.N`). The 3.0.0 builds used `v3.0.0-throughput.N`.
 
-| | Rule | Example (`v3.0.0-throughput.5`) |
+| | Rule | Example (`v4.0.0`) |
 |---|---|---|
-| `versionName` | tag without `v`, plus `-debug` | `3.0.0-throughput.5-debug` |
-| `versionCode` | `X·1 000 000 + Y·10 000 + Z·100 + N` (Y, Z, N < 100) | `3000005` |
+| `versionName` | tag without `v`, plus `-debug` for the debug build type | `4.0.0-debug` |
+| `versionCode` | `X·1 000 000 + Y·10 000 + Z·100 + N` (Y, Z, N < 100; N = the `-rc`/`-throughput` number, 0 for a release) | `4000000` |
 
-Releases `.1`–`.4` all had `versionCode 5` and `versionName 3.0.0-debug`, so they cannot be told apart from the phone; every later field build is higher than 5 and increases with each tag. `-PappVersionName`/`-PappVersionCode` override the rule; local builds without them are `3.0.0-dev-debug` with `versionCode 1`, so a field build always installs over them.
-
-*About* shows the visible version, the `versionCode`, the source commit (`BuildConfig.GIT_SHA`, first 12 characters) and the channel (`field`, `ci` or `local`).
+Every version is higher than the previous ones (`3.0.0-throughput.5` was `3000005`). `-PappVersionName`/`-PappVersionCode` override the rule; local builds without them are `4.0.0-dev` with `versionCode 1`, so a published build always installs over them. Changes per version are in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Identifying an APK
 
-`.github/workflows/field-build.yml` runs on every `v*-throughput.*` tag (or by hand with a tag). It runs the unit tests (including the iPerf3 protocol test against a real `iperf3`), lint, the debug/release/instrumentation builds and the R8 validation build, then checks that the APK's `versionName`/`versionCode` match the tag and uploads, as a workflow artifact:
+`.github/workflows/field-build.yml` (not yet in the repository: pushing workflows needs a token with the `workflow` scope) runs on every `v*` tag (or by hand with a tag). It runs the unit tests (including the iPerf3 protocol test against a real `iperf3`), lint, the debug/release/instrumentation builds and the R8 validation build, then checks that the APK's `versionName`/`versionCode` match the tag and uploads, as a workflow artifact:
 
 - `nimWifi-<version>-debug.apk`, `SHA256SUMS`, `output-metadata.json`
 - `build-info.json`: `tag`, `sourceSha`, `versionName`, `versionCode`, `apkSha256`, `signerCertificateSha256`, `fieldKey`, `workflowRun`

@@ -4,19 +4,23 @@ plugins {
 }
 
 /*
- * Build identity (docs/release-process.md). The field channel is the debug build type
- * (applicationId com.mpedreira.nimwifi.debug) published from tags `vX.Y.Z-throughput.N`:
- *   versionName = the tag without "v"          e.g. 3.0.0-throughput.5 (+ "-debug")
- *   versionCode = X*1_000_000 + Y*10_000 + Z*100 + N   e.g. 3_000_005 (> 5 used by .1-.4)
- * -PappVersionName / -PappVersionCode override both; local builds without them are
- * "3.0.0-dev" with versionCode 1, so a field build always installs over them.
+ * Build identity (docs/release-process.md). Releases are published from tags `vX.Y.Z`
+ * (semantic versioning from 4.0.0; `vX.Y.Z-rc.N` for test builds, `-throughput.N` for the
+ * 3.0.0 builds):
+ *   versionName = the tag without "v"                    e.g. 4.0.0 (+ "-debug")
+ *   versionCode = X*1_000_000 + Y*10_000 + Z*100 + N     e.g. 4_000_000 (> 3_000_005 of 3.0.0-throughput.5)
+ * N is the -rc/-throughput number, 0 for a release. -PappVersionName / -PappVersionCode
+ * override both; local builds without them are "4.0.0-dev" with versionCode 1, so a
+ * published build always installs over them.
  */
-val appVersionName: String = providers.gradleProperty("appVersionName").orNull ?: "3.0.0-dev"
+val appVersionName: String = providers.gradleProperty("appVersionName").orNull ?: "4.0.0-dev"
 val appVersionCode: Int = providers.gradleProperty("appVersionCode").orNull?.toInt()
-    ?: Regex("""^(\d+)\.(\d+)\.(\d+)-throughput\.(\d+)$""").matchEntire(appVersionName)?.destructured
-        ?.let { (major, minor, patch, build) ->
-            require(minor.toInt() < 100 && patch.toInt() < 100 && build.toInt() < 100) { "Version part out of range: $appVersionName" }
-            major.toInt() * 1_000_000 + minor.toInt() * 10_000 + patch.toInt() * 100 + build.toInt()
+    ?: Regex("""^(\d+)\.(\d+)\.(\d+)(?:-(?:rc|throughput)\.(\d+))?$""").matchEntire(appVersionName)?.groupValues
+        ?.let { parts ->
+            val (major, minor, patch) = parts.subList(1, 4).map(String::toInt)
+            val build = parts[4].ifEmpty { "0" }.toInt()
+            require(minor < 100 && patch < 100 && build < 100) { "Version part out of range: $appVersionName" }
+            major * 1_000_000 + minor * 10_000 + patch * 100 + build
         }
     ?: 1
 /** Source commit shown in About; CI passes -PgitSha, local builds ask git. */
