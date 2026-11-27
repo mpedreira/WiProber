@@ -45,7 +45,13 @@ data class WifiNetworkInfo(
     val frequency: Int,
     val security: String,
     val technologies: List<String>,
-    val informationElements: String
+    val informationElements: String,
+    /**
+     * What the beacon says about the AP (vendor elements, WPS, advertised name), extracted when
+     * scanning; null in scans saved before 4.0.0-rc.5 and when the beacon says nothing. App and
+     * export only: the ESX keeps [informationElements] as before.
+     */
+    val beacon: BeaconIdentity? = null
 )
 
 data class MapInfo(val fileName: String, val width: Int, val height: Int)

@@ -19,9 +19,16 @@ object ScanResultMapper {
             frequency = scanResult.frequency,
             security = security(scanResult.capabilities),
             technologies = WifiTechnologyMapper.map(scanResult.wifiStandard, scanResult.frequency),
-            informationElements = informationElements(scanResult)
+            informationElements = informationElements(scanResult),
+            beacon = beacon(scanResult)
         )
     }
+
+    /** Every element (not only the first 512 bytes kept for the ESX), read for the AP's identity. */
+    private fun beacon(scanResult: ScanResult): BeaconIdentity? = runCatching {
+        val elements = scanResult.informationElements ?: return@runCatching null
+        BeaconIdentityParser.parse(elements.map { ie -> ie.id to ByteArray(ie.bytes.remaining()).also { ie.bytes.duplicate().get(it) } })
+    }.getOrNull()
 
     private fun security(capabilities: String): String = when {
         capabilities.contains("WPA3") -> "WPA3"
