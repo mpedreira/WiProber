@@ -28,6 +28,7 @@ object ProbeResult {
  * One probe attempt during a Continuous track. Times are milliseconds on the session's monotonic
  * time base (the same as waypoints and scans), relative to the session start.
  */
+@JsonModel
 data class ProbeAttempt(
     val startMs: Long,
     val endMs: Long,
@@ -129,6 +130,9 @@ data class RoamingLog(
  */
 class RoamingTracker(private val target: String, private val intervalMillis: Int) {
     private val attempts = mutableListOf<ProbeAttempt>()
+
+    /** Attempts so far (for the route draft). */
+    fun attempts(): List<ProbeAttempt> = attempts.toList()
 
     /** Attempts must arrive in order; out-of-order or stale ones are ignored. */
     fun add(attempt: ProbeAttempt) {

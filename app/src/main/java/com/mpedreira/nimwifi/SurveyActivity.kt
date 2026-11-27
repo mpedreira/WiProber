@@ -1523,7 +1523,8 @@ class SurveyActivity : AppCompatActivity() {
             skippedSuggestions = floor.skippedSuggestions,
             // Without these a reopened floor lost its runs (and planned points) on the next save.
             activeRuns = floor.activeRuns,
-            plannedPoints = floor.plannedPoints
+            plannedPoints = floor.plannedPoints,
+            routeDrafts = floor.routeDrafts
         )
         binding.mapImageView.post(::syncOverlayTransform)
     }
@@ -1593,6 +1594,26 @@ class SurveyActivity : AppCompatActivity() {
      * tracks/tests and warns when saving keeps failing.
      */
     private fun setupBackgroundObservers() {
+        // Mejora 3: checkpoint of the open route, so a process death or a reboot does not lose it.
+        lifecycleScope.launch {
+            viewModel.routeDraftRevision.collect {
+                val projectId = currentProjectId ?: return@collect
+                val floorId = currentFloorId ?: return@collect
+                val draft = viewModel.activeRouteDraft(floorId) ?: return@collect
+                val repository = projectRepository
+                ProjectAutosave.schedule(SaveKey(projectId, floorId, draft.sessionId), ROUTE_DRAFT_DEBOUNCE_MILLIS) {
+                    repository.saveRouteDraft(projectId, floorId, draft)
+                }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.screenState.collect { state ->
+                    val draft = state.interruptedRoutes.firstOrNull { it.sessionId !in offeredRouteDrafts }
+                    if (draft != null && state.interaction is SurveyInteraction.Idle && isProjectReady) offerInterruptedRoute(draft)
+                }
+            }
+        }
         lifecycleScope.launch {
             var previous: SurveyScreenState? = null
             viewModel.screenState.collect { state ->
@@ -1633,6 +1654,28 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
+    private val offeredRouteDrafts = mutableSetOf<String>()
+
+    private fun offerInterruptedRoute(draft: RouteDraft) {
+        offeredRouteDrafts += draft.sessionId
+        RouteRecoveryDialog.show(
+            this, draft,
+            // Saving it adds the route to the floor; the floor save removes the draft afterwards.
+            onSave = { viewModel.finalizeInterruptedRoute(draft.sessionId) },
+            onContinue = {
+                if (viewModel.requestResumeRoute(draft.sessionId)) androidCoordinator.ensureWifiScanAccess()
+            },
+            onDiscard = {
+                viewModel.discardInterruptedRoute(draft.sessionId)
+                val projectId = currentProjectId ?: return@show
+                val floorId = currentFloorId ?: return@show
+                lifecycleScope.launch(Dispatchers.IO) {
+                    runCatching { projectRepository.deleteRouteDraft(projectId, floorId, draft.sessionId) }
+                }
+            }
+        )
+    }
+
     private fun surveyChanged(previous: SurveyScreenState, state: SurveyScreenState): Boolean =
         state.scanPoints != previous.scanPoints ||
             state.continuousScanSessions != previous.continuousScanSessions ||
@@ -1652,6 +1695,7 @@ class SurveyActivity : AppCompatActivity() {
 
     companion object {
         private const val POINT_TOUCH_RADIUS_DP = 20f
+        private const val ROUTE_DRAFT_DEBOUNCE_MILLIS = 1_500L
         private const val PROJECT_URL = "https://github.com/mpedreira/nimwifi"
         /** Attribution: nimWifi is based on WiProber (MIT). */
         private const val ORIGINAL_PROJECT_URL = "https://github.com/htechno/WiProber"

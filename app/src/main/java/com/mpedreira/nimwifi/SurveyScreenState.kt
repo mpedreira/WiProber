@@ -25,7 +25,8 @@ sealed interface PendingScanRequest {
 
     /** [pointId]: measure again at an existing (local, imported or planned) point; null = new point. */
     data class StopAndGo(override val coordinate: SurveyCoordinate, val pointId: String? = null) : PendingScanRequest
-    data class ContinuousStart(override val coordinate: SurveyCoordinate) : PendingScanRequest
+    /** [resumeSessionId]: continue an interrupted route with a new stretch. */
+    data class ContinuousStart(override val coordinate: SurveyCoordinate, val resumeSessionId: String? = null) : PendingScanRequest
 }
 
 sealed interface SurveyInteraction {
@@ -68,6 +69,8 @@ data class SurveyScreenState(
     val activeRuns: List<ActiveRun> = emptyList(),
     /** Template points not measured yet. */
     val plannedPoints: List<PlannedPoint> = emptyList(),
+    /** Routes left open by a process death or a reboot, recovered from their drafts. */
+    val interruptedRoutes: List<RouteDraft> = emptyList(),
     /** Phase currently running in the active run, for the progress dialog. */
     val activeRunProgress: ThroughputProgress? = null,
     val scanMode: SurveyScanMode = SurveyScanMode.STOP_AND_GO,

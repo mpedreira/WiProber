@@ -49,7 +49,9 @@ data class LocalSurveyFloor(
     val notes: List<AppNote>,
     val skippedSuggestions: List<SkippedSuggestion> = emptyList(),
     val activeRuns: List<ActiveRun> = emptyList(),
-    val plannedPoints: List<PlannedPoint> = emptyList()
+    val plannedPoints: List<PlannedPoint> = emptyList(),
+    /** Routes left open (process death or reboot), recovered from their drafts. */
+    val routeDrafts: List<RouteDraft> = emptyList()
 )
 
 data class LocalSurveyProject(
@@ -419,8 +421,24 @@ class ProjectRepository(
             continuousScanSessions = survey.continuousScanSessions,
             notes = survey.notes.map { note -> note.toAppNote(projectDirectory) },
             skippedSuggestions = survey.skippedSuggestions.orEmpty(),
-            plannedPoints = survey.plannedPoints.orEmpty()
+            plannedPoints = survey.plannedPoints.orEmpty(),
+            routeDrafts = routeDrafts(projectDirectory, floor).list()
+                .filter { draft -> survey.continuousScanSessions.none { it.id == draft.sessionId } }
         )
+    }
+
+    private fun routeDrafts(projectDirectory: File, floor: FloorManifest): RouteDraftStore =
+        RouteDraftStore(File(resolveProjectFile(projectDirectory, floor.surveyRelativePath).parentFile, DRAFTS_DIRECTORY), gson)
+
+    /** Checkpoint of an open Continuous route of [floorId] (replaced atomically). */
+    fun saveRouteDraft(projectId: String, floorId: String, draft: RouteDraft) = synchronized(storageLock) {
+        val directory = projectDirectory(projectId)
+        routeDrafts(directory, readManifest(directory).floor(floorId)).save(draft)
+    }
+
+    fun deleteRouteDraft(projectId: String, floorId: String, sessionId: String) = synchronized(storageLock) {
+        val directory = projectDirectory(projectId)
+        routeDrafts(directory, readManifest(directory).floor(floorId)).delete(sessionId)
     }
 
     private fun saveFloorLocked(
@@ -458,6 +476,8 @@ class ProjectRepository(
             resolveProjectFile(projectDirectory, floor.surveyRelativePath),
             storedSurvey
         )
+        // Only once the survey holding the routes is on disk: their drafts are done.
+        routeDrafts(projectDirectory, floor).deleteFinalized(snapshot.continuousScanSessions.map { it.id }.toSet())
         val timestamp = now()
         val updatedFloor = floor.copy(
             mapFileName = snapshot.mapInfo.fileName,
@@ -1100,6 +1120,7 @@ class ProjectRepository(
         private const val MAX_SKIPPED_SUGGESTIONS = 100_000
         private const val MAX_ACTIVE_RUNS = 50_000
         private const val MAX_PLANNED_POINTS = 5_000
+        private const val DRAFTS_DIRECTORY = "drafts"
         private const val PROJECT_SCHEMA_VERSION = 3
         private const val PREVIOUS_PROJECT_SCHEMA_VERSION = 2
         private const val LEGACY_PROJECT_SCHEMA_VERSION = 1

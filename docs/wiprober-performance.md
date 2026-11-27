@@ -239,6 +239,12 @@ A phase that was not reached is `null`. Redirects are not followed: a 3xx is the
 | `errorCode` | string \| null | Structured cause: `http_status`, `expectation_failed`, `extract_failed`, `unknown_variable`, `missing_credential`, `invalid_target`, `cleartext_not_permitted`, `tls_failed`, `hostname_mismatch`, `response_too_large`, `timeout`, `resolution_failed`, `connect_failed`, `write_not_allowed`, … |
 | `error` | string \| null | E.g. `status 401`, `expected text not found`, `cannot extract token from $.data.token`. Never contains credential, cookie or extracted values, query strings or the expected text |
 
+## 3c-bis. Continuous routes (`continuousSessions`)
+
+One row per local Continuous route (with or without roaming probe): `surveyId`, `floorPlanId`, `floorName`, `startedAt`, `endedAt`, `timeBase`, `waypoints`, `scans`, `segments`, `recoveredAfterInterruption`, `interruptions` (`from`/`to` UTC and `fromMs`/`toMs` relative to `startedAt`), `roamingProbe`.
+
+An open route is checkpointed every ~1.5 s in `drafts/<sessionId>.json` next to the floor survey. If the app is killed or the phone restarts, reopening the project offers it as an **interrupted route**: *Save* (as it is), *Continue* (a new stretch from its last turn, with its own monotonic clock anchored in UTC) or *Discard*. Stretches are joined in order, never overlapping even if the clock restarted; the gap between them is an `interruptions` entry: nothing was observed in it. Saving is idempotent (a retry never adds the route twice) and the draft is removed only once the survey holding the route is on disk.
+
 ## 3d. Continuous-mode roaming (`roamingSessions`, `roamingEvents`)
 
 When the imported configuration enables `roaming`, during every Continuous track the app tries a TCP connect to the target (`host:port`, e.g. `${gateway}:443`) over the Wi-Fi `Network` every `intervalMs` (200 ms by default) and reads the association of that same network. Each attempt records its monotonic start and end, its result, and the SSID/BSSID/RSSI seen.

@@ -35,6 +35,84 @@ class MainViewModel @JvmOverloads constructor(
     private val activeWaypoints = mutableListOf<RoutePointWrapper>()
     private val activeScanResults = mutableListOf<ScanResultWrapper>()
     private var roamingTracker: RoamingTracker? = null
+    private var roamingTarget: String? = null
+    private var roamingInterval: Int? = null
+    /** UTC start of the route (of its first stretch when it was resumed). */
+    private var activeRouteStartUtc: Long = 0L
+    /** Stretches recorded before an interruption, when the route was resumed. */
+    private var previousSegments: List<RouteSegment> = emptyList()
+    private val _routeDraftRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /** Changes whenever the open route gains data: the screen saves its draft when it changes. */
+    val routeDraftRevision: kotlinx.coroutines.flow.StateFlow<Long> = _routeDraftRevision
+
+    private fun routeChanged() {
+        _routeDraftRevision.value = _routeDraftRevision.value + 1
+    }
+
+    /** Durable checkpoint of the open route, or null without one. */
+    fun activeRouteDraft(floorId: String): RouteDraft? {
+        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
+        val sessionId = activeSessionId ?: return null
+        return RouteDraft(
+            sessionId = sessionId,
+            floorId = floorId,
+            startTime = activeRouteStartUtc,
+            segments = previousSegments + currentSegment(),
+            roamingTarget = roamingTarget,
+            roamingIntervalMillis = roamingInterval,
+            savedAt = clock.now()
+        )
+    }
+
+    private fun currentSegment(): RouteSegment = RouteSegment(
+        startUtc = activeSessionStartTime,
+        waypoints = activeWaypoints.toList(),
+        scanResults = activeScanResults.toList(),
+        probeAttempts = roamingTracker?.attempts().orEmpty(),
+        lastObservedMs = (monotonic.now() - activeSessionStartMono).coerceAtLeast(0L)
+    )
+
+    /**
+     * Saves an interrupted route as it is. Idempotent: if the route is already in the survey
+     * (a retry after a failed save), nothing is added twice.
+     */
+    fun finalizeInterruptedRoute(sessionId: String): ContinuousScanSession? {
+        val state = _screenState.value
+        val draft = state.interruptedRoutes.firstOrNull { it.sessionId == sessionId }
+        val existing = state.continuousScanSessions.firstOrNull { it.id == sessionId }
+        if (existing != null || draft == null) {
+            _screenState.value = state.copy(interruptedRoutes = state.interruptedRoutes.filterNot { it.sessionId == sessionId })
+            return existing
+        }
+        val session = RouteDrafts.finalize(draft, recovered = true)
+        _screenState.value = state.copy(
+            continuousScanSessions = state.continuousScanSessions + session,
+            interruptedRoutes = state.interruptedRoutes - draft,
+            actionHistory = state.actionHistory + LastAction.SCAN_SESSION
+        )
+        return session
+    }
+
+    /** Forgets an interrupted route (the screen deletes its draft). */
+    fun discardInterruptedRoute(sessionId: String) {
+        _screenState.update { it.copy(interruptedRoutes = it.interruptedRoutes.filterNot { r -> r.sessionId == sessionId }) }
+    }
+
+    /** Continues an interrupted route from its last waypoint, with a new stretch on its own clock. */
+    fun requestResumeRoute(sessionId: String): Boolean {
+        val state = _screenState.value
+        val draft = state.interruptedRoutes.firstOrNull { it.sessionId == sessionId } ?: return false
+        if (!state.hasMap || state.interaction !is SurveyInteraction.Idle) return false
+        val last = draft.lastWaypoint ?: return false
+        _screenState.value = state.copy(
+            scanMode = SurveyScanMode.CONTINUOUS,
+            interaction = SurveyInteraction.AwaitingScanAccess(
+                PendingScanRequest.ContinuousStart(SurveyCoordinate(last.x, last.y), resumeSessionId = sessionId)
+            )
+        )
+        return true
+    }
 
     /**
      * Starts the roaming log of the active Continuous track (once; kept across recreation) and
@@ -42,7 +120,11 @@ class MainViewModel @JvmOverloads constructor(
      */
     fun startRoamingLog(target: String, intervalMillis: Int): String? {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
-        if (roamingTracker == null) roamingTracker = RoamingTracker(target, intervalMillis)
+        if (roamingTracker == null) {
+            roamingTracker = RoamingTracker(target, intervalMillis)
+            roamingTarget = target
+            roamingInterval = intervalMillis
+        }
         return activeSessionId
     }
 
@@ -65,6 +147,7 @@ class MainViewModel @JvmOverloads constructor(
                 associationKnown = association?.known == true
             )
         )
+        routeChanged()
     }
 
     fun loadProject(
@@ -75,7 +158,8 @@ class MainViewModel @JvmOverloads constructor(
         notes: List<AppNote>,
         skippedSuggestions: List<SkippedSuggestion> = emptyList(),
         activeRuns: List<ActiveRun> = emptyList(),
-        plannedPoints: List<PlannedPoint> = emptyList()
+        plannedPoints: List<PlannedPoint> = emptyList(),
+        routeDrafts: List<RouteDraft> = emptyList()
     ) {
         activeRunJob?.cancel()
         activeRunJob = null
@@ -92,6 +176,8 @@ class MainViewModel @JvmOverloads constructor(
             // Nothing runs right after a load: anything unfinished was interrupted.
             activeRuns = SurveyIds.reconcile(activeRuns, clock.now()),
             plannedPoints = plannedPoints.toList(),
+            // A draft whose route is already saved was finished (its cleanup failed): not interrupted.
+            interruptedRoutes = routeDrafts.filter { draft -> continuousSessions.none { it.id == draft.sessionId } },
             scanMode = selectedScanMode,
             actionHistory = buildList {
                 repeat(scanPoints.count { !it.importedFromEsx }) { add(LastAction.SCAN) }
@@ -248,7 +334,7 @@ class MainViewModel @JvmOverloads constructor(
                 StartedScanAction.StopAndGo(request.coordinate)
             }
             is PendingScanRequest.ContinuousStart -> {
-                startContinuousTrack(request.coordinate)
+                startContinuousTrack(request.coordinate, request.resumeSessionId)
                 StartedScanAction.Continuous
             }
         }
@@ -307,6 +393,7 @@ class MainViewModel @JvmOverloads constructor(
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return false
         activeWaypoints += RoutePointWrapper(monotonic.now() - activeSessionStartMono, x, y)
         publishTrackingState()
+        routeChanged()
         return true
     }
 
@@ -325,6 +412,7 @@ class MainViewModel @JvmOverloads constructor(
             wifiNetworks = wifiNetworks.toList()
         )
         publishTrackingState()
+        routeChanged()
         return true
     }
 
@@ -333,15 +421,25 @@ class MainViewModel @JvmOverloads constructor(
         val elapsed = monotonic.now() - activeSessionStartMono
         activeWaypoints += RoutePointWrapper(elapsed, x, y)
         val scanWindows = activeScanResults.map { (it.timestamp - it.duration)..it.timestamp }
-        val session = ContinuousScanSession(
-            id = activeSessionId ?: idSource.newId(),
-            startTime = activeSessionStartTime,
-            endTime = activeSessionStartTime + elapsed,
-            waypoints = activeWaypoints.toList(),
-            scanResults = activeScanResults.toList(),
-            roaming = roamingTracker?.finish(scanWindows),
-            timeBase = RoamingTracker.TIME_BASE
-        )
+        val session = if (previousSegments.isNotEmpty()) {
+            // A resumed route: its stretches are joined on the route's relative time base.
+            RouteDrafts.finalize(
+                RouteDraft(activeSessionId ?: idSource.newId(), "", activeRouteStartUtc, previousSegments + currentSegment(),
+                    roamingTarget, roamingInterval),
+                recovered = true
+            )
+        } else {
+            ContinuousScanSession(
+                id = activeSessionId ?: idSource.newId(),
+                startTime = activeSessionStartTime,
+                endTime = activeSessionStartTime + elapsed,
+                waypoints = activeWaypoints.toList(),
+                scanResults = activeScanResults.toList(),
+                roaming = roamingTracker?.finish(scanWindows),
+                timeBase = RoamingTracker.TIME_BASE,
+                segments = 1
+            )
+        }
         _screenState.update {
             it.copy(
                 continuousScanSessions = it.continuousScanSessions + session,
@@ -638,14 +736,26 @@ class MainViewModel @JvmOverloads constructor(
         return true
     }
 
-    private fun startContinuousTrack(coordinate: SurveyCoordinate) {
-        activeSessionId = idSource.newId()
+    private fun startContinuousTrack(coordinate: SurveyCoordinate, resumeSessionId: String? = null) {
+        val resumed = resumeSessionId?.let { id -> _screenState.value.interruptedRoutes.firstOrNull { it.sessionId == id } }
+        activeSessionId = resumed?.sessionId ?: idSource.newId()
         activeSessionStartTime = clock.now()
         activeSessionStartMono = monotonic.now()
+        activeRouteStartUtc = resumed?.startTime ?: activeSessionStartTime
+        previousSegments = resumed?.segments.orEmpty()
+        if (resumed?.roamingTarget != null) {
+            roamingTarget = resumed.roamingTarget
+            roamingInterval = resumed.roamingIntervalMillis
+            roamingTracker = RoamingTracker(resumed.roamingTarget, resumed.roamingIntervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS)
+        }
         activeWaypoints.clear()
         activeScanResults.clear()
         activeWaypoints += RoutePointWrapper(0L, coordinate.x, coordinate.y)
+        if (resumed != null) {
+            _screenState.update { it.copy(interruptedRoutes = it.interruptedRoutes - resumed) }
+        }
         publishTrackingState()
+        routeChanged()
     }
 
     private fun publishTrackingState() {
@@ -662,6 +772,10 @@ class MainViewModel @JvmOverloads constructor(
 
     private fun clearActiveSession() {
         roamingTracker = null
+        roamingTarget = null
+        roamingInterval = null
+        previousSegments = emptyList()
+        activeRouteStartUtc = 0L
         activeSessionId = null
         activeSessionStartTime = 0L
         activeSessionStartMono = 0L

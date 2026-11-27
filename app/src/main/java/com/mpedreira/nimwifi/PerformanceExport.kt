@@ -70,6 +70,10 @@ object PerformanceExport {
             add("networkTests", networkRows)
             add("scriptRuns", scriptRunRows)
             add("scriptSteps", scriptRows)
+            // Every local Continuous route, with how it was recorded (stretches, interruptions).
+            add("continuousSessions", JsonArray().apply {
+                report?.continuousSurveys.orEmpty().forEach { ref -> add(continuousSessionRow(ref)) }
+            })
             add("roamingSessions", JsonArray().apply {
                 report?.continuousSurveys.orEmpty().forEach { ref -> ref.session.roaming?.let { add(roamingSessionRow(ref, it)) } }
             })
@@ -100,6 +104,31 @@ object PerformanceExport {
                 zip.closeEntry()
             }
         }
+    }
+
+    private fun continuousSessionRow(ref: ContinuousSurveyRef) = JsonObject().apply {
+        val session = ref.session
+        addProperty("surveyId", ref.surveyId)
+        addProperty("floorPlanId", ref.floorPlanId)
+        addProperty("floorName", ref.floorName)
+        addProperty("startedAt", isoUtc(session.startTime))
+        addProperty("endedAt", isoUtc(session.endTime))
+        addProperty("timeBase", session.timeBase ?: "wall-clock")
+        addProperty("waypoints", session.waypoints.size)
+        addProperty("scans", session.scanResults.size)
+        addProperty("segments", session.segments ?: 1)
+        addProperty("recoveredAfterInterruption", session.recoveredAfterInterruption == true)
+        add("interruptions", JsonArray().apply {
+            session.interruptions.orEmpty().forEach { gap ->
+                add(JsonObject().apply {
+                    addProperty("from", isoUtc(session.startTime + gap.fromMs))
+                    addProperty("to", isoUtc(session.startTime + gap.toMs))
+                    addProperty("fromMs", gap.fromMs)
+                    addProperty("toMs", gap.toMs)
+                })
+            }
+        })
+        addProperty("roamingProbe", session.roaming != null)
     }
 
     private fun roamingSessionRow(ref: ContinuousSurveyRef, log: RoamingLog) = JsonObject().apply {

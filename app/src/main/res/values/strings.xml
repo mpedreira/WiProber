@@ -358,4 +358,10 @@
     <string name="config_field_count">Probes (ping, tcp)</string>
     <string name="config_field_value">Value</string>
     <string name="save_failed_floors">Could not save %1$s: %2$s</string>
+    <string name="route_recovery_title">Interrupted route</string>
+    <string name="route_recovery_message">A Continuous route started on %1$s was not closed (the app was closed or the phone restarted). It has %2$d scans in %3$d stretches; last checkpoint %4$s.\n\nSave it as it is, continue it from its last turn with a new stretch, or discard it.</string>
+    <string name="route_recovery_save">Save</string>
+    <string name="route_recovery_continue">Continue</string>
+    <string name="route_recovery_discard">Discard</string>
+    <string name="route_recovery_discard_confirm">Discard this route and the data recorded in it?</string>
 </resources>

@@ -358,4 +358,10 @@
     <string name="config_field_count">Sondas (ping, tcp)</string>
     <string name="config_field_value">Valor</string>
     <string name="save_failed_floors">No se ha podido guardar %1$s: %2$s</string>
+    <string name="route_recovery_title">Ruta interrumpida</string>
+    <string name="route_recovery_message">Un recorrido continuo empezado el %1$s no se cerró (se cerró la app o se reinició el móvil). Tiene %2$d escaneos en %3$d tramos; último punto de control %4$s.\n\nGuárdalo tal cual, continúalo desde su último giro con un tramo nuevo o descártalo.</string>
+    <string name="route_recovery_save">Guardar</string>
+    <string name="route_recovery_continue">Continuar</string>
+    <string name="route_recovery_discard">Descartar</string>
+    <string name="route_recovery_discard_confirm">¿Descartar esta ruta y los datos grabados en ella?</string>
 </resources>

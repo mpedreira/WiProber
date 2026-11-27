@@ -80,7 +80,13 @@ data class ContinuousScanSession(
      * `monotonic-relative`: waypoint, scan and probe times are monotonic milliseconds since the
      * session start and [startTime] is the UTC anchor. Null for tracks recorded before (wall clock).
      */
-    val timeBase: String? = null
+    val timeBase: String? = null,
+    /** Stretches the route was recorded in (1 unless it was resumed after an interruption). */
+    val segments: Int? = null,
+    /** Gaps between stretches, relative to [startTime]: nothing was observed in them. */
+    val interruptions: List<RouteInterruption>? = null,
+    /** The route was recovered from a draft after the app was closed or killed. */
+    val recoveredAfterInterruption: Boolean? = null
 )
 
 @JsonModel
