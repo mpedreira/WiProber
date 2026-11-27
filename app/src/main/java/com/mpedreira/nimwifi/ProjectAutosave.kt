@@ -133,4 +133,9 @@ object ProjectAutosave {
     suspend fun saveNow(key: SaveKey, save: () -> Unit) = saver.saveNow(key, save)
 
     val failures: StateFlow<Map<SaveKey, String>> get() = saver.failures
+
+    /** Periodic drafts of open routes (rc.2 · 2): built on the main thread, written on IO. */
+    val routes = RouteDraftCheckpointer(CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)) { key, error ->
+        android.util.Log.e("ProjectStorage", "Cannot save route draft $key", error)
+    }
 }

@@ -473,16 +473,25 @@ class ProjectRepository(
     private fun routeDrafts(projectDirectory: File, floor: FloorManifest): RouteDraftStore =
         RouteDraftStore(File(resolveProjectFile(projectDirectory, floor.surveyRelativePath).parentFile, DRAFTS_DIRECTORY), gson)
 
-    /** Checkpoint of an open Continuous route of [floorId] (replaced atomically). */
-    fun saveRouteDraft(projectId: String, floorId: String, draft: RouteDraft) = synchronized(storageLock) {
+    /**
+     * Checkpoint of an open Continuous route of [floorId] (replaced atomically). A draft of a
+     * session already saved as a route or discarded is not written (rc.2 · 2): a late write must
+     * never bring it back. Returns whether it was written.
+     */
+    fun saveRouteDraft(projectId: String, floorId: String, draft: RouteDraft): Boolean = synchronized(storageLock) {
+        if (draftKey(projectId, floorId, draft.sessionId) in closedDrafts) return false
         val directory = projectDirectory(projectId)
         routeDrafts(directory, readManifest(directory).floor(floorId)).save(draft)
+        true
     }
 
     fun deleteRouteDraft(projectId: String, floorId: String, sessionId: String) = synchronized(storageLock) {
+        closedDrafts += draftKey(projectId, floorId, sessionId)
         val directory = projectDirectory(projectId)
         routeDrafts(directory, readManifest(directory).floor(floorId)).delete(sessionId)
     }
+
+    private fun draftKey(projectId: String, floorId: String, sessionId: String) = "$projectId/$floorId/$sessionId"
 
     private fun saveFloorLocked(
         projectDirectory: File,
@@ -519,8 +528,10 @@ class ProjectRepository(
             resolveProjectFile(projectDirectory, floor.surveyRelativePath),
             storedSurvey
         )
-        // Only once the survey holding the routes is on disk: their drafts are done.
-        routeDrafts(projectDirectory, floor).deleteFinalized(snapshot.continuousScanSessions.map { it.id }.toSet())
+        // Only once the survey holding the routes is on disk: their drafts are done, for good.
+        val saved = snapshot.continuousScanSessions.map { it.id }.toSet()
+        saved.forEach { closedDrafts += draftKey(manifest.id, floorId, it) }
+        routeDrafts(projectDirectory, floor).deleteFinalized(saved)
         val timestamp = now()
         val updatedFloor = floor.copy(
             mapFileName = snapshot.mapInfo.fileName,
@@ -1198,5 +1209,7 @@ class ProjectRepository(
         private const val MAX_NETWORK_OBSERVATIONS = 5_000_000L
         private val PROJECT_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,100}")
         private val storageLock = Any()
+        /** Sessions whose draft must not be written again (saved as a route or discarded), per process. */
+        private val closedDrafts: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     }
 }

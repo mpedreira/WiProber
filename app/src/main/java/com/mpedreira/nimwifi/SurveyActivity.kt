@@ -1571,14 +1571,22 @@ class SurveyActivity : AppCompatActivity() {
      */
     private fun setupBackgroundObservers() {
         // Mejora 3: checkpoint of the open route, so a process death or a reboot does not lose it.
+        // rc.2 · 2: a first draft when the route starts, then at most every
+        // RouteDraftCheckpointer.INTERVAL_MILLIS while it changes; samples never postpone it.
         lifecycleScope.launch {
+            var tracked: SaveKey? = null
             viewModel.routeDraftRevision.collect {
-                val projectId = currentProjectId ?: return@collect
-                val floorId = currentFloorId ?: return@collect
-                val draft = viewModel.activeRouteDraft(floorId) ?: return@collect
+                val projectId = currentProjectId
+                val floorId = currentFloorId
+                val sessionId = viewModel.activeRouteSessionId
+                val key = if (projectId != null && floorId != null && sessionId != null) SaveKey(projectId, floorId, sessionId) else null
+                // The route ended (saved by the floor save) or another one started: stop the old one.
+                tracked?.takeIf { it != key }?.let { ProjectAutosave.routes.close(it) }
+                tracked = key
+                if (key == null) return@collect
                 val repository = projectRepository
-                ProjectAutosave.schedule(SaveKey(projectId, floorId, draft.sessionId), ROUTE_DRAFT_DEBOUNCE_MILLIS) {
-                    repository.saveRouteDraft(projectId, floorId, draft)
+                ProjectAutosave.routes.changed(key, build = { viewModel.activeRouteDraft(key.floorId) }) { draft ->
+                    repository.saveRouteDraft(key.projectId, key.floorId, draft)
                 }
             }
         }
@@ -1659,8 +1667,10 @@ class SurveyActivity : AppCompatActivity() {
                 viewModel.discardInterruptedRoute(draft.sessionId)
                 val projectId = currentProjectId ?: return@show
                 val floorId = currentFloorId ?: return@show
-                lifecycleScope.launch(Dispatchers.IO) {
-                    runCatching { projectRepository.deleteRouteDraft(projectId, floorId, draft.sessionId) }
+                val repository = projectRepository
+                // A pending checkpoint of this session is cancelled (or awaited) before the delete.
+                ProjectAutosave.routes.closeLater(SaveKey(projectId, floorId, draft.sessionId)) {
+                    runCatching { repository.deleteRouteDraft(projectId, floorId, draft.sessionId) }
                 }
             }
         )
@@ -1685,7 +1695,6 @@ class SurveyActivity : AppCompatActivity() {
 
     companion object {
         private const val POINT_TOUCH_RADIUS_DP = 20f
-        private const val ROUTE_DRAFT_DEBOUNCE_MILLIS = 1_500L
         private const val PROJECT_URL = "https://github.com/mpedreira/nimwifi"
         /** Attribution: nimWifi is based on WiProber (MIT). */
         private const val ORIGINAL_PROJECT_URL = "https://github.com/htechno/WiProber"

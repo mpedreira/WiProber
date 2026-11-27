@@ -116,6 +116,10 @@ class MainViewModel @JvmOverloads constructor(
         _routeDraftRevision.value = _routeDraftRevision.value + 1
     }
 
+    /** Session id of the route being tracked, or null (cheap: no draft is built). */
+    val activeRouteSessionId: String?
+        get() = activeSessionId.takeIf { _screenState.value.interaction is SurveyInteraction.ContinuousTracking }
+
     /** Durable checkpoint of the open route, or null without one. */
     fun activeRouteDraft(floorId: String): RouteDraft? {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
@@ -871,6 +875,8 @@ class MainViewModel @JvmOverloads constructor(
         activeSessionStartMono = 0L
         activeWaypoints.clear()
         activeScanResults.clear()
+        // The route ended (or the project changed): the screen stops checkpointing it.
+        routeChanged()
     }
 
     private fun transitionFromIdle(interaction: SurveyInteraction): Boolean {
