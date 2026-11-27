@@ -39,7 +39,7 @@ class ProjectBackupTest {
     }
 
     private fun restore(copy: File, projects: File, conflict: ProjectBackup.Conflict = ProjectBackup.Conflict.FAIL, validate: (File) -> Unit = {}) =
-        ProjectBackup.restore(copy, projects, File(projects, ".staging-restore-${System.nanoTime()}"), conflict, { "22222222-0000-4000-8000-000000000000" }, validate)
+        ProjectBackup.restore(copy, projects, File(projects, "${ProjectBackup.RESTORE_PREFIX}${System.nanoTime()}"), conflict, { "22222222-0000-4000-8000-000000000000" }, validate)
 
     private fun tree(dir: File) = ProjectBackup.projectFiles(dir).associateWith { File(dir, it).readBytes().toList() }
 

@@ -430,6 +430,36 @@ class ProjectRepositoryInstrumentedTest {
         photo.delete()
     }
 
+    /** rc.2 · 1: killed after parking the original, reopening finishes installing the validated copy. */
+    @Test
+    fun replaceRestoreKilledMidwayRecoversOnReopen() {
+        class Killed : Error()
+        val root = File(projectsDirectory, "replace")
+        val repository = ProjectRepository(context = context, newId = { "project-r" }, projectsRoot = root)
+        repository.createNewProject(ByteArrayInputStream(pngBytes()), "ground.png", projectName = "Almacén", floorName = "Baja")
+        val floor = repository.openProject("project-r")
+        repository.saveProject("project-r", floor.activeFloorId, ProjectSnapshot(floor.activeFloor.mapInfo, 0.1,
+            listOf(ScanPoint(1L, 2f, 3f, emptyList(), pointId = "copy", scanId = "s1")), emptyList(), emptyList()))
+        val copy = File(context.cacheDir, "replace-copy.zip")
+        copy.outputStream().use { repository.backupProject("project-r", "test", it) }
+        repository.saveProject("project-r", floor.activeFloorId, ProjectSnapshot(floor.activeFloor.mapInfo, 0.1,
+            listOf(ScanPoint(1L, 2f, 3f, emptyList(), pointId = "original", scanId = "s2")), emptyList(), emptyList()))
+
+        val dying = ProjectRepository(context = context, projectsRoot = root,
+            restoreCheckpoint = { phase -> if (phase == ProjectBackup.Phase.PARKING) throw Killed() })
+        try {
+            dying.restoreProject(copy, ProjectBackup.Conflict.REPLACE)
+            throw AssertionError("expected the simulated kill")
+        } catch (_: Killed) {
+        }
+        val reopened = ProjectRepository(context = context, projectsRoot = root)
+        assertEquals(1, reopened.listRecentProjects().size)
+        val restored = reopened.openProject("project-r").activeFloor
+        assertTrue(restored.mapFile.isFile)
+        assertEquals(listOf("copy"), restored.scanPoints.map { it.pointId })
+        copy.delete()
+    }
+
     private fun pngBytes(width: Int = 16, height: Int = 12): ByteArray {
         val output = ByteArrayOutputStream()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

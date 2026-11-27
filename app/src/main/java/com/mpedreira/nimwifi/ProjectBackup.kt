@@ -168,57 +168,174 @@ object ProjectBackup {
         }
     }
 
+    /** Persisted phases of a restore (`journal.json`), so a killed process can be recovered. */
+    object Phase {
+        /** The copy is extracted and validated in `staged/`; the original has not been touched. */
+        const val PREPARED = "prepared"
+        /** About to move (or moved) the original into `original/`; the copy goes into place next. */
+        const val PARKING = "parking"
+        /** The copy is in place; the original is kept until the copy has been opened. */
+        const val INSTALLED = "installed"
+    }
+
+    @JsonModel
+    data class Journal(val projectId: String = "", val phase: String = "", val replacing: Boolean = false)
+
+    const val RESTORE_PREFIX = ".restore-"
+    private const val JOURNAL = "journal.json"
+    private const val STAGED = "staged"
+    private const val ORIGINAL = "original"
+    private const val REJECTED = "rejected"
+
+    /** Test seam: called after each persisted phase; throwing an [Error] there simulates process death. */
+    fun interface Checkpoint {
+        fun reached(phase: String)
+    }
+
     /**
-     * Restores [backup] under [projectsRoot]: extract to [staging], verify, [validate] (the
-     * repository opens the staged project), resolve the ID [conflict], then move into place.
-     * Nothing under [projectsRoot] changes unless every step succeeds.
+     * Restores [backup] under [projectsRoot] through a restore workspace [work] (a directory named
+     * with [RESTORE_PREFIX] inside [projectsRoot]): extract to `staged/`, verify, [validate] (the
+     * repository opens it), resolve the ID [conflict], then install it.
+     *
+     * Replacing never deletes the original before the copy is in place **and** has been opened:
+     * the original is moved into `original/` of the same workspace and removed only at the end.
+     * Every step is recorded in `journal.json`; [recover] finishes or rolls back an interrupted
+     * restore. An ordinary failure rolls back here and leaves the original as it was.
      */
     fun restore(
         backup: File,
         projectsRoot: File,
-        staging: File,
+        work: File,
         conflict: Conflict,
         newId: () -> String,
         validate: (File) -> Unit,
-        idPattern: Regex = DEFAULT_ID_PATTERN
+        idPattern: Regex = DEFAULT_ID_PATTERN,
+        checkpoint: Checkpoint = Checkpoint { }
     ): String {
-        require(!staging.exists() && staging.mkdirs()) { "Cannot create a restore workspace" }
-        var parked: File? = null
+        require(work.name.startsWith(RESTORE_PREFIX) && work.parentFile == projectsRoot) { "Invalid restore workspace" }
+        require(!work.exists() && work.mkdirs()) { "Cannot create a restore workspace" }
+        val staged = File(work, STAGED)
         try {
-            val manifest = verify(backup, staging, idPattern)
+            val manifest = verify(backup, staged, idPattern)
             var projectId = manifest.projectId
             val existing = File(projectsRoot, projectId)
+            var replacing = false
             if (existing.exists()) {
                 when (conflict) {
                     Conflict.FAIL -> throw ProjectExistsException(projectId)
                     Conflict.AS_COPY -> {
                         projectId = newId()
                         require(idPattern.matches(projectId) && !File(projectsRoot, projectId).exists()) { "Cannot allocate a project ID" }
-                        rewriteProjectId(File(staging, PROJECT_MANIFEST), projectId)
+                        rewriteProjectId(File(staged, PROJECT_MANIFEST), projectId)
                     }
-                    Conflict.REPLACE -> Unit
+                    Conflict.REPLACE -> replacing = true
                 }
             }
-            validate(staging)
+            validate(staged)
+            writeJournal(work, Journal(projectId, Phase.PREPARED, replacing))
+            checkpoint.reached(Phase.PREPARED)
             val destination = File(projectsRoot, projectId)
-            if (destination.exists()) {
-                // REPLACE: the old project is parked first and deleted only after the move.
-                parked = File(projectsRoot, ".deleting-$projectId-${System.nanoTime()}")
-                move(destination, parked)
+            if (replacing) {
+                writeJournal(work, Journal(projectId, Phase.PARKING, true))
+                move(destination, File(work, ORIGINAL))
+                checkpoint.reached(Phase.PARKING)
             }
-            try {
-                move(staging, destination)
-            } catch (e: Throwable) {
-                parked?.let { move(it, destination) }
-                parked = null
-                throw e
-            }
+            move(staged, destination)
+            writeJournal(work, Journal(projectId, Phase.INSTALLED, replacing))
+            checkpoint.reached(Phase.INSTALLED)
+            // The original goes only once the installed copy opens.
+            check(finish(work, projectsRoot, validate)) { "The restored copy cannot be opened; the original project was kept" }
             return projectId
-        } finally {
-            staging.deleteRecursively()
-            parked?.deleteRecursively()
+        } catch (e: Exception) {
+            rollBack(work, projectsRoot)
+            throw e
         }
     }
+
+    /**
+     * Finishes or rolls back every interrupted restore under [projectsRoot]. Idempotent: running
+     * it again (or after it was itself interrupted) gives the same result.
+     *
+     * - no journal: nothing was installed and the original was never moved; the workspace goes;
+     * - the copy is still in `staged/` (prepared, or the original was not moved yet): roll back;
+     * - the original is in `original/` and nothing is in place: finish installing the copy;
+     * - the copy is in place: open it; if it opens, remove the original, otherwise put it back.
+     */
+    fun recover(projectsRoot: File, validate: (File) -> Unit) {
+        projectsRoot.listFiles().orEmpty()
+            .filter { it.isDirectory && it.name.startsWith(RESTORE_PREFIX) }
+            .sortedBy { it.name }
+            .forEach { work ->
+                val journal = readJournal(work)
+                if (journal == null || !DEFAULT_ID_PATTERN.matches(journal.projectId)) {
+                    // No journal: the original was never moved (the journal precedes every move).
+                    if (!File(work, ORIGINAL).exists()) work.deleteRecursively()
+                    return@forEach
+                }
+                val destination = File(projectsRoot, journal.projectId)
+                val staged = File(work, STAGED)
+                val original = File(work, ORIGINAL)
+                if (!destination.exists()) {
+                    when {
+                        journal.phase != Phase.PREPARED && staged.isDirectory -> move(staged, destination)
+                        original.isDirectory -> move(original, destination)
+                    }
+                }
+                when {
+                    !destination.exists() -> work.deleteRecursively()
+                    staged.exists() -> rollBack(work, projectsRoot)
+                    else -> finish(work, projectsRoot, validate)
+                }
+            }
+    }
+
+    /** The copy is in place: keep it if it opens and drop the original, else restore the original. */
+    private fun finish(work: File, projectsRoot: File, validate: (File) -> Unit): Boolean {
+        val journal = readJournal(work)
+        if (journal == null) {
+            work.deleteRecursively()
+            return false
+        }
+        val destination = File(projectsRoot, journal.projectId)
+        val original = File(work, ORIGINAL)
+        val opens = runCatching { validate(destination) }.isSuccess
+        if (!opens && original.isDirectory) {
+            move(destination, File(work, REJECTED))
+            move(original, destination)
+        }
+        work.deleteRecursively()
+        if (!opens && !original.isDirectory) {
+            // A new project (no original) whose copy does not open is not kept either.
+            if (!journal.replacing) destination.deleteRecursively()
+        }
+        return opens
+    }
+
+    /** Puts the original back in place (when it was moved) and removes the restore workspace. */
+    private fun rollBack(work: File, projectsRoot: File) {
+        val journal = readJournal(work)
+        val original = File(work, ORIGINAL)
+        if (journal != null && original.isDirectory) {
+            val destination = File(projectsRoot, journal.projectId)
+            if (destination.exists()) move(destination, File(work, REJECTED))
+            move(original, destination)
+        }
+        work.deleteRecursively()
+    }
+
+    private fun writeJournal(work: File, journal: Journal) {
+        val temporary = File(work, "$JOURNAL.tmp")
+        temporary.writeText(gson.toJson(journal))
+        try {
+            Files.move(temporary.toPath(), File(work, JOURNAL).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary.toPath(), File(work, JOURNAL).toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun readJournal(work: File): Journal? = runCatching {
+        gson.fromJson(File(work, JOURNAL).readText(), Journal::class.java)
+    }.getOrNull()
 
     private fun rewriteProjectId(manifestFile: File, projectId: String) {
         val json = JsonParser.parseString(manifestFile.readText()).asJsonObject

@@ -103,7 +103,9 @@ class ProjectRepository(
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create(),
     private val now: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
-    private val projectsRoot: File = File(context.filesDir, PROJECTS_DIRECTORY)
+    private val projectsRoot: File = File(context.filesDir, PROJECTS_DIRECTORY),
+    /** Test seam for [restoreProject]: an [Error] thrown here simulates the process being killed. */
+    private val restoreCheckpoint: ProjectBackup.Checkpoint = ProjectBackup.Checkpoint { }
 ) {
     fun listRecentProjects(): List<ProjectSummary> = listRecentProjectCatalog().projects
 
@@ -115,7 +117,8 @@ class ProjectRepository(
             .filter {
                 it.isDirectory &&
                     !it.name.startsWith(STAGING_PREFIX) &&
-                    !it.name.startsWith(DELETING_PREFIX)
+                    !it.name.startsWith(DELETING_PREFIX) &&
+                    !it.name.startsWith(ProjectBackup.RESTORE_PREFIX)
             }
             .mapNotNull { directory ->
                 runCatching {
@@ -173,17 +176,23 @@ class ProjectRepository(
      */
     fun restoreProject(backup: File, conflict: ProjectBackup.Conflict = ProjectBackup.Conflict.FAIL): ProjectSummary = synchronized(storageLock) {
         ensureProjectsRoot()
-        val staging = File(projectsRoot, "${STAGING_PREFIX}restore-${System.nanoTime()}")
-        val projectId = ProjectBackup.restore(backup, projectsRoot, staging, conflict, newId, validate = { staged ->
-            val manifest = readManifest(staged)
-            manifest.baseEsxRelativePath?.let { require(resolveProjectFile(staged, it).isFile) { "The copy has no base.esx" } }
-            manifest.floors.forEach { readFloor(staged, it) }
-        }, idPattern = PROJECT_ID_PATTERN)
+        val work = File(projectsRoot, "${ProjectBackup.RESTORE_PREFIX}${System.nanoTime()}")
+        val projectId = ProjectBackup.restore(backup, projectsRoot, work, conflict, newId, ::validateWorkspace,
+            idPattern = PROJECT_ID_PATTERN, checkpoint = restoreCheckpoint)
         val directory = projectDirectory(projectId)
         val manifest = readManifest(directory)
         val active = manifest.floor(manifest.activeFloorId)
         ProjectSummary(projectId, manifest.title, active.name, manifest.floors.size, manifest.lastOpenedAt,
             resolveProjectFile(directory, active.mapRelativePath))
+    }
+
+    /** Opens a workspace as the survey screen would: manifest, base.esx and every floor. */
+    private fun validateWorkspace(directory: File) {
+        val manifest = readManifest(directory)
+        manifest.baseEsxRelativePath?.let { require(resolveProjectFile(directory, it).isFile) { "The copy has no base.esx" } }
+        manifest.floors.forEach { floor ->
+            readFloor(directory, floor)
+        }
     }
 
     fun createNewProject(
@@ -951,6 +960,9 @@ class ProjectRepository(
 
     private fun ensureProjectsRoot() {
         require(projectsRoot.mkdirs() || projectsRoot.isDirectory) { "Cannot create the projects directory" }
+        // An interrupted restore is finished or rolled back first (never deleted as a whole):
+        // its workspace may hold the only copy of the project being replaced.
+        ProjectBackup.recover(projectsRoot, ::validateWorkspace)
         projectsRoot.listFiles().orEmpty()
             .filter { it.isDirectory && it.name.startsWith(STAGING_PREFIX) }
             .forEach(File::deleteRecursively)

@@ -52,3 +52,19 @@ If a project with the same ID already exists, nothing is changed until the user 
 - **Cancel**.
 
 A newer format version than the app supports is refused rather than guessed.
+
+### Interrupted restores (4.0.0-rc.2)
+
+Every restore works in its own `projects/.restore-<n>/` directory with a `journal.json`
+(`prepared` → `parking` → `installed`), the validated copy in `staged/` and, when replacing, the
+original in `original/`. The original is moved there only after the copy is validated, and
+removed only after the copy is in place **and** opens. If Android kills the app midway, the next
+time projects are listed or opened the restore is recovered from the persisted phase and the
+files present:
+
+- before the original moved: the copy is discarded, the original stays;
+- original moved, copy not yet in place: the validated copy is installed;
+- copy in place: it is opened; if it opens the original goes, otherwise the original is put back.
+
+Recovery is idempotent. `.deleting-*` directories belong only to explicit project deletion and
+are never used by a restore.
