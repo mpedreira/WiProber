@@ -31,23 +31,32 @@ class AndroidWifiNetworks(context: Context) {
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val wifiManager = appContext.getSystemService(WifiManager::class.java)
 
-    fun select(): AndroidMeasurementNetwork? {
+    /** Chooses with [NetworkSelectionPolicy]; [expectedSsid] prefers the eligible network that reports it. */
+    fun select(expectedSsid: String? = null): AndroidMeasurementNetwork? {
         val cm = connectivity ?: return null
         val monitor = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) AssociationMonitor(cm) else null
-        val candidates = wifiNetworks(cm)
-        val chosen: Pair<Network, String>? = when {
-            candidates.isEmpty() -> null
-            candidates.size == 1 -> candidates.single() to "only"
-            else -> cm.activeNetwork?.takeIf { it in candidates }?.let { it to "default" }
-                ?: candidates.filter { cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true }
-                    .minByOrNull(Network::getNetworkHandle)?.let { it to "validated" }
-                ?: candidates.minBy(Network::getNetworkHandle) to "lowest-handle"
-        }
+        val networks = wifiNetworks(cm)
+        val candidates = networks.map { network -> candidate(cm, network, networks.size, monitor) }
+        val chosen = NetworkSelectionPolicy.choose(candidates, expectedSsid)
         if (chosen == null) {
             monitor?.close()
             return null
         }
-        return AndroidMeasurementNetwork(chosen.first, chosen.second, cm, wifiManager, monitor)
+        val network = networks.first { it.networkHandle == chosen.first.id }
+        return AndroidMeasurementNetwork(network, chosen.second, cm, wifiManager, monitor, candidates.map { it.ssid })
+    }
+
+    private fun candidate(cm: ConnectivityManager, network: Network, count: Int, monitor: AssociationMonitor?): NetworkCandidate {
+        @Suppress("DEPRECATION")
+        val info = monitor?.wifiInfo(network) ?: if (count == 1) wifiManager?.connectionInfo else null
+        @Suppress("DEPRECATION")
+        val ssid = info?.ssid?.removeSurrounding("\"")?.takeUnless { it == WifiManager.UNKNOWN_SSID || it.isEmpty() }
+        return NetworkCandidate(
+            id = network.networkHandle,
+            isDefault = cm.activeNetwork == network,
+            validated = cm.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
+            ssid = ssid
+        )
     }
 
     companion object {
@@ -65,7 +74,9 @@ class AndroidMeasurementNetwork internal constructor(
     override val selection: String,
     private val connectivity: ConnectivityManager,
     private val wifiManager: WifiManager?,
-    private val monitor: AssociationMonitor?
+    private val monitor: AssociationMonitor?,
+    /** SSIDs of every eligible Wi-Fi network when this one was chosen. */
+    val eligibleSsids: List<String?> = emptyList()
 ) : MeasurementNetwork, Closeable {
     override val id: String = network.networkHandle.toString()
     override val socketFactory: SocketFactory get() = network.socketFactory

@@ -22,6 +22,7 @@ object ConfigExport {
             addProperty("version", WiproberConfigParser.VERSION)
             addProperty("_comment", "Exported by nimWifi. Credential values are not included: add them under \"credentials\".")
             add("throughput", JsonObject().apply {
+                addProperty("expectedSsid", throughput.expectedSsid)
                 add("iperf", JsonObject().apply {
                     addProperty("enabled", throughput.iperfEnabled)
                     addProperty("label", throughput.iperfLabel)

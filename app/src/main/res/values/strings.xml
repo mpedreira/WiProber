@@ -236,7 +236,7 @@
     <string name="throughput_cancel_tests">Cancel tests</string>
     <string name="throughput_cancelling">Cancelling… finished phases are kept</string>
     <string name="last_template_undone">Last imported point template removed</string>
-    <string name="action_map_ssid">Map SSID…</string>
+    <string name="action_map_ssid">Map SSID (passive coverage)…</string>
     <string name="action_point_template">Import point template…</string>
     <string name="map_ssid_title">SSID shown on the map and first in the report</string>
     <string name="map_ssid_automatic">Automatic (most widely detected)</string>
@@ -367,4 +367,11 @@
     <string name="capture_service_failed">The background service did not start (%1$s): with the screen off the capture may pause.</string>
     <string name="capture_status_detail">RF %1$d scans · roaming %2$s</string>
     <string name="throughput_progress_budget">Starting… at most %1$d s for this point</string>
+    <string name="throughput_expected_ssid">Expected SSID for active tests (empty = any)</string>
+    <string name="throughput_expected_ssid_help">Checked before sending tests. Not the map SSID (passive coverage filter).</string>
+    <string name="network_check_title">Check the Wi-Fi before testing</string>
+    <string name="network_check_mismatch">Expected SSID: %1$s\nNetwork the tests would use: %2$s\nEligible Wi-Fi networks: %3$s\n\nThe tests would run on another network. Test anyway (recorded as confirmed) or skip the tests of this point.</string>
+    <string name="network_check_unknown">Expected SSID: %1$s\nAndroid does not say which SSID the network has (%2$s).\nEligible Wi-Fi networks: %3$s\n\nTest anyway (recorded as confirmed with an unknown association) or skip the tests of this point.</string>
+    <string name="network_check_test_anyway">Test anyway</string>
+    <string name="network_check_skip">Skip tests</string>
 </resources>

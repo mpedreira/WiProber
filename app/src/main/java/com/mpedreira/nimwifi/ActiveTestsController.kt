@@ -39,12 +39,40 @@ class ActiveTestsController(
     fun start(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>) {
         val settings = throughputStore.load()
         val imported = configStore.load()
+        if (ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isEmpty()) return
+        // Mejora 13: before sending anything, which Wi-Fi the tests would use and whether it is the declared one.
+        activity.lifecycleScope.launch {
+            val preflight = withContext(Dispatchers.IO) { runCatching { probe.preflight(settings.sanitized().expectedSsid) }.getOrNull() }
+            if (preflight != null && NetworkVerification.needsDecision(preflight.verification)) {
+                MaterialAlertDialogBuilder(activity)
+                    .setTitle(R.string.network_check_title)
+                    .setMessage(activity.getString(
+                        if (preflight.verification == NetworkVerification.UNKNOWN) R.string.network_check_unknown else R.string.network_check_mismatch,
+                        preflight.expectedSsid.orEmpty(), preflight.observedSsid ?: "?",
+                        preflight.eligible.joinToString(", ") { it ?: "?" }
+                    ))
+                    .setCancelable(false)
+                    .setPositiveButton(R.string.network_check_test_anyway) { _, _ -> run(pointId, scanId, scanResults, preflight, DECISION_CONFIRMED) }
+                    .setNegativeButton(R.string.network_check_skip, null)
+                    .show()
+            } else {
+                run(pointId, scanId, scanResults, preflight, null)
+            }
+        }
+    }
+
+    private fun run(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>, preflight: NetworkPreflight?, decision: String?) {
+        val settings = throughputStore.load()
+        val imported = configStore.load()
         val credentials = configStore.loadCredentials()
         val phases = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts)
         if (phases.isEmpty()) return
         val probe = probe
         val budget = ThroughputRunner.runDeadlineMillis(settings, imported.enabledTests, imported.enabledScripts)
-        viewModel.startActiveRun(pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS, budgetMillis = budget) { control, listener ->
+        viewModel.startActiveRun(
+            pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS, budgetMillis = budget,
+            preflight = preflight, networkDecision = decision
+        ) { control, listener ->
             probe.measure(settings, imported, credentials, scanResults, control, listener)
         }
     }
@@ -119,5 +147,6 @@ class ActiveTestsController(
 
     private companion object {
         const val PROFILE_DEVICE_SETTINGS = "device-settings"
+        const val DECISION_CONFIRMED = "confirmed"
     }
 }

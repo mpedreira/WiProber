@@ -673,6 +673,8 @@ class MainViewModel @JvmOverloads constructor(
         phases: List<PhaseRecord>,
         profile: String?,
         budgetMillis: Long? = null,
+        preflight: NetworkPreflight? = null,
+        networkDecision: String? = null,
         executor: suspend (MeasurementControl, RunListener) -> PointThroughput
     ): String? {
         val state = _screenState.value
@@ -682,7 +684,9 @@ class MainViewModel @JvmOverloads constructor(
         val run = ActiveRun(
             runId = runId, pointId = pointId, scanId = scanId, startedAt = clock.now(),
             status = RunStatus.RUNNING, profile = profile, phases = phases,
-            x = position.x, y = position.y, budgetMillis = budgetMillis
+            x = position.x, y = position.y, budgetMillis = budgetMillis,
+            expectedSsid = preflight?.expectedSsid, observedSsid = preflight?.observedSsid,
+            networkVerification = preflight?.verification, networkDecision = networkDecision
         )
         _screenState.value = state.copy(
             activeRuns = state.activeRuns + run,

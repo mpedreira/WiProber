@@ -24,7 +24,8 @@ class ThroughputSettingsStore(context: Context) {
             internetEnabled = prefs.getBoolean(INTERNET_ENABLED, defaults.internetEnabled),
             internetDownloadUrl = prefs.getString(INTERNET_DOWNLOAD, null) ?: defaults.internetDownloadUrl,
             internetUploadUrl = prefs.getString(INTERNET_UPLOAD, null) ?: defaults.internetUploadUrl,
-            internetDurationSeconds = prefs.getInt(INTERNET_DURATION, defaults.internetDurationSeconds)
+            internetDurationSeconds = prefs.getInt(INTERNET_DURATION, defaults.internetDurationSeconds),
+            expectedSsid = prefs.getString(EXPECTED_SSID, null) ?: defaults.expectedSsid
         ).sanitized()
     }
 
@@ -40,6 +41,7 @@ class ThroughputSettingsStore(context: Context) {
             putString(INTERNET_DOWNLOAD, clean.internetDownloadUrl)
             putString(INTERNET_UPLOAD, clean.internetUploadUrl)
             putInt(INTERNET_DURATION, clean.internetDurationSeconds)
+            putString(EXPECTED_SSID, clean.expectedSsid)
         }
     }
 
@@ -54,6 +56,7 @@ class ThroughputSettingsStore(context: Context) {
         const val INTERNET_DOWNLOAD = "internet_download_url"
         const val INTERNET_UPLOAD = "internet_upload_url"
         const val INTERNET_DURATION = "internet_duration"
+        const val EXPECTED_SSID = "expected_ssid"
     }
 }
 
@@ -73,6 +76,7 @@ object ThroughputSettingsDialog {
         val downloadUrl = view.findViewById<TextInputEditText>(R.id.internetDownloadUrl)
         val uploadUrl = view.findViewById<TextInputEditText>(R.id.internetUploadUrl)
         val internetDuration = view.findViewById<TextInputEditText>(R.id.internetDuration)
+        val expectedSsid = view.findViewById<TextInputEditText>(R.id.expectedSsid)
 
         fun fill(settings: ThroughputSettings) {
             iperfEnabled.isChecked = settings.iperfEnabled
@@ -84,6 +88,7 @@ object ThroughputSettingsDialog {
             downloadUrl.setText(settings.internetDownloadUrl)
             uploadUrl.setText(settings.internetUploadUrl)
             internetDuration.setText(number(settings.internetDurationSeconds))
+            expectedSsid.setText(settings.expectedSsid)
         }
 
         val current = store.load()
@@ -105,7 +110,8 @@ object ThroughputSettingsDialog {
                         internetDownloadUrl = downloadUrl.text?.toString().orEmpty(),
                         internetUploadUrl = uploadUrl.text?.toString().orEmpty(),
                         internetDurationSeconds = internetDuration.text?.toString()?.toIntOrNull()
-                            ?: current.internetDurationSeconds
+                            ?: current.internetDurationSeconds,
+                        expectedSsid = expectedSsid.text?.toString().orEmpty()
                     )
                 )
                 Toast.makeText(activity, R.string.throughput_settings_saved, Toast.LENGTH_SHORT).show()

@@ -2,6 +2,20 @@
 
 Servers, credentials, tests and scripts are never in the code. They are set on the phone (⋮ → *Imported configuration*: roaming probe, network tests, scripts and credentials can be edited there) or imported from a `wiprober-config.json` ([example](wiprober-config.example.json)), a browser `.har` recording or a **configuration ZIP** ([commented example](examples/nimwifi-config-example.zip), sources in [examples/config-zip](examples/config-zip)), and kept in app-private storage (`files/private-config/`) that is excluded from Android backups and device transfers.
 
+## Which Wi-Fi the active tests use
+
+`throughput.expectedSsid` (also in *Throughput tests* on the phone) declares the SSID the active tests must run on. It is not the map SSID (*Map SSID (passive coverage)*, a filter of the coverage map). Before sending anything nimWifi selects the Wi-Fi network (the eligible one that reports the expected SSID when there are several; otherwise the only one, the default, a validated one or the lowest handle — never mobile data, Internet is not required) and compares its SSID with the expected one:
+
+| `networkVerification` | Meaning | Before testing |
+|---|---|---|
+| `matched` | The network reports the expected SSID | Tests run |
+| `mismatch` | Another SSID | Decide: test anyway (`networkDecision: "confirmed"`) or skip |
+| `unknown` | Android does not say which SSID it is | Decide, as above |
+| `not_declared` | No expected SSID | Tests run |
+| `no_wifi` | No Wi-Fi network | Nothing is sent |
+
+DNS, sockets and HTTP of the run stay bound to the selected network. The check is saved with the run (`expectedSsid`, `observedSsid`, `networkVerification`, `networkDecision`).
+
 ## Survey guide and signal profile
 
 `guide.profile` sets when a point's signal is weak on the map and in the report: `pda` (handheld scanners, −67 dBm, second AP −72 dBm, default), `voz` (voice, −67/−67) or `datos` (data, −70/−75). The same profiles as the wifianalisys report; they can also be chosen in the survey-guide settings.

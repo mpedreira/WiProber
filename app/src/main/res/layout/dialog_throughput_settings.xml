@@ -17,6 +17,24 @@
             android:text="@string/throughput_settings_hint"
             android:textAppearance="?attr/textAppearanceBodyMedium" />
 
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/throughput_expected_ssid"
+            app:helperText="@string/throughput_expected_ssid_help"
+            xmlns:app="http://schemas.android.com/apk/res-auto">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/expectedSsid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:maxLength="32"
+                android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+
         <CheckBox
             android:id="@+id/iperfEnabled"
             android:layout_width="match_parent"

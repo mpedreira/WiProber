@@ -236,6 +236,11 @@ object PerformanceExport {
         addProperty("status", run.status)
         addProperty("statusReason", run.statusReason)
         addProperty("profile", run.profile)
+        addProperty("budgetMs", run.budgetMillis)
+        addProperty("expectedSsid", run.expectedSsid)
+        addProperty("observedSsid", run.observedSsid)
+        addProperty("networkVerification", run.networkVerification)
+        addProperty("networkDecision", run.networkDecision)
         // The run's status is separate from what its phases produced.
         add("phaseSummary", JsonObject().apply { run.phaseSummary.toSortedMap().forEach { (status, n) -> addProperty(status, n) } })
         add("phases", JsonArray().apply {

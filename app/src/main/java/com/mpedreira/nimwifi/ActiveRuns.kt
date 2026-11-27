@@ -51,7 +51,13 @@ data class ActiveRun(
     val x: Float? = null,
     val y: Float? = null,
     /** Mejora 7: the point's finite time budget, shown before starting. */
-    val budgetMillis: Long? = null
+    val budgetMillis: Long? = null,
+    /** Mejora 13: network check before the run (see [NetworkVerification]). */
+    val expectedSsid: String? = null,
+    val observedSsid: String? = null,
+    val networkVerification: String? = null,
+    /** `confirmed`: the technician chose to test although the network did not match or was unknown. */
+    val networkDecision: String? = null
 ) {
     val isFinished: Boolean get() = status !in RunStatus.UNFINISHED
 

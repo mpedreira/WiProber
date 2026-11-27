@@ -282,7 +282,8 @@ object WiproberConfigParser {
             internetEnabled = internet?.bool("enabled") ?: d.internetEnabled,
             internetDownloadUrl = internet?.string("downloadUrl") ?: d.internetDownloadUrl,
             internetUploadUrl = internet?.string("uploadUrl") ?: d.internetUploadUrl,
-            internetDurationSeconds = internet?.int("durationSeconds") ?: d.internetDurationSeconds
+            internetDurationSeconds = internet?.int("durationSeconds") ?: d.internetDurationSeconds,
+            expectedSsid = json.string("expectedSsid") ?: d.expectedSsid
         ).sanitized()
     }
 

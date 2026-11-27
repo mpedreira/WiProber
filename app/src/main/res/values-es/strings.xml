@@ -238,7 +238,7 @@
     <string name="throughput_cancel_tests">Cancelar pruebas</string>
     <string name="throughput_cancelling">Cancelando… se conservan las fases terminadas</string>
     <string name="last_template_undone">Eliminada la última plantilla de puntos importada</string>
-    <string name="action_map_ssid">SSID del mapa…</string>
+    <string name="action_map_ssid">SSID del mapa (cobertura pasiva)…</string>
     <string name="action_point_template">Importar plantilla de puntos…</string>
     <string name="map_ssid_title">SSID que se muestra en el mapa y primero en el informe</string>
     <string name="map_ssid_automatic">Automático (el más detectado)</string>
@@ -367,4 +367,11 @@
     <string name="capture_service_failed">No se ha podido iniciar el servicio en segundo plano (%1$s): con la pantalla apagada la captura puede pausarse.</string>
     <string name="capture_status_detail">RF %1$d escaneos · roaming %2$s</string>
     <string name="throughput_progress_budget">Empezando… como mucho %1$d s en este punto</string>
+    <string name="throughput_expected_ssid">SSID esperado para las pruebas activas (vacío = cualquiera)</string>
+    <string name="throughput_expected_ssid_help">Se comprueba antes de enviar pruebas. No es el SSID del mapa (filtro pasivo de cobertura).</string>
+    <string name="network_check_title">Comprueba el Wi-Fi antes de probar</string>
+    <string name="network_check_mismatch">SSID esperado: %1$s\nRed que usarían las pruebas: %2$s\nRedes Wi-Fi elegibles: %3$s\n\nLas pruebas irían por otra red. Probar igualmente (queda registrado como confirmado) o saltar las pruebas de este punto.</string>
+    <string name="network_check_unknown">SSID esperado: %1$s\nAndroid no indica qué SSID tiene la red (%2$s).\nRedes Wi-Fi elegibles: %3$s\n\nProbar igualmente (queda registrado como confirmado con asociación desconocida) o saltar las pruebas de este punto.</string>
+    <string name="network_check_test_anyway">Probar igualmente</string>
+    <string name="network_check_skip">Saltar pruebas</string>
 </resources>

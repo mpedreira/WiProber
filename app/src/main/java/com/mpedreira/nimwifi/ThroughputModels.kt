@@ -136,7 +136,13 @@ data class ThroughputSettings(
     val internetEnabled: Boolean = false,
     val internetDownloadUrl: String = DEFAULT_DOWNLOAD_URL,
     val internetUploadUrl: String = DEFAULT_UPLOAD_URL,
-    val internetDurationSeconds: Int = DEFAULT_DURATION_SECONDS
+    val internetDurationSeconds: Int = DEFAULT_DURATION_SECONDS,
+    /**
+     * Mejora 13: SSID the active tests must run on. Before sending anything the app compares it
+     * with the network it would use; a mismatch or an unknown association needs a decision.
+     * Not the map SSID (the passive filter of the coverage map).
+     */
+    val expectedSsid: String = ""
 ) {
     val anyEnabled: Boolean get() = iperfEnabled || internetEnabled
 
@@ -148,7 +154,8 @@ data class ThroughputSettings(
         iperfDurationSeconds = iperfDurationSeconds.coerceIn(MIN_DURATION_SECONDS, MAX_DURATION_SECONDS),
         internetDownloadUrl = internetDownloadUrl.trim(),
         internetUploadUrl = internetUploadUrl.trim(),
-        internetDurationSeconds = internetDurationSeconds.coerceIn(MIN_DURATION_SECONDS, MAX_DURATION_SECONDS)
+        internetDurationSeconds = internetDurationSeconds.coerceIn(MIN_DURATION_SECONDS, MAX_DURATION_SECONDS),
+        expectedSsid = expectedSsid.trim().take(32)
     )
 
     companion object {
