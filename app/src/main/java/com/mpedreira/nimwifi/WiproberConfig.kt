@@ -161,6 +161,37 @@ object WiproberConfigParser {
         }
     }
 
+    /**
+     * A configuration ZIP: `wiprober-config.json` (required, may carry `_comment` keys) plus
+     * optional browser `.har` recordings, each added as one more script. README and other text
+     * files are ignored. [entries] maps root file names to their text.
+     */
+    fun parseZip(entries: Map<String, String>): WiproberConfig {
+        val configText = entries.entries.firstOrNull { it.key.equals(CONFIG_FILE_NAME, ignoreCase = true) }?.value
+            ?: throw ConfigException("The ZIP has no $CONFIG_FILE_NAME")
+        val config = parse(configText, CONFIG_FILE_NAME)
+        val hars = entries.filterKeys { it.endsWith(".har", ignoreCase = true) }.toSortedMap()
+            .map { (name, text) -> HarImporter.import(parseRoot(text), scriptNameFrom(name)) }
+        if (hars.isEmpty()) return config
+        val scripts = config.scripts.orEmpty() + hars.map { it.script }
+        if (scripts.size > MAX_SCRIPTS) throw ConfigException("At most $MAX_SCRIPTS scripts")
+        if (scripts.map { it.name }.toSet().size != scripts.size) throw ConfigException("Script names must be unique (config and HAR files)")
+        return config.copy(
+            scripts = scripts,
+            // Without a scripts section the HARs are added to the device's scripts, as a lone HAR is.
+            mergeScripts = config.scripts == null,
+            stripped = config.stripped + hars.flatMap { har -> har.stripped.map { "${har.script.name}: $it" } }
+        )
+    }
+
+    const val CONFIG_FILE_NAME = "wiprober-config.json"
+
+    private fun parseRoot(text: String): JsonObject = try {
+        JsonParser.parseString(text).asJsonObject
+    } catch (e: Exception) {
+        throw ConfigException("Not a JSON file: ${e.message}")
+    }
+
     private fun parseConfig(root: JsonObject): WiproberConfig {
         if (root.string("format") != FORMAT) throw ConfigException("\"format\" must be \"$FORMAT\"")
         val version = root.int("version")
@@ -190,8 +221,8 @@ object WiproberConfigParser {
 
     private fun parseCredentials(json: JsonObject?): Map<String, String>? {
         json ?: return null
-        if (json.size() > Sensitive.MAX_CREDENTIALS) throw ConfigException("At most ${Sensitive.MAX_CREDENTIALS} credentials")
-        return json.entrySet().associate { (name, value) ->
+        if (json.keySet().count { !it.startsWith("_") } > Sensitive.MAX_CREDENTIALS) throw ConfigException("At most ${Sensitive.MAX_CREDENTIALS} credentials")
+        return json.entrySet().filterNot { it.key.startsWith("_") }.associate { (name, value) ->
             if (!Sensitive.CREDENTIAL_NAME.matches(name)) throw ConfigException("Credential name \"$name\": use letters, digits and _ (max 40)")
             if (!value.isJsonPrimitive) throw ConfigException("Credential \"$name\" must be a string")
             val text = value.asString
@@ -332,8 +363,9 @@ object WiproberConfigParser {
     private fun JsonObject.bool(name: String): Boolean? = member(name)?.asBoolean
     private fun JsonObject.int(name: String): Int? = member(name)?.asInt
     private fun JsonObject.double(name: String): Double? = member(name)?.asDouble
+    /** Keys starting with `_` are comments (`"_comment": "…"`), never values. */
     private fun JsonObject.stringMap(name: String): Map<String, String> =
-        obj(name)?.entrySet()?.associate { (key, value) -> key to value.asString }.orEmpty()
+        obj(name)?.entrySet()?.filterNot { it.key.startsWith("_") }?.associate { (key, value) -> key to value.asString }.orEmpty()
 }
 
 /**

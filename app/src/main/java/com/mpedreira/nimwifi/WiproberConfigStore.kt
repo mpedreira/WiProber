@@ -94,6 +94,23 @@ class WiproberConfigStore(private val directory: File, private val gson: Gson = 
         )
     }
 
+    /** Edits the stored tests, scripts and roaming (the configuration screen). */
+    fun update(transform: (Imported) -> Imported) {
+        saveAtomically(file, gson.toJson(transform(load())))
+    }
+
+    fun credentialNames(): Set<String> = loadCredentials().keys
+
+    fun setCredential(name: String, value: String) {
+        require(Sensitive.CREDENTIAL_NAME.matches(name)) { "Invalid credential name" }
+        require(value.length <= Sensitive.MAX_CREDENTIAL_LENGTH && value.none { it == '\r' || it == '\n' }) { "Invalid credential value" }
+        saveAtomically(credentialsFile, gson.toJson(loadCredentials() + (name to value)))
+    }
+
+    fun removeCredential(name: String) {
+        saveAtomically(credentialsFile, gson.toJson(loadCredentials() - name))
+    }
+
     fun clear() {
         file.delete()
         credentialsFile.delete()
@@ -115,5 +132,7 @@ class WiproberConfigStore(private val directory: File, private val gson: Gson = 
         private const val FILE_NAME = "imported.json"
         private const val CREDENTIALS_FILE_NAME = "credentials.json"
         const val MAX_FILE_BYTES = 2L * 1024 * 1024
+        /** A configuration ZIP (config + HAR recordings). */
+        const val MAX_ZIP_BYTES = 8L * 1024 * 1024
     }
 }

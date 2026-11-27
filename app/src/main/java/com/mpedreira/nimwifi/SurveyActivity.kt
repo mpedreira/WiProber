@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.text.InputType
 import android.util.Log
+import androidx.activity.result.contract.ActivityResultContracts
 import android.annotation.SuppressLint
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -76,6 +77,12 @@ class SurveyActivity : AppCompatActivity() {
     private var isProjectReady = false
     private var projectSaveJob: Job? = null
     private var saveFailureSnackbar: com.google.android.material.snackbar.Snackbar? = null
+    /** The configuration screen may change the guide (SSID, profile): redraw on return. */
+    private val configurationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val state = viewModel.screenState.value
+        renderSurveyGuide(state)
+        renderPointMarkers(state)
+    }
     private var trackingStatusJob: Job? = null
     private var stopAndGoScanJob: Job? = null
     private var continuousScanLoopJob: Job? = null
@@ -206,10 +213,6 @@ class SurveyActivity : AppCompatActivity() {
                     ) return
                     if (uri == null) viewModel.finishProjectOperation(ProjectOperation.EXPORT_DESTINATION)
                     else exportProject(uri, bundle)
-                }
-
-                override fun onConfigFileSelected(uri: Uri?) {
-                    if (uri != null) importConfiguration(uri)
                 }
 
                 override fun onPointTemplateSelected(uri: Uri?) {
@@ -354,7 +357,7 @@ class SurveyActivity : AppCompatActivity() {
                     true
                 }
                 R.id.action_configuration -> {
-                    showConfigurationDialog()
+                    configurationLauncher.launch(Intent(this, ConfigurationActivity::class.java))
                     true
                 }
                 R.id.action_survey_guide -> {
@@ -552,93 +555,6 @@ class SurveyActivity : AppCompatActivity() {
         val dialog = progressDialog ?: ThroughputProgressDialog(this, onCancel = { viewModel.cancelActiveRun() }, onSkip = { viewModel.skipActiveRun() })
             .also { it.show(); progressDialog = it }
         state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
-    }
-
-    /** Imported tests/scripts/roaming at a glance, with Import and Remove. */
-    private fun showConfigurationDialog() {
-        val imported = configStore.load()
-        val none = getString(R.string.config_none)
-        val message = getString(
-            R.string.config_summary,
-            imported.tests.orEmpty().joinToString(", ") { it.displayAlias }.ifEmpty { none },
-            imported.scripts.orEmpty().joinToString(", ") { it.displayAlias }.ifEmpty { none },
-            imported.roamingSettings.let { if (it.enabled && it.host.isNotEmpty()) "${it.host}:${it.port}" else none }
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.config_title)
-            .setMessage(message)
-            .setPositiveButton(R.string.config_import) { _, _ -> androidCoordinator.openConfigFile() }
-            .setNeutralButton(R.string.config_remove) { _, _ ->
-                configStore.clear()
-                Toast.makeText(this, R.string.config_removed, Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    /** Parse → preview (nothing saved yet) → explicit activation; a failure keeps the previous profile. */
-    private fun importConfiguration(uri: Uri) {
-        lifecycleScope.launch {
-            val parsed = withContext(Dispatchers.IO) {
-                runCatching {
-                    val text = requireNotNull(contentResolver.openInputStream(uri)) { "Cannot open the file" }.use { input ->
-                        val bytes = java.io.ByteArrayOutputStream()
-                        val buffer = ByteArray(16 * 1024)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            bytes.write(buffer, 0, read)
-                            require(bytes.size() <= WiproberConfigStore.MAX_FILE_BYTES) { "File larger than 2 MB" }
-                        }
-                        bytes.toString(Charsets.UTF_8.name())
-                    }
-                    val name = uri.lastPathSegment?.substringAfterLast('/') ?: "config"
-                    val config = WiproberConfigParser.parse(text, name)
-                    config to configStore.preview(config)
-                }
-            }
-            parsed.onSuccess { (config, preview) ->
-                ConfigImportDialogs.showPreview(this@SurveyActivity, preview) { activateConfiguration(config) }
-            }.onFailure(::showConfigImportFailure)
-        }
-    }
-
-    private fun activateConfiguration(config: WiproberConfig) {
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { configStore.apply(config, throughputSettingsStore, surveyGuideStore) }
-            }
-            result.onSuccess { summary ->
-                renderSurveyGuide(viewModel.screenState.value)
-                val yes = getString(R.string.config_updated)
-                val unchanged = getString(R.string.config_unchanged)
-                MaterialAlertDialogBuilder(this@SurveyActivity)
-                    .setTitle(R.string.config_imported_title)
-                    .setMessage(
-                        getString(
-                            R.string.config_imported_summary,
-                            if (summary.throughput) yes else unchanged,
-                            if (summary.guide) yes else unchanged,
-                            summary.tests?.toString() ?: unchanged,
-                            summary.scripts?.joinToString(", ")?.ifEmpty { "0" } ?: unchanged,
-                            if (summary.roaming) yes else unchanged,
-                            summary.credentials
-                        )
-                    )
-                    .setPositiveButton(R.string.action_ok, null)
-                    .show()
-            }.onFailure(::showConfigImportFailure)
-        }
-    }
-
-    private fun showConfigImportFailure(error: Throwable) {
-        // Parser messages never quote credential values; sanitize anything else.
-        val detail = (error as? ConfigException)?.message ?: ErrorClassifier.sanitize(error.message ?: error.javaClass.simpleName)
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.config_import_failed)
-            .setMessage(getString(R.string.config_import_failed_kept, detail))
-            .setPositiveButton(R.string.action_ok, null)
-            .show()
     }
 
     /** SSID the map shows: the chosen one, else the most widely detected on this floor. */

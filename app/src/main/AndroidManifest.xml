@@ -39,6 +39,9 @@
             android:name=".CreateProjectActivity"
             android:exported="false" />
         <activity
+            android:name=".ConfigurationActivity"
+            android:exported="false" />
+        <activity
             android:name=".ProjectHubActivity"
             android:exported="true"
             android:launchMode="singleTop">

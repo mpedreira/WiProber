@@ -41,9 +41,6 @@ internal class SurveyAndroidCoordinator(
         ActivityResultContracts.CreateDocument(ESX_MIME_TYPE)
     ) { callbacks.onExportDestinationSelected(it, bundle = false) }
 
-    private val openConfigLauncher = activity.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { callbacks.onConfigFileSelected(it) }
 
     private val openPointTemplateLauncher = activity.registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -100,8 +97,6 @@ internal class SurveyAndroidCoordinator(
 
     fun createExportBundleDocument(suggestedName: String) = saveBundleLauncher.launch(suggestedName)
 
-    /** wiprober-config.json or a browser .har (both JSON; some file managers report neither type). */
-    fun openConfigFile() = openConfigLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
 
     /** wiprober-points JSON or CSV point list. */
     fun openPointTemplateFile() = openPointTemplateLauncher.launch(arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "*/*"))
@@ -244,7 +239,6 @@ internal class SurveyAndroidCoordinator(
         fun onPictureCaptured(success: Boolean)
         fun onFloorMapSelected(uri: Uri?)
         fun onExportDestinationSelected(uri: Uri?, bundle: Boolean)
-        fun onConfigFileSelected(uri: Uri?)
         fun onPointTemplateSelected(uri: Uri?)
         fun pendingScanAccess(): SurveyInteraction.AwaitingScanAccess?
         fun transitionScanAccess(expected: ScanAccessStep, next: ScanAccessStep): Boolean

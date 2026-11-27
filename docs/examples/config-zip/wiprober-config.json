@@ -1,0 +1,63 @@
+{
+  "_comment": "nimWifi configuration example. Keys starting with _ are comments and are ignored. All hosts are fictitious (example.com); replace them with yours.",
+  "format": "wiprober-config",
+  "version": 1,
+
+  "_credentials": "Secret values, referenced as ${secret.NAME}. Stored apart from the definitions, never shown or exported, excluded from backups. Leave this out and set them on the phone (Imported configuration > Credentials) if you do not want them in a file.",
+  "credentials": {
+    "portal_password": "change-me"
+  },
+
+  "_throughput": "Speed tests after each Stop-and-Go scan. iperf: your private iperf3 server (iperf3 -s). internet: an HTTP speed test; {bytes} is replaced by the download size.",
+  "throughput": {
+    "iperf": { "enabled": true, "label": "corporate", "host": "iperf.example.com", "port": 5201, "durationSeconds": 5 },
+    "internet": {
+      "enabled": false,
+      "downloadUrl": "https://speed.example.com/__down?bytes={bytes}",
+      "uploadUrl": "https://speed.example.com/__up",
+      "durationSeconds": 5
+    }
+  },
+
+  "_guide": "Survey guide: grid spacing and coverage circle in metres, the SSID shown on the map and the signal profile (pda -67/-72, voz -67/-67, datos -70/-75 dBm).",
+  "guide": { "enabled": true, "spacingMeters": 10, "coverageRadiusMeters": 5, "ssid": "CORP-WIFI", "profile": "pda" },
+
+  "_roaming": "Continuous mode: a TCP connect to host:port every intervalMs over the Wi-Fi network. ${gateway} = the Wi-Fi default gateway, ${dns} = its first DNS server.",
+  "roaming": { "enabled": true, "host": "${gateway}", "port": 443, "intervalMs": 200 },
+
+  "_tests": "Network tests at every point: dns (UDP query to the network's DNS server), ping (ICMP, TCP fallback), tcp (connect time) and http (timed GET). alias is the name shown in reports.",
+  "tests": [
+    { "_comment": "Round trip to the gateway.", "name": "gateway", "alias": "Gateway", "type": "ping", "host": "${gateway}", "count": 10 },
+    { "name": "dns-portal", "alias": "Portal DNS", "type": "dns", "host": "portal.example.com" },
+    { "name": "erp-db", "alias": "ERP database", "type": "tcp", "host": "10.0.0.5", "port": 1521 },
+    { "name": "portal-health", "alias": "Portal", "type": "http", "url": "https://portal.example.com/health", "expectStatus": 200 }
+  ],
+
+  "_scripts": "HTTP scripts: requests chained with variables, values extracted from JSON responses and cookies. Only GET/HEAD run unless a step sets allowWrite (the import asks for an extra confirmation). Each .har file in this ZIP becomes one more script (credentials stripped).",
+  "scripts": [
+    {
+      "name": "portal-lookup",
+      "alias": "Portal lookup",
+      "variables": { "user": "survey" },
+      "steps": [
+        {
+          "_comment": "Login: the token in the response is used by the next step.",
+          "name": "login",
+          "method": "POST",
+          "allowWrite": true,
+          "url": "https://portal.example.com/api/login",
+          "headers": { "Content-Type": "application/json" },
+          "body": "{\"user\":\"${user}\",\"password\":\"${secret.portal_password}\"}",
+          "expectStatus": 200,
+          "extract": { "token": "$.data.token" }
+        },
+        {
+          "name": "location",
+          "url": "https://portal.example.com/api/locations/A-01",
+          "headers": { "Authorization": "Bearer ${token}" },
+          "expectContains": "A-01"
+        }
+      ]
+    }
+  ]
+}
