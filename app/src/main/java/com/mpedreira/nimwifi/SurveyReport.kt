@@ -558,6 +558,9 @@ object SurveyReport {
         val r = model.requirements ?: return@with
         append("<details><summary>Requisitos aplicados</summary><ul>")
         append("<li>Señal: AP más fuerte ≥ ").append(model.weakDbm).append(" dBm (perfil «").append(e(model.profile)).append("»)</li>")
+        r.bands.orEmpty().forEach { b ->
+            append("<li>Señal en ").append(e(WifiBands.label(b.band))).append(": AP más fuerte de la banda ≥ ").append(num(b.minRssiDbm)).append(" dBm</li>")
+        }
         r.throughput.orEmpty().forEach { t ->
             append("<li>iPerf3 privado «").append(e(t.alias)).append("»: ")
             append(listOfNotNull(t.minDownMbps?.let { "bajada ≥ ${num(it)} Mbit/s" }, t.minUpMbps?.let { "subida ≥ ${num(it)} Mbit/s" },

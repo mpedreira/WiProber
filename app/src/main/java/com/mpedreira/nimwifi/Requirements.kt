@@ -15,10 +15,20 @@ data class Requirements(
     val throughput: List<ThroughputRequirement>? = null,
     /** Network tests (DNS, ping, TCP, HTTP), matched by alias (or name when it has no alias). */
     val networkTests: List<ServiceRequirement>? = null,
-    val roaming: RoamingRequirement? = null
+    val roaming: RoamingRequirement? = null,
+    /** Minimum signal of the SSID in a given band (e.g. 5 GHz), on top of the profile's threshold. */
+    val bands: List<BandRequirement>? = null
 ) {
-    val isEmpty: Boolean get() = throughput.isNullOrEmpty() && networkTests.isNullOrEmpty() && roaming == null
+    val isEmpty: Boolean get() = throughput.isNullOrEmpty() && networkTests.isNullOrEmpty() && roaming == null && bands.isNullOrEmpty()
 }
+
+@JsonModel
+data class BandRequirement(
+    /** [WifiBands.B24], [WifiBands.B5] or [WifiBands.B6]. */
+    val band: String,
+    /** The strongest AP of the SSID in that band at the point must be at least this (dBm). */
+    val minRssiDbm: Double
+)
 
 @JsonModel
 data class ThroughputRequirement(
@@ -145,6 +155,7 @@ object VerdictEvaluator {
     ): PointVerdict {
         val checks = mutableListOf<Check>()
         checks += signal(point, weakDbm, apNames)
+        requirements.bands.orEmpty().forEach { req -> checks += bandSignal(point, req, apNames) }
         val ordered = runs.sortedBy { it.startedAt }
         requirements.throughput.orEmpty().forEach { req ->
             val attempts = ordered.flatMap { run -> run.results?.tests.orEmpty().filter { it.ssid == ssid && isTarget(it, req.alias) }.map { run to it } }
@@ -197,6 +208,22 @@ object VerdictEvaluator {
                     else -> "sin escaneo válido"
                 })
         }
+    }
+
+    /**
+     * The SSID's strongest AP in one band. A valid scan that did not hear the SSID in that band
+     * fails (the band is not there); a point without a valid scan lacks data.
+     */
+    private fun bandSignal(point: PointCoverage, req: BandRequirement, apNames: ApLabels): Check {
+        val id = "rssi:${req.band}"
+        val label = "Señal ${WifiBands.label(req.band)}"
+        if (point.state == PointState.NOT_MEASURED) {
+            return Check(id, label, VerdictState.MISSING, null, req.minRssiDbm, "dBm", reason = if (point.planned) "punto planificado sin medir" else "sin escaneo válido")
+        }
+        val heard = point.band(req.band)
+            ?: return Check(id, label, VerdictState.FAIL, null, req.minRssiDbm, "dBm", reason = "SSID no oído en ${WifiBands.label(req.band)} en un escaneo válido")
+        return Check(id, label, if (heard.rssi >= req.minRssiDbm) VerdictState.PASS else VerdictState.FAIL, heard.rssi.toDouble(), req.minRssiDbm, "dBm",
+            reason = "AP más fuerte en la banda: ${apNames.label(heard.bssid)}")
     }
 
     /** p95 of the series' point values, roaming outages and their count, per SSID and floor. */

@@ -349,7 +349,19 @@ object WiproberConfigParser {
             }
             RoamingRequirement(outage, losses).takeIf { outage != null || losses != null }
         }
-        return Requirements(throughput?.takeIf { it.isNotEmpty() }, tests?.takeIf { it.isNotEmpty() }, roaming)
+        val bands = items("bands")?.map { (o, where) ->
+            val band = when (o.string("band")?.trim()?.lowercase()?.removeSuffix("ghz")?.trim()?.replace(',', '.')) {
+                "2.4" -> WifiBands.B24
+                "5" -> WifiBands.B5
+                "6" -> WifiBands.B6
+                else -> throw ConfigException("$where: \"band\" must be \"2.4\", \"5\" or \"6\"")
+            }
+            val rssi = o.member("minRssiDbm")?.let { runCatching { it.asDouble }.getOrNull() }
+            if (rssi == null || !rssi.isFinite() || rssi !in -120.0..0.0) throw ConfigException("$where: \"minRssiDbm\" must be a number between -120 and 0")
+            BandRequirement(band, rssi)
+        }
+        if (bands != null && bands.map { it.band }.toSet().size != bands.size) throw ConfigException("requirements.bands: one entry per band")
+        return Requirements(throughput?.takeIf { it.isNotEmpty() }, tests?.takeIf { it.isNotEmpty() }, roaming, bands?.takeIf { it.isNotEmpty() })
     }
 
     private fun parseRoaming(json: JsonObject): RoamingSettings {

@@ -159,7 +159,7 @@ data class ImportPreview(
                 guide = config.guide != null,
                 roaming = config.roaming != null,
                 requirements = config.requirements?.let { r ->
-                    r.throughput.orEmpty().size + r.networkTests.orEmpty().size + (if (r.roaming != null) 1 else 0)
+                    r.throughput.orEmpty().size + r.networkTests.orEmpty().size + (if (r.roaming != null) 1 else 0) + r.bands.orEmpty().size
                 },
                 apNames = config.apNames?.size
             )
