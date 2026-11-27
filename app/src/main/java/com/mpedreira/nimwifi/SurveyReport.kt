@@ -1,6 +1,5 @@
 package com.mpedreira.nimwifi
 
-import java.time.Instant
 
 /**
  * Plain-language survey report per floor and SSID, written next to the ESX and the JSON
@@ -9,6 +8,7 @@ import java.time.Instant
  */
 object SurveyReport {
     const val FILE_NAME = "wiprober-report.html"
+    private const val MAX_REPORTED_SSIDS = 5
 
     /** Which runs feed the service figures. The JSON always has every run. */
     enum class RunSelection { LATEST_PER_POINT, ALL }
@@ -54,7 +54,17 @@ object SurveyReport {
     /** A run that belongs to this SSID (by its results or, without results, by the network it observed). */
     data class RunFact(val runId: String, val pointLabel: String, val at: Long, val status: String, val reason: String?, val withValues: Boolean)
 
-    data class Event(val kind: String, val at: Long?, val from: String?, val to: String?, val detail: String?)
+    /**
+     * An AP change or a loss of reachability. [at] keeps milliseconds; [seq] keeps the order of
+     * events in the same millisecond. [windowFrom]..[windowTo] is what the observations bound.
+     */
+    data class Event(
+        val kind: String, val at: Long?, val from: String?, val to: String?, val detail: String?,
+        val windowFrom: Long? = null, val windowTo: Long? = null,
+        val fromSsid: String? = null, val toSsid: String? = null,
+        val x: Float? = null, val y: Float? = null,
+        val incidentId: String? = null, val seq: Int = 0, val source: String = "run"
+    )
 
     data class SsidSection(
         /** Null: results whose association (SSID) was never identified. */
@@ -159,15 +169,16 @@ object SurveyReport {
         }
     )
 
-    /** The chosen SSID, the SSIDs associated during active tests, else the three most widely detected. */
+    /** The chosen SSID, the SSIDs associated during active tests and the three most widely detected (max five). */
     fun ssidsFor(survey: ProjectSnapshot, chosen: String): List<String> {
         val associated = survey.activeRuns.flatMap { run ->
             val results = run.results
             listOfNotNull(run.observedSsid) + results?.tests.orEmpty().mapNotNull { it.ssid } +
                 results?.networkTests.orEmpty().mapNotNull { it.ssid } + results?.scripts.orEmpty().mapNotNull { it.ssid }
         }
-        val list = (listOfNotNull(chosen.trim().ifEmpty { null }) + associated).filter(String::isNotEmpty).distinct()
-        return list.ifEmpty { SsidCoverage.ssids(survey.scanPoints, survey.continuousScanSessions).take(3) }
+        // The chosen SSID, those used by the tests, then the most widely detected (at most five).
+        return (listOfNotNull(chosen.trim().ifEmpty { null }) + associated + SsidCoverage.ssids(survey.scanPoints, survey.continuousScanSessions).take(3))
+            .filter(String::isNotEmpty).distinct().take(MAX_REPORTED_SSIDS)
     }
 
     /** One measurement of a series at a point in one run (value null = attempted without a value). */
@@ -296,23 +307,30 @@ object SurveyReport {
         val apChanges = mutableListOf<Event>()
         val outages = mutableListOf<Event>()
         results.flatMap { it.tests }.filter { it.ssid == ssid && it.associationChange in setOf(AssociationChange.BSSID_CHANGED, AssociationChange.SSID_CHANGED) }
-            .forEach { apChanges += Event(it.associationChange!!, it.measuredAt, it.bssidStart, it.bssidEnd, it.target) }
+            .forEach { apChanges += Event(it.associationChange!!, it.measuredAt, it.bssidStart, it.bssidEnd, it.target,
+                fromSsid = it.ssid, toSsid = it.ssidEnd, seq = apChanges.size, source = "run") }
         survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { session ->
-            session.roaming?.events.orEmpty().filter { it.fromSsid == ssid || it.toSsid == ssid || (it.fromSsid == null && it.toSsid == null) }.forEach { event ->
-                val at = session.startTime + event.atMillis
-                when (event.type) {
-                    RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ROAM ->
-                        apChanges += Event(event.type, at, event.fromBssid, event.toBssid, if (event.outageObserved == true) "outage observed" else null)
-                    else -> outages += Event(
-                        event.type, at, event.fromBssid, event.toBssid,
-                        when {
-                            event.open == true -> "not recovered"
-                            event.outageLowerBoundMs != null -> "${event.outageLowerBoundMs}–${event.outageUpperBoundMs ?: "?"} ms"
-                            else -> null
-                        }
-                    )
+            val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
+            session.roaming?.events.orEmpty().filter { it.fromSsid == ssid || it.toSsid == ssid || (it.fromSsid == null && it.toSsid == null) }
+                .forEachIndexed { index, event ->
+                    val at = session.startTime + event.atMillis
+                    val position = if (route.size >= 2 && event.atMillis in route.first().timestamp..route.last().timestamp) SurveyGuide.positionAt(route, event.atMillis) else null
+                    val detail = when {
+                        event.open == true -> "sin recuperar al terminar"
+                        event.outageObserved == false -> "sin fallos observados" + (event.outageUpperBoundMs?.let { " (resolución ≤ $it ms)" } ?: "")
+                        event.outageLowerBoundMs != null -> "corte de ${event.outageLowerBoundMs} a ${event.outageUpperBoundMs ?: "?"} ms"
+                        else -> "duración no estimable (hueco sin muestras)"
+                    }
+                    val built = Event(event.type, at, event.fromBssid, event.toBssid, detail,
+                        windowFrom = event.lastReachableAtMillis?.let { session.startTime + it },
+                        windowTo = event.firstReachableAtMillis?.let { session.startTime + it },
+                        fromSsid = event.fromSsid, toSsid = event.toSsid, x = position?.first, y = position?.second,
+                        incidentId = event.incidentId, seq = index, source = "roaming")
+                    when (event.type) {
+                        RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ROAM -> apChanges += built
+                        else -> outages += built
+                    }
                 }
-            }
         }
         val coverage = ssid?.let { SsidCoverage.points(survey.scanPoints, survey.plannedPoints, it, weakDbm, secondaryDbm, survey.activeRuns) }.orEmpty()
         val (marks, sources) = if (ssid != null) marks(ssid, survey, coverage, weakDbm) else emptyList<MapMark>() to null
@@ -375,108 +393,165 @@ object SurveyReport {
         return marks to sources
     }
 
+    /** Mejora 19: readable report for Operations, in Spanish, self-contained (no scripts). */
     fun html(model: Model): String = buildString {
         fun e(text: Any?): String = text?.toString().orEmpty()
             .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
-        fun at(ms: Long?) = ms?.let { Instant.ofEpochMilli(it).toString().substringBefore('.').replace('T', ' ') + " UTC" }.orEmpty()
-        append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-        append("<title>").append(e(model.title)).append(" – Wi-Fi survey report</title><style>")
+        append("<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+        append("<title>").append(e(model.title)).append(" – informe Wi-Fi</title><style>")
         append("body{font-family:system-ui,sans-serif;margin:16px;max-width:1000px;color:#1c1c1c;background:#fff}")
         append("table{border-collapse:collapse;width:100%;margin:8px 0 16px}th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;font-size:14px}")
-        append("th{background:#f0f0f0}.weak{color:#b35c00}.bad{color:#b00020}.ok{color:#1b6e20}.muted{color:#666;font-size:13px}")
+        append("th{background:#f0f0f0}.weak{color:#b35c00}.bad{color:#b00020}.ok{color:#1b6e20}.muted{color:#666;font-size:13px}.box{border:1px solid #ccc;padding:8px 12px;margin:8px 0;background:#fafafa}")
         append("</style></head><body>")
         append("<h1>").append(e(model.title)).append("</h1>")
-        append("<p class=\"muted\">Generated ").append(e(at(model.generatedAt))).append(". Service figures use ")
-        append(if (model.selection == RunSelection.ALL) "every run" else "the last valid value at each point, per SSID and series")
+        append("<p class=\"muted\">Generado el ").append(e(time(model.generatedAt))).append(". Perfil de señal «").append(e(model.profile))
+            .append("»: señal débil por debajo de ").append(model.weakDbm).append(" dBm. Cifras de servicio: ")
+        append(if (model.selection == RunSelection.ALL) "todas las ejecuciones" else "la última medición válida de cada punto, por SSID y serie")
         model.selectionDetail?.let { append(" (").append(e(it)).append(")") }
-        append(". Weak signal (profile ").append(e(model.profile)).append("): strongest AP of the SSID below ").append(model.weakDbm).append(" dBm in the latest valid scan. ")
-        append("Signal values are the strongest AP of each SSID seen by the passive scan, not necessarily the AP the phone was connected to during the tests. ")
-        append("Points imported from an ESX have no local measurement (their Ekahau data is kept untouched in the .esx).</p>")
+        append(".</p>")
+        append("<div class=\"box\"><b>Cómo leer este informe.</b> <b>Señal</b>: lo que el escaneo pasivo oyó de cada SSID (el AP más fuerte, no necesariamente al que estaba conectado el móvil). ")
+        append("<b>Degradación de red</b>: la conexión Wi-Fi sigue pero rinde menos (descarga, subida o latencia peores, pérdidas parciales). ")
+        append("<b>Caída hacia un servicio</b>: un destino concreto deja de responder (fallos o códigos de error en sus pruebas) aunque la red siga; mírese junto a los cambios de AP del mismo intervalo. ")
+        append("El iPerf3 privado mide la red hasta el servidor propio; Internet incluye además la salida a Internet; los servicios internos son las aplicaciones (DNS, ping, TCP, HTTP, scripts).</div>")
         model.floors.forEach { floor ->
-            append("<h2>Floor: ").append(e(floor.floorName)).append("</h2>")
-            append("<p class=\"muted\">").append(floor.runs).append(" active test runs; ").append(floor.remeasuredPoints).append(" points measured more than once.</p>")
-            if (floor.ssids.isEmpty()) append("<p>No local Wi-Fi scans on this floor.</p>")
-            (floor.ssids + listOfNotNull(floor.unknownAssociation)).forEach { section ->
-                if (section.ssid == null) {
-                    append("<h3>Unknown association</h3><p class=\"muted\">Results recorded before the SSID could be identified (e.g. the Wi-Fi was lost). Reasons are listed per run below.</p><ul>")
-                } else {
-                    append("<h3>SSID: ").append(e(section.ssid)).append("</h3><ul>")
+            append("<h2>Planta: ").append(e(floor.floorName)).append("</h2>")
+            append("<p class=\"muted\">").append(floor.runs).append(" ejecuciones de pruebas; ").append(floor.remeasuredPoints).append(" puntos medidos más de una vez.</p>")
+            if (floor.ssids.isEmpty()) append("<p>Sin escaneos Wi-Fi locales en esta planta.</p>")
+            (floor.ssids + listOfNotNull(floor.unknownAssociation)).forEach { section -> appendSection(this, model, floor, section, ::e) }
+        }
+        append("</body></html>")
+    }
+
+    private fun time(ms: Long?): String = ms?.let {
+        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.ROOT).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .format(java.util.Date(it)) + " UTC"
+    }.orEmpty()
+
+    private fun appendSection(out: StringBuilder, model: Model, floor: FloorSection, section: SsidSection, e: (Any?) -> String) = with(out) {
+        if (section.ssid == null) {
+            append("<h3>Asociación desconocida · ").append(e(floor.floorName)).append("</h3>")
+            append("<p class=\"muted\">Resultados registrados antes de identificar el SSID (p. ej. se perdió el Wi-Fi). No cuentan en ningún SSID; los motivos van por ejecución.</p>")
+        } else {
+            append("<h3>SSID «").append(e(section.ssid)).append("» · ").append(e(floor.floorName)).append("</h3>")
+            // Summary
+            append("<ul><li class=\"ok\">Buena señal: ").append(section.count(PointState.OK)).append(" puntos</li>")
+            append("<li class=\"weak\">Señal débil medida: ").append(section.count(PointState.WEAK)).append(" puntos</li>")
+            append("<li class=\"bad\">SSID no detectado en un escaneo válido: ").append(section.count(PointState.SSID_NOT_DETECTED)).append(" puntos</li>")
+            append("<li>Sin medición local: ").append(section.count(PointState.NOT_MEASURED)).append(" puntos</li>")
+            append("<li>Segundo AP del mismo SSID por encima del umbral secundario (indicio de redundancia): ").append(section.redundant).append(" puntos</li>")
+            append("<li>Cambios de AP: ").append(section.apChanges.size).append(" · pérdidas de alcance: ").append(section.outages.size).append("</li></ul>")
+            section.sources?.let { src ->
+                append("<p class=\"muted\">Fuentes: ").append(src.stopPoints).append(" puntos Stop-and-Go con RF local; ")
+                    .append(src.continuousPlaced).append(" escaneos continuos en el plano (posición aproximada)")
+                if (src.continuousWithoutGeometry > 0) append(", ").append(src.continuousWithoutGeometry).append(" sin geometría de ruta suficiente (no se dibujan)")
+                append("; ").append(src.imported).append(" puntos importados sin RF local; ").append(src.planned).append(" puntos planificados.")
+                if (src.continuousPlaced + src.continuousWithoutGeometry > 0) {
+                    append(" Continuo: ").append(src.continuousWeak).append(" débiles (por debajo de ").append(model.weakDbm).append(" dBm), ")
+                        .append(src.continuousNotDetected).append(" sin el SSID")
+                    src.continuousWorst?.let { append(", peor ").append(it).append(" dBm") }
+                    append(".")
                 }
-                append("<li class=\"ok\">Good signal: ").append(section.count(PointState.OK)).append(" points</li>")
-                append("<li class=\"weak\">Weak signal measured: ").append(section.count(PointState.WEAK)).append(" points</li>")
-                append("<li class=\"bad\">SSID not detected in a valid scan: ").append(section.count(PointState.SSID_NOT_DETECTED)).append(" points</li>")
-                append("<li>No local measurement: ").append(section.count(PointState.NOT_MEASURED)).append(" points</li>")
-                append("<li>Second AP of the same SSID above the secondary threshold (redundancy hint): ").append(section.redundant).append(" points</li>")
-                append("<li>AP changes: ").append(section.apChanges.size).append("; outages: ").append(section.outages.size).append("</li></ul>")
-                section.sources?.let { src ->
-                    append("<p class=\"muted\">Sources: ").append(src.stopPoints).append(" Stop-and-Go points with local RF; ")
-                        .append(src.continuousPlaced).append(" Continuous scans on the plan (approximate position)")
-                    if (src.continuousWithoutGeometry > 0) append(", ").append(src.continuousWithoutGeometry).append(" without enough route geometry (not drawn)")
-                    append("; ").append(src.imported).append(" imported points without local RF; ").append(src.planned).append(" planned points.")
-                    if (src.continuousPlaced + src.continuousWithoutGeometry > 0) {
-                        append(" Continuous: ").append(src.continuousWeak).append(" weak (below ").append(model.weakDbm).append(" dBm), ")
-                            .append(src.continuousNotDetected).append(" SSID not detected")
-                        src.continuousWorst?.let { append(", worst ").append(it).append(" dBm") }
-                        append(".")
-                    }
-                    append("</p>")
+                append("</p>")
+            }
+            floor.image?.let { appendMap(this, it, section, model.weakDbm, e) }
+            // Worst points first
+            val attention = section.points.filter { it.state != PointState.OK }
+                .sortedWith(compareBy({ stateRank(it.state) }, { it.strongestRssi ?: Int.MIN_VALUE }))
+            if (attention.isNotEmpty()) {
+                append("<h4>Peores puntos</h4><table><tr><th>Punto</th><th>Estado</th><th>AP más fuerte (escaneo)</th><th>dBm</th><th>Segundo AP</th><th>AP asociado (pruebas)</th><th>x, y (px)</th></tr>")
+                attention.forEach { p ->
+                    append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(stateLabel(p.state)))
+                        .append(if (p.state == PointState.WEAK) " (umbral ${model.weakDbm} dBm)" else "").append("</td><td>")
+                        .append(e(p.strongestBssid ?: "—")).append("</td><td>").append(e(p.strongestRssi ?: "—")).append("</td><td>")
+                        .append(e(p.secondBssid?.let { "$it ${p.secondRssi} dBm" } ?: "ninguno")).append("</td><td>")
+                        .append(e(p.associatedBssid?.let { "$it ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} cambios de AP" else "" } ?: "—"))
+                        .append("</td><td>").append(e("%.0f, %.0f".format(java.util.Locale.ROOT, p.x, p.y))).append("</td></tr>")
                 }
-                floor.image?.let { image -> if (section.ssid != null) appendMap(this, image, section, model.weakDbm, ::e) }
-                val attention = section.points.filter { it.state != PointState.OK }.sortedBy { it.state }
-                if (attention.isNotEmpty()) {
-                    append("<table><tr><th>Point</th><th>State</th><th>Strongest AP (scan)</th><th>dBm</th><th>Second AP</th><th>Associated AP (tests)</th><th>x, y (px)</th></tr>")
-                    attention.forEach { p ->
-                        append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(stateLabel(p.state))).append("</td><td>")
-                            .append(e(p.strongestBssid)).append("</td><td>").append(e(p.strongestRssi)).append("</td><td>")
-                            .append(e(p.secondBssid?.let { "$it ${p.secondRssi} dBm" } ?: "none")).append("</td><td>")
-                            .append(e(p.associatedBssid?.let { "$it ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} AP changes" else "" } ?: "—")).append("</td><td>")
-                            .append(e("%.0f, %.0f".format(java.util.Locale.ROOT, p.x, p.y))).append("</td></tr>")
-                    }
-                    append("</table>")
+                append("</table>")
+            }
+        }
+        // Services by category
+        if (section.metrics.isNotEmpty()) {
+            append("<p class=\"muted\">Denominadores: «Muestras» son puntos con un valor válido de la serie (el último válido de cada punto salvo que se elijan todas las ejecuciones); «Resultados» cuenta los intentos de la serie en la selección (uno por punto: el último). Nunca se mezclan series, SSID ni direcciones no configuradas.</p>")
+            listOf(TargetCategory.PRIVATE_IPERF, TargetCategory.INTERNET, TargetCategory.INTERNAL).forEach { category ->
+                val list = section.metrics.filter { (it.category.takeIf { c -> c in setOf(TargetCategory.PRIVATE_IPERF, TargetCategory.INTERNET) } ?: TargetCategory.INTERNAL) == category }
+                if (list.isEmpty()) return@forEach
+                append("<h4>").append(categoryLabel(category)).append("</h4>")
+                append("<table><tr><th>Destino (alias)</th><th>Medida</th><th>Mediana</th><th>Mín–máx</th><th>Unidad</th><th>Método</th><th>Muestras</th><th>Fallos</th><th>Resultados</th></tr>")
+                list.sortedWith(compareBy({ it.alias }, { it.measure })).forEach { m ->
+                    append("<tr><td>").append(e(m.alias)).append("<div class=\"muted\">").append(e(m.seriesLabel))
+                        .append(if (m.comparable) "" else " · no comparable (guardado antes de existir las series)").append("</div></td><td>")
+                        .append(e(measureLabel(m.measure))).append("</td><td>").append(e(m.median ?: "—")).append("</td><td>")
+                        .append(if (m.min != null) e("${m.min}–${m.max}") else "—").append("</td><td>").append(e(m.unit)).append("</td><td>")
+                        .append(e(m.method)).append("</td><td>").append(m.samples).append("</td><td>").append(m.failures).append("</td><td>")
+                        .append(e(Outcome.ORDER.filter { it in m.outcomes }.joinToString(", ") { "${outcomeLabel(it)} ${m.outcomes.getValue(it)}" })).append("</td></tr>")
                 }
-                if (section.metrics.isNotEmpty()) {
-                    append("<p class=\"muted\">Denominators: «Samples» are points with a valid value of the series (the last valid one per point unless all runs are selected); «Outcomes» count the attempts of the series in the selection (one per point: its last attempt), never mixing series, SSIDs or not-configured directions.</p>")
-                    append("<table><tr><th>Service</th><th>Type</th><th>Measure</th><th>Median</th><th>Min–max</th><th>Unit</th><th>Method</th><th>Samples</th><th>Failures</th><th>Outcomes</th></tr>")
-                    section.metrics.sortedWith(compareBy({ it.category }, { it.alias })).forEach { m ->
-                        append("<tr><td>").append(e(m.alias)).append("<div class=\"muted\">").append(e(m.seriesLabel))
-                            .append(if (m.comparable) "" else " · not comparable (saved before series existed)").append("</div></td><td>")
-                            .append(e(categoryLabel(m.category))).append("</td><td>")
-                            .append(e(m.measure)).append("</td><td>").append(e(m.median)).append("</td><td>")
-                            .append(if (m.min != null) e("${m.min}–${m.max}") else "").append("</td><td>").append(e(m.unit)).append("</td><td>")
-                            .append(e(m.method)).append("</td><td>").append(m.samples).append("</td><td>").append(m.failures).append("</td><td>")
-                            .append(e(Outcome.ORDER.filter { it in m.outcomes }.joinToString(", ") { "$it ${m.outcomes.getValue(it)}" })).append("</td></tr>")
-                    }
-                    append("</table>")
-                }
-                section.metrics.filter { it.points.isNotEmpty() }.forEach { m ->
-                    append("<details><summary>").append(e(m.alias)).append(" · ").append(e(m.measure)).append(" · per point</summary>")
-                    append("<table><tr><th>Point</th><th>Last attempt</th><th>Last valid</th></tr>")
+                append("</table>")
+                list.filter { it.points.isNotEmpty() }.forEach { m ->
+                    append("<details><summary>").append(e(m.alias)).append(" · ").append(e(measureLabel(m.measure))).append(" · por punto</summary>")
+                    append("<table><tr><th>Punto</th><th>Último intento</th><th>Última válida</th></tr>")
                     m.points.forEach { p ->
-                        fun fact(f: Fact?) = f?.let { "${at(it.at)} · ${it.status}${it.code?.let { c -> " ($c)" } ?: ""}${it.value?.let { v -> " · $v ${m.unit}" } ?: ""} · run ${it.runId}" } ?: "—"
+                        fun fact(f: Fact?) = f?.let { "${time(it.at)} · ${it.status}${it.code?.let { c -> " ($c)" } ?: ""}${it.value?.let { v -> " · $v ${m.unit}" } ?: ""} · run ${it.runId}" } ?: "—"
                         append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(fact(p.lastAttempt))).append("</td><td>").append(e(fact(p.lastValid))).append("</td></tr>")
                     }
                     append("</table></details>")
                 }
-                if (section.runs.isNotEmpty()) {
-                    append("<details><summary>Runs on this SSID (").append(section.runs.size).append(")</summary><table><tr><th>Run</th><th>Point</th><th>Started</th><th>Status</th><th>Values</th></tr>")
-                    section.runs.forEach { r ->
-                        append("<tr><td>").append(e(r.runId)).append("</td><td>").append(e(r.pointLabel)).append("</td><td>").append(e(at(r.at)))
-                            .append("</td><td>").append(e(r.status)).append(r.reason?.let { " (" + e(it) + ")" } ?: "").append("</td><td>")
-                            .append(if (r.withValues) "yes" else "none").append("</td></tr>")
-                    }
-                    append("</table></details>")
-                }
-                (section.apChanges.map { "AP change" to it } + section.outages.map { "Outage" to it }).takeIf { it.isNotEmpty() }?.let { events ->
-                    append("<table><tr><th>Event</th><th>Kind</th><th>When</th><th>From</th><th>To</th><th>Detail</th></tr>")
-                    events.sortedBy { it.second.at }.forEach { (title, ev) ->
-                        append("<tr><td>").append(title).append("</td><td>").append(e(ev.kind)).append("</td><td>").append(e(at(ev.at)))
-                            .append("</td><td>").append(e(ev.from)).append("</td><td>").append(e(ev.to)).append("</td><td>").append(e(ev.detail)).append("</td></tr>")
-                    }
-                    append("</table>")
-                }
             }
         }
-        append("</body></html>")
+        // Roaming events: milliseconds, observed window, association, approximate position
+        val events = (section.apChanges.map { "Cambio de AP" to it } + section.outages.map { "Pérdida de alcance" to it })
+            .sortedWith(compareBy({ it.second.at ?: Long.MAX_VALUE }, { it.second.source }, { it.second.seq }))
+        if (events.isNotEmpty()) {
+            append("<h4>Roaming y cortes</h4><table><tr><th>Evento</th><th>Hora (UTC, ms)</th><th>Ventana observada</th><th>De</th><th>A</th><th>Detalle</th><th>Posición</th></tr>")
+            events.forEach { (title, ev) ->
+                append("<tr><td>").append(title).append("<div class=\"muted\">").append(e(ev.kind)).append(ev.incidentId?.let { " · incidente $it" } ?: "").append("</div></td><td>")
+                    .append(e(time(ev.at))).append("</td><td>")
+                    .append(if (ev.windowFrom != null || ev.windowTo != null) e("${time(ev.windowFrom).ifEmpty { "?" }} → ${time(ev.windowTo).ifEmpty { "sin recuperar" }}") else "—")
+                    .append("</td><td>").append(e(listOfNotNull(ev.fromSsid, ev.from).joinToString(" · ").ifEmpty { "—" }))
+                    .append("</td><td>").append(e(listOfNotNull(ev.toSsid, ev.to).joinToString(" · ").ifEmpty { "—" }))
+                    .append("</td><td>").append(e(ev.detail ?: "—")).append("</td><td>")
+                    .append(if (ev.x != null && ev.y != null) e("%.0f, %.0f px (aprox.)".format(java.util.Locale.ROOT, ev.x, ev.y)) else "—").append("</td></tr>")
+            }
+            append("</table>")
+        }
+        if (section.runs.isNotEmpty()) {
+            append("<details><summary>Ejecuciones en ").append(e(section.ssid ?: "asociación desconocida")).append(" (").append(section.runs.size)
+                .append(")</summary><table><tr><th>Ejecución</th><th>Punto</th><th>Inicio</th><th>Estado</th><th>Valores</th></tr>")
+            section.runs.forEach { r ->
+                append("<tr><td>").append(e(r.runId)).append("</td><td>").append(e(r.pointLabel)).append("</td><td>").append(e(time(r.at)))
+                    .append("</td><td>").append(e(r.status)).append(r.reason?.let { " (" + e(it) + ")" } ?: "").append("</td><td>")
+                    .append(if (r.withValues) "sí" else "ninguno").append("</td></tr>")
+            }
+            append("</table></details>")
+        }
+    }
+
+    private fun stateRank(state: String) = when (state) {
+        PointState.SSID_NOT_DETECTED -> 0
+        PointState.WEAK -> 1
+        PointState.NOT_MEASURED -> 2
+        else -> 3
+    }
+
+    private fun measureLabel(measure: String) = when (measure) {
+        "download" -> "descarga"
+        "upload" -> "subida"
+        "latency" -> "latencia"
+        "dns lookup" -> "resolución DNS"
+        "round trip" -> "ida y vuelta"
+        "tcp connect" -> "conexión TCP"
+        "http request" -> "petición HTTP"
+        else -> measure
+    }
+
+    private fun outcomeLabel(outcome: String) = when (outcome) {
+        Outcome.VALID -> "válidas"
+        Outcome.PARTIAL -> "parciales"
+        Outcome.FAILED -> "fallidas"
+        Outcome.SKIPPED -> "omitidas"
+        Outcome.CANCELLED -> "canceladas"
+        Outcome.INTERRUPTED -> "interrumpidas"
+        else -> "no configuradas"
     }
 
     private fun stateColor(state: String) = when (state) {
@@ -492,13 +567,13 @@ object SurveyReport {
         val h = image.originalHeight
         val r = maxOf(w, h) / 110f
         out.append("<figure><svg viewBox=\"0 0 $w $h\" style=\"width:100%;height:auto;border:1px solid #ccc\" role=\"img\" aria-label=\"")
-            .append(e(section.ssid)).append(" map\"><image href=\"").append(image.dataUri).append("\" width=\"$w\" height=\"$h\"/>")
+            .append(e(section.ssid)).append(" plano\"><image href=\"").append(image.dataUri).append("\" width=\"$w\" height=\"$h\"/>")
         section.marks.sortedBy { if (it.source == MapMark.CONTINUOUS) 0 else 1 }.forEach { m ->
             val color = stateColor(m.state)
             val title = buildString {
                 append(m.label ?: m.source).append(": ").append(stateLabel(m.state))
-                m.rssi?.let { append(" · ").append(it).append(" dBm (threshold ").append(weakDbm).append(")") }
-                if (m.approximate) append(" · approximate position")
+                m.rssi?.let { append(" · ").append(it).append(" dBm (umbral ").append(weakDbm).append(")") }
+                if (m.approximate) append(" · posición aproximada")
             }
             when {
                 m.source == MapMark.CONTINUOUS -> out.append("<circle cx=\"${m.x}\" cy=\"${m.y}\" r=\"${r * 0.45f}\" fill=\"$color\" fill-opacity=\"0.75\" stroke=\"#fff\" stroke-dasharray=\"2 2\"><title>")
@@ -511,20 +586,20 @@ object SurveyReport {
                 }
             }
         }
-        out.append("</svg><figcaption class=\"muted\">Green: good signal · orange: weak (below ").append(weakDbm)
-            .append(" dBm, value shown) · red: SSID not detected in a valid scan · dashed ring: no local measurement · small dashed dots: Continuous scans, approximate position. Areas without marks have no sample.</figcaption></figure>")
+        out.append("</svg><figcaption class=\"muted\">Verde: buena señal · naranja: débil (por debajo de ").append(weakDbm)
+            .append(" dBm, con su valor) · rojo: SSID no detectado en un escaneo válido · anillo discontinuo: sin medición local · puntos pequeños: escaneos continuos, posición aproximada. Las zonas sin marca no tienen muestra.</figcaption></figure>")
     }
 
     fun stateLabel(state: String) = when (state) {
-        PointState.WEAK -> "Weak signal measured"
-        PointState.SSID_NOT_DETECTED -> "SSID not detected in a valid scan"
-        PointState.NOT_MEASURED -> "No local measurement"
-        else -> "Good signal"
+        PointState.WEAK -> "Señal débil medida"
+        PointState.SSID_NOT_DETECTED -> "SSID no detectado en un escaneo válido"
+        PointState.NOT_MEASURED -> "Sin medición local"
+        else -> "Buena señal"
     }
 
     private fun categoryLabel(category: String) = when (category) {
-        TargetCategory.PRIVATE_IPERF -> "Private iPerf3 server"
+        TargetCategory.PRIVATE_IPERF -> "iPerf3 privado (red hasta el servidor propio)"
         TargetCategory.INTERNET -> "Internet"
-        else -> "Internal service"
+        else -> "Servicios internos"
     }
 }

@@ -52,9 +52,9 @@ class OutcomesTest {
         assertEquals(mapOf(SurveyReport.Outcome.FAILED to 1), unknown.metrics.single { it.measure == "download" }.outcomes)
 
         val html = SurveyReport.html(SurveyReport.build(snapshot, 0L, "Ops"))
-        assertTrue("Unknown association" in html)
-        assertTrue("not_configured 1" in html && "cancelled 1" in html && "partial 1" in html)
-        assertTrue("Denominators" in html)
+        assertTrue("Asociación desconocida" in html)
+        assertTrue("no configuradas 1" in html && "canceladas 1" in html && "parciales 1" in html)
+        assertTrue("Denominadores" in html)
 
         // JSON: the script run is partial with a pending step; the sheet shows the codes.
         val scriptRow = PerformanceExport.build(null, "Site.esx", 0L, snapshot).getAsJsonArray("scriptRuns").single().asJsonObject

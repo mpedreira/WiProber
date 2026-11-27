@@ -56,7 +56,7 @@ class SurveyReportTest {
     fun reportsEachFloorAndSsidSeparately() {
         val model = SurveyReport.build(snapshot, 0L, chosenSsid = "Operativa")
         val groundOperativa = model.floors[0].ssids.single { it.ssid == "Operativa" }
-        assertEquals(listOf("Operativa"), model.floors[0].ssids.map { it.ssid })
+        assertEquals(listOf("Operativa", "Invitados"), model.floors[0].ssids.map { it.ssid })
         assertEquals(1, groundOperativa.count(PointState.WEAK)) // a: latest scan -80
         assertEquals(1, groundOperativa.count(PointState.SSID_NOT_DETECTED)) // b: only the guest SSID
         assertEquals(1, groundOperativa.count(PointState.NOT_MEASURED)) // the planned point
@@ -64,12 +64,12 @@ class SurveyReportTest {
         assertEquals(1, model.floors[0].remeasuredPoints) // "a": two scans and two runs, one physical point
 
         // First floor: the chosen SSID was never seen there.
-        assertEquals(PointState.SSID_NOT_DETECTED, model.floors[1].ssids.single().points.single().state)
+        assertEquals(PointState.SSID_NOT_DETECTED, model.floors[1].ssids.single { it.ssid == "Operativa" }.points.single().state)
     }
 
     @Test
     fun servicesAreSeparatedByCategoryAndAliasWithUnitsMethodsSamplesAndFailures() {
-        val latest = SurveyReport.build(snapshot, 0L, "Operativa").floors[0].ssids.single()
+        val latest = SurveyReport.build(snapshot, 0L, "Operativa").floors[0].ssids.single { it.ssid == "Operativa" }
         val iperfDown = latest.metrics.single { it.category == TargetCategory.PRIVATE_IPERF && it.measure == "download" }
         // Last valid value per point within the SSID: r1 (300) for "a" — its last attempt r2 failed — and r3 (100) for "b".
         assertEquals(2, iperfDown.samples)
@@ -88,7 +88,7 @@ class SurveyReportTest {
         assertEquals(1, dnsMetric.failures) // …and the failed last attempt (r2) is counted
         assertEquals(1, latest.apChanges.size)
 
-        val all = SurveyReport.build(snapshot, 0L, "Operativa", SurveyReport.RunSelection.ALL).floors[0].ssids.single()
+        val all = SurveyReport.build(snapshot, 0L, "Operativa", SurveyReport.RunSelection.ALL).floors[0].ssids.single { it.ssid == "Operativa" }
         val allDown = all.metrics.single { it.category == TargetCategory.PRIVATE_IPERF && it.measure == "download" }
         assertEquals(2, allDown.samples)
         assertEquals(200.0, allDown.median) // 100 and 300
@@ -102,11 +102,11 @@ class SurveyReportTest {
         assertTrue("Warehouse &amp; &lt;Site&gt;" in html)
         assertTrue("Core &lt;iperf&gt;" in html)
         assertFalse("<script" in html)
-        assertTrue("Weak signal measured" in html)
-        assertTrue("SSID not detected in a valid scan" in html)
-        assertTrue("No local measurement" in html)
-        assertTrue("Private iPerf3 server" in html && "Internet" in html && "Internal service" in html)
+        assertTrue("Señal débil medida" in html)
+        assertTrue("SSID no detectado en un escaneo válido" in html)
+        assertTrue("Sin medición local" in html)
+        assertTrue("iPerf3 privado" in html && "Internet" in html && "Servicios internos" in html)
         assertTrue("Dock 7" in html)
-        assertTrue("Floor: Ground" in html && "Floor: First" in html)
+        assertTrue("Planta: Ground" in html && "Planta: First" in html)
     }
 }

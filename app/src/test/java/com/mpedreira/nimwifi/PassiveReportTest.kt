@@ -31,11 +31,11 @@ class PassiveReportTest {
     fun bothFloorsGetTheirMapAndFiguresWithoutActiveTests() {
         val model = SurveyReport.build(snapshot, 0L, "Ops", weakDbm = -67,
             planImages = mapOf("11111111-1111-4111-8111-111111111111" to image, "33333333-3333-4333-8333-333333333333" to image))
-        val ground = model.floors[0].ssids.single()
+        val ground = model.floors[0].ssids.single { it.ssid == "Ops" }
         assertEquals(listOf(MapMarkView(MapMark.STOP, PointState.OK), MapMarkView(MapMark.STOP, PointState.SSID_NOT_DETECTED),
             MapMarkView(MapMark.PLANNED, PointState.NOT_MEASURED)), ground.marks.map { MapMarkView(it.source, it.state) })
 
-        val first = model.floors[1].ssids.single()
+        val first = model.floors[1].ssids.single { it.ssid == "Ops" }
         val sources = first.sources!!
         assertEquals(1, sources.continuousPlaced)
         assertEquals(1, sources.continuousWithoutGeometry)
@@ -48,11 +48,12 @@ class PassiveReportTest {
         assertEquals(500f, mark.x)
 
         val html = SurveyReport.html(model)
-        assertEquals(2, Regex("<svg viewBox").findAll(html).count())
-        assertTrue("-84 dBm (threshold -67)" in html)
-        assertTrue("approximate position" in html)
-        assertTrue("without enough route geometry (not drawn)" in html)
-        assertTrue("Dock 4: No local measurement" in html)
+        // One plan per floor and SSID: Ops on both floors and the guest SSID heard on the ground floor.
+        assertEquals(3, Regex("<svg viewBox").findAll(html).count())
+        assertTrue("-84 dBm (umbral -67)" in html)
+        assertTrue("posición aproximada" in html)
+        assertTrue("sin geometría de ruta suficiente (no se dibujan)" in html)
+        assertTrue("Dock 4: Sin medición local" in html)
         // The bundle also exists without runs.
         assertTrue(PerformanceExport.build(null, "Site.esx", 0L, snapshot).getAsJsonArray("activeRuns").size() == 0)
     }
