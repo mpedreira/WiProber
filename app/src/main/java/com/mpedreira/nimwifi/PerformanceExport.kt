@@ -334,6 +334,8 @@ object PerformanceExport {
         addProperty("totalMs", test.totalMs)
         addProperty("status", test.status)
         addProperty("redirectLocation", test.redirectLocation)
+        addProperty("seriesId", Series.networkTest(test).id)
+        addProperty("seriesComparable", Series.networkTest(test).comparable)
         addProperty("bytes", test.bytes)
         addProperty("sent", test.sent)
         addProperty("received", test.received)
@@ -357,6 +359,9 @@ object PerformanceExport {
         val ok = run.steps.count { it.ok }
         addProperty("script", run.name)
         addProperty("scriptAlias", run.alias ?: run.name)
+        addProperty("seriesId", Series.script(run).id)
+        addProperty("seriesComparable", Series.script(run).comparable)
+        addProperty("definitionHash", run.definitionHash)
         addProperty(
             "status",
             when {
@@ -424,6 +429,11 @@ object PerformanceExport {
         addProperty("resolvedAddress", test.resolvedAddress)
         addProperty("downloadEndpoint", test.downloadEndpoint)
         addProperty("uploadEndpoint", test.uploadEndpoint)
+        // Mejora 9: stable series of each direction (join and compare by these, not by alias).
+        addProperty("seriesDownload", Series.throughput(test, Series.DOWNLOAD).id)
+        addProperty("seriesUpload", Series.throughput(test, Series.UPLOAD).id)
+        addProperty("seriesLatency", Series.throughput(test, Series.LATENCY).id)
+        addProperty("seriesComparable", Series.throughput(test, Series.DOWNLOAD).comparable)
         addProperty("downloadEndpointId", test.downloadEndpointId)
         addProperty("uploadEndpointId", test.uploadEndpointId)
         addProperty("downloadPrecheckAddress", test.downloadPrecheckAddress)

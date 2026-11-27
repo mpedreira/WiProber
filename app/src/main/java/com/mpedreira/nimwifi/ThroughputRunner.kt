@@ -201,6 +201,7 @@ class ThroughputRunner(
         val before = network?.association()
         val base = ScriptRun(
             name = script.name, measuredAt = clock.now(), alias = script.displayAlias, stepsTotal = script.steps.size,
+            definitionHash = Series.definitionHash(script),
             ssid = before?.ssid, bssidStart = before?.bssid, rssi = before?.rssi
         )
         val runner = scriptRunner

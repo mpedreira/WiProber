@@ -162,6 +162,10 @@ Every test of a run uses one Wi-Fi network (`networkId`): names resolve with its
 
 Several reasons are separated by `; `.
 
+### Series (mejora 9)
+
+`alias`/`target` is only the visible name. Results are combined and compared by **series**: `seriesDownload`, `seriesUpload`, `seriesLatency` (throughput rows), `seriesId` (network tests and script runs). A series fixes the kind of test, direction, endpoint (`scheme://host:port`), method and, for scripts, the definition (`definitionHash`): the same alias pointing at another host, port or method is another series, and ICMP and TCP pings never mix. Results saved before series existed get a `legacy:` identity and `seriesComparable: false`. Join across exports by `pointId` + series, not by alias.
+
 ### Endpoints per direction (mejora 14)
 
 Each direction is identified by `downloadEndpointId` / `uploadEndpointId` = `scheme://host:effective-port` (the same host on another port is another endpoint). When the upload endpoint differs it gets its **own pre-check** and is measured even if the download pre-check failed; `downloadPrecheckAddress` / `uploadPrecheckAddress` are the IPs the pre-checks connected to (`uploadPrecheckErrorCode` when it failed). The IP the HTTP transport itself used is not observable without changing the destination or breaking TLS, so it is not reported. Times and statuses are per direction.

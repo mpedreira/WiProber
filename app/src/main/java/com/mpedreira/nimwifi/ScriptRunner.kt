@@ -22,6 +22,8 @@ data class ScriptRun(
     val name: String,
     val measuredAt: Long,
     val alias: String? = null,
+    /** Mejora 9: digest of the script definition, so a changed script is another series. */
+    val definitionHash: String? = null,
     /** Steps the script defines; with [steps] it tells how far a run got (0 when skipped). */
     val stepsTotal: Int? = null,
     /** Why no step ran, or why the run stopped early (skipped without Wi-Fi, cancelled). */

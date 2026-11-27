@@ -23,7 +23,11 @@ object SurveyReport {
         val failures: Int,
         val median: Double?,
         val min: Double?,
-        val max: Double?
+        val max: Double?,
+        /** Mejora 9: the series the figures belong to; only results of one series are combined. */
+        val seriesId: String = "",
+        val seriesLabel: String = "",
+        val comparable: Boolean = true
     )
 
     data class Event(val kind: String, val at: Long?, val from: String?, val to: String?, val detail: String?)
@@ -93,27 +97,38 @@ object SurveyReport {
     private fun section(ssid: String, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int): SsidSection {
         val results = runs.mapNotNull { it.results }
         val metrics = mutableListOf<Metric>()
-        fun metric(category: String, alias: String, measure: String, unit: String, method: String?, values: List<Double?>, failures: Int) {
+        fun metric(category: String, alias: String, measure: String, unit: String, method: String?, values: List<Double?>, failures: Int, series: Series) {
             val ok = values.filterNotNull().sorted()
             if (ok.isEmpty() && failures == 0) return
             metrics += Metric(
                 category, alias, measure, unit, method, ok.size, failures,
                 ok.takeIf { it.isNotEmpty() }?.let { round1(if (it.size % 2 == 1) it[it.size / 2] else (it[it.size / 2 - 1] + it[it.size / 2]) / 2) },
-                ok.firstOrNull(), ok.lastOrNull()
+                ok.firstOrNull(), ok.lastOrNull(), series.id, series.label, series.comparable
             )
         }
-        results.flatMap { it.tests }.filter { it.ssid == ssid }
-            .groupBy { (it.category ?: if (it.method == ThroughputTestResult.METHOD_IPERF3_TCP) TargetCategory.PRIVATE_IPERF else TargetCategory.INTERNET) to it.target }
-            .forEach { (key, tests) ->
-                val (category, alias) = key
-                metric(category, alias, "download", "Mbit/s", tests.first().method, tests.map { it.downMbps }, tests.count { it.downMbps == null && (it.downloadErrorCode != null || it.error != null) })
-                metric(category, alias, "upload", "Mbit/s", tests.first().method, tests.map { it.upMbps }, tests.count { it.upMbps == null && (it.uploadErrorCode != null || it.error != null) })
-                metric(category, alias, "latency", "ms", tests.first().latencyMethod ?: "tcp-connect", tests.map { it.latencyMs }, tests.count { it.latencyMs == null && (it.latencyErrorCode != null || it.error != null) })
+        fun categoryOf(t: ThroughputTestResult) = t.category ?: if (t.method == ThroughputTestResult.METHOD_IPERF3_TCP) TargetCategory.PRIVATE_IPERF else TargetCategory.INTERNET
+        val throughput = results.flatMap { it.tests }.filter { it.ssid == ssid }
+        // Grouped by series, never by alias: the same alias on another endpoint, port, direction
+        // or method is another series.
+        listOf(Series.DOWNLOAD, Series.UPLOAD, Series.LATENCY).forEach { direction ->
+            throughput.groupBy { Series.throughput(it, direction).id }.forEach { (_, tests) ->
+                val first = tests.first()
+                val series = Series.throughput(first, direction)
+                when (direction) {
+                    Series.DOWNLOAD -> metric(categoryOf(first), first.target, "download", "Mbit/s", first.method, tests.map { it.downMbps },
+                        tests.count { it.downMbps == null && (it.downloadErrorCode != null || it.error != null) }, series)
+                    Series.UPLOAD -> metric(categoryOf(first), first.target, "upload", "Mbit/s", first.method, tests.map { it.upMbps },
+                        tests.count { it.upMbps == null && (it.uploadErrorCode != null || it.error != null) }, series)
+                    else -> metric(categoryOf(first), first.target, "latency", "ms", first.latencyMethod ?: "tcp-connect", tests.map { it.latencyMs },
+                        tests.count { it.latencyMs == null && (it.latencyErrorCode != null || it.error != null) }, series)
+                }
             }
+        }
         results.flatMap { it.networkTests.orEmpty() }.filter { it.ssid == ssid }
-            .groupBy { (it.category ?: TargetCategory.INTERNAL) to (it.alias ?: it.name) }
-            .forEach { (key, tests) ->
-                val (category, alias) = key
+            .groupBy { Series.networkTest(it).id }
+            .forEach { (_, tests) ->
+                val category = tests.first().category ?: TargetCategory.INTERNAL
+                val alias = tests.first().alias ?: tests.first().name
                 val type = tests.first().type
                 val (measure, values) = when (type) {
                     NetworkTest.DNS -> "dns lookup" to tests.map { it.dnsMs }
@@ -121,15 +136,17 @@ object SurveyReport {
                     NetworkTest.TCP -> "tcp connect" to tests.map { it.connectMs }
                     else -> "http request" to tests.map { it.totalMs }
                 }
-                metric(category, alias, measure, "ms", tests.firstNotNullOfOrNull { it.method } ?: type, values.zip(tests) { v, t -> v.takeIf { t.ok } }, tests.count { !it.ok })
+                metric(category, alias, measure, "ms", tests.firstNotNullOfOrNull { it.method } ?: type, values.zip(tests) { v, t -> v.takeIf { t.ok } },
+                    tests.count { !it.ok }, Series.networkTest(tests.first()))
             }
         results.flatMap { it.scripts.orEmpty() }.filter { it.ssid == ssid }
-            .groupBy { it.alias ?: it.name }
-            .forEach { (alias, scriptRuns) ->
+            .groupBy { Series.script(it).id }
+            .forEach { (_, scriptRuns) ->
                 metric(
-                    TargetCategory.INTERNAL, alias, "script", "ms", "http-script",
+                    TargetCategory.INTERNAL, scriptRuns.first().alias ?: scriptRuns.first().name, "script", "ms", "http-script",
                     scriptRuns.map { run -> run.steps.takeIf { s -> s.isNotEmpty() && s.all { it.ok } }?.sumOf { it.totalMs ?: 0.0 } },
-                    scriptRuns.count { run -> run.steps.isEmpty() || run.steps.any { !it.ok } }
+                    scriptRuns.count { run -> run.steps.isEmpty() || run.steps.any { !it.ok } },
+                    Series.script(scriptRuns.first())
                 )
             }
 
@@ -197,7 +214,9 @@ object SurveyReport {
                 if (section.metrics.isNotEmpty()) {
                     append("<table><tr><th>Service</th><th>Type</th><th>Measure</th><th>Median</th><th>Min–max</th><th>Unit</th><th>Method</th><th>Samples</th><th>Failures</th></tr>")
                     section.metrics.sortedWith(compareBy({ it.category }, { it.alias })).forEach { m ->
-                        append("<tr><td>").append(e(m.alias)).append("</td><td>").append(e(categoryLabel(m.category))).append("</td><td>")
+                        append("<tr><td>").append(e(m.alias)).append("<div class=\"muted\">").append(e(m.seriesLabel))
+                            .append(if (m.comparable) "" else " · not comparable (saved before series existed)").append("</div></td><td>")
+                            .append(e(categoryLabel(m.category))).append("</td><td>")
                             .append(e(m.measure)).append("</td><td>").append(e(m.median)).append("</td><td>")
                             .append(if (m.min != null) e("${m.min}–${m.max}") else "").append("</td><td>").append(e(m.unit)).append("</td><td>")
                             .append(e(m.method)).append("</td><td>").append(m.samples).append("</td><td>").append(m.failures).append("</td></tr>")
