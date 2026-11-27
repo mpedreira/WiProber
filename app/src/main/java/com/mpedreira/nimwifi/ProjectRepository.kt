@@ -153,6 +153,37 @@ class ProjectRepository(
         Unit
     }
 
+    /**
+     * Mejora 5: writes a restorable copy of the whole project ([ProjectBackup]) to [output].
+     * Taken under the storage lock, so it is one consistent revision.
+     */
+    fun backupProject(projectId: String, appVersion: String, output: java.io.OutputStream): ProjectBackup.Manifest = synchronized(storageLock) {
+        val directory = projectDirectory(projectId)
+        val manifest = readManifest(directory)
+        require(manifest.id == projectId) { "Project identity does not match its directory" }
+        ProjectBackup.write(directory, projectId, manifest.title, appVersion, now(), output)
+    }
+
+    /**
+     * Restores a project copy. The copy is extracted and verified in staging and opened as a
+     * project before anything is moved into place; an existing project with the same ID is kept
+     * unless [conflict] says otherwise ([ProjectBackup.ProjectExistsException]).
+     */
+    fun restoreProject(backup: File, conflict: ProjectBackup.Conflict = ProjectBackup.Conflict.FAIL): ProjectSummary = synchronized(storageLock) {
+        ensureProjectsRoot()
+        val staging = File(projectsRoot, "${STAGING_PREFIX}restore-${System.nanoTime()}")
+        val projectId = ProjectBackup.restore(backup, projectsRoot, staging, conflict, newId, validate = { staged ->
+            val manifest = readManifest(staged)
+            manifest.baseEsxRelativePath?.let { require(resolveProjectFile(staged, it).isFile) { "The copy has no base.esx" } }
+            manifest.floors.forEach { readFloor(staged, it) }
+        }, idPattern = PROJECT_ID_PATTERN)
+        val directory = projectDirectory(projectId)
+        val manifest = readManifest(directory)
+        val active = manifest.floor(manifest.activeFloorId)
+        ProjectSummary(projectId, manifest.title, active.name, manifest.floors.size, manifest.lastOpenedAt,
+            resolveProjectFile(directory, active.mapRelativePath))
+    }
+
     fun createNewProject(
         mapInput: InputStream,
         displayName: String,

@@ -381,6 +381,55 @@ class ProjectRepositoryInstrumentedTest {
         sourcePhoto.delete()
     }
 
+    /** Mejora 5: a clean install restores the copy with the same IDs, coordinates, files and values. */
+    @Test
+    fun projectCopyRestoresOnACleanInstallAndDuplicatesNeedADecision() {
+        val ids = ArrayDeque(listOf("project-copy", "project-copy-2"))
+        val phoneA = ProjectRepository(context = context, newId = { ids.removeFirstOrNull() ?: java.util.UUID.randomUUID().toString() },
+            projectsRoot = File(projectsDirectory, "a"))
+        phoneA.createNewProject(ByteArrayInputStream(pngBytes(16, 12)), "ground.png", projectName = "Almacén", floorName = "Baja")
+        val ground = phoneA.openProject("project-copy")
+        val photo = File(context.cacheDir, "backup-note.png").apply { writeBytes(pngBytes(4, 3)) }
+        val net = WifiNetworkInfo("Ops", "aa:01", -60, 5_180, "WPA2", emptyList(), "")
+        val route = ContinuousScanSession("route-1", 1_000, 5_000,
+            listOf(RoutePointWrapper(0, 1f, 1f), RoutePointWrapper(4_000, 9f, 1f)), listOf(ScanResultWrapper(1_000, 500, listOf(net))))
+        phoneA.saveProject("project-copy", ground.activeFloorId, ProjectSnapshot(
+            ground.activeFloor.mapInfo, 0.1,
+            listOf(ScanPoint(1L, 2.5f, 3.25f, listOf(net), pointId = "p1", scanId = "s1"), ScanPoint(2L, 2.5f, 3.25f, listOf(net), pointId = "p1", scanId = "s2")),
+            listOf(route),
+            listOf(AppNote(id = "n1", text = "Muelle", photoUri = Uri.fromFile(photo).toString(), photoWidth = 4, photoHeight = 3,
+                photoId = "ph1", x = 5f, y = 6f, pictureNoteId = "pn1")),
+            activeRuns = listOf(ActiveRun("r1", "p1", null, 10L, 20L, RunStatus.COMPLETED))
+        ))
+        phoneA.addFloor("project-copy", ByteArrayInputStream(pngBytes(20, 10)), "first.png", "Primera")
+        val copy = File(context.cacheDir, "project-copy.zip")
+        copy.outputStream().use { phoneA.backupProject("project-copy", "test", it) }
+
+        val phoneB = ProjectRepository(context = context, newId = { "project-new" }, projectsRoot = File(projectsDirectory, "b"))
+        val restored = phoneB.restoreProject(copy)
+        assertEquals("project-copy", restored.id)
+        assertEquals(2, restored.floorCount)
+        val floor = phoneB.openProject("project-copy", ground.activeFloorId).activeFloor
+        assertEquals(listOf("s1", "s2"), floor.scanPoints.map { it.scanId })
+        assertEquals(3.25f, floor.scanPoints.first().y, 0f)
+        assertEquals(0.1, floor.metersPerUnit ?: 0.0, 0.0)
+        assertEquals("route-1", floor.continuousScanSessions.single().id)
+        assertEquals(null, floor.activeRuns.single().scanId)
+        val restoredPhoto = File(Uri.parse(floor.notes.single().photoUri).path!!)
+        assertEquals(photo.readBytes().toList(), restoredPhoto.readBytes().toList())
+
+        // Restoring the same copy again: nothing is overwritten without a decision.
+        try {
+            phoneB.restoreProject(copy)
+            throw AssertionError("expected a conflict")
+        } catch (_: ProjectBackup.ProjectExistsException) {
+        }
+        assertEquals("project-new", phoneB.restoreProject(copy, ProjectBackup.Conflict.AS_COPY).id)
+        assertEquals(2, phoneB.listRecentProjects().size)
+        copy.delete()
+        photo.delete()
+    }
+
     private fun pngBytes(width: Int = 16, height: Int = 12): ByteArray {
         val output = ByteArrayOutputStream()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

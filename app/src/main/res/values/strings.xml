@@ -8,7 +8,19 @@
     <string name="btn_export_esx">Export ESX</string>
     <string name="btn_stop_tracking">Stop Tracking</string>
     <string name="btn_new_project">New project</string>
-    <string name="btn_open_esx">Open ESX project</string>
+    <string name="btn_open_esx">Open ESX or project copy</string>
+    <string name="import_esx_only_title">Import ESX only</string>
+    <string name="import_esx_only_message">This file is an analysis ZIP (ESX + results), not a project copy. Only its ESX is imported: active test runs, route drafts, planned points and skipped cells are not restored. For a complete copy use “Back up project” on the phone that has it.</string>
+    <string name="backup_project">Back up project</string>
+    <string name="backing_up_project">Creating the project copy…</string>
+    <string name="backup_project_done">Project copy saved (%1$d files)</string>
+    <string name="backup_project_failed">Cannot create the project copy: %1$s</string>
+    <string name="restoring_project">Checking and restoring the project copy…</string>
+    <string name="restore_project_failed">Cannot restore the project copy: %1$s</string>
+    <string name="restore_conflict_title">The project already exists</string>
+    <string name="restore_conflict_message">A project with the same ID is already on this phone. Nothing has been changed yet: restore the copy as a new project, or replace the existing one with the copy.</string>
+    <string name="restore_as_copy">Restore as a new project</string>
+    <string name="restore_replace">Replace existing</string>
 
     <!-- Content Descriptions -->
     <string name="cd_map_image">Floor Plan Map</string>

@@ -8,7 +8,11 @@ import java.util.zip.ZipFile
  * configuration ZIP, or a configuration JSON / HAR. Decided from the content, never the name.
  */
 object ImportedFiles {
-    enum class Kind { ESX, EXPORT_BUNDLE, CONFIG_ZIP, CONFIG_JSON, UNKNOWN }
+    /**
+     * [PROJECT_BACKUP] is a restorable copy of a whole project (mejora 5); [EXPORT_BUNDLE] is an
+     * analysis ZIP, from which only the ESX can be imported.
+     */
+    enum class Kind { ESX, EXPORT_BUNDLE, PROJECT_BACKUP, CONFIG_ZIP, CONFIG_JSON, UNKNOWN }
 
     private const val MAX_CONFIG_ENTRIES = 50
     private const val MAX_CONFIG_ENTRY_BYTES = 2L * 1024 * 1024
@@ -20,6 +24,7 @@ object ImportedFiles {
             val names = runCatching { ZipFile(file).use { zip -> zip.entries().toList().map { it.name } } }.getOrNull()
                 ?: return Kind.UNKNOWN
             return when {
+                ProjectBackup.MANIFEST_ENTRY in names -> Kind.PROJECT_BACKUP
                 "project.json" in names -> Kind.ESX
                 names.any { it.equals(WiproberConfigParser.CONFIG_FILE_NAME, true) } -> Kind.CONFIG_ZIP
                 PerformanceExport.FILE_NAME in names && names.count { it.endsWith(".esx", true) && '/' !in it } == 1 -> Kind.EXPORT_BUNDLE

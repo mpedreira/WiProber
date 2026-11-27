@@ -5,7 +5,19 @@
     <string name="btn_export_esx">Exportar ESX</string>
     <string name="btn_stop_tracking">Detener recorrido</string>
     <string name="btn_new_project">Nuevo proyecto</string>
-    <string name="btn_open_esx">Abrir proyecto ESX</string>
+    <string name="btn_open_esx">Abrir ESX o copia de proyecto</string>
+    <string name="import_esx_only_title">Importar solo ESX</string>
+    <string name="import_esx_only_message">Este archivo es un ZIP de análisis (ESX + resultados), no una copia del proyecto. Solo se importa su ESX: no se restauran las ejecuciones de pruebas activas, los borradores de ruta, los puntos planificados ni las celdas omitidas. Para una copia completa usa «Copia de seguridad del proyecto» en el teléfono que lo tiene.</string>
+    <string name="backup_project">Copia de seguridad del proyecto</string>
+    <string name="backing_up_project">Creando la copia del proyecto…</string>
+    <string name="backup_project_done">Copia del proyecto guardada (%1$d archivos)</string>
+    <string name="backup_project_failed">No se puede crear la copia del proyecto: %1$s</string>
+    <string name="restoring_project">Comprobando y restaurando la copia del proyecto…</string>
+    <string name="restore_project_failed">No se puede restaurar la copia del proyecto: %1$s</string>
+    <string name="restore_conflict_title">El proyecto ya existe</string>
+    <string name="restore_conflict_message">En este teléfono ya hay un proyecto con el mismo ID. Todavía no se ha cambiado nada: restaura la copia como un proyecto nuevo o reemplaza el existente por la copia.</string>
+    <string name="restore_as_copy">Restaurar como proyecto nuevo</string>
+    <string name="restore_replace">Reemplazar el existente</string>
 
     <string name="cd_map_image">Plano</string>
     <string name="cd_add_note">Añadir nota</string>

@@ -47,6 +47,7 @@ Added in this fork:
 *   **Background-safe:** a foreground service keeps Continuous tracks and active tests running with the screen off; autosave retries and warns when it keeps failing.
 *   **Configuration screen:** roaming probe, network tests, HTTP scripts and credentials (names only) on the phone; import a JSON, HAR or configuration ZIP ([commented example](docs/examples/nimwifi-config-example.zip)), export the current configuration.
 *   **Imported configuration:** servers, credentials, tests and scripts are never in the code. They are imported on the phone from a `wiprober-config.json` ([example](docs/wiprober-config.example.json)), kept in app-private storage and excluded from backups. Imports are previewed before activation, credentials are stored apart from definitions and stripped from HAR recordings ([details](docs/wiprober-config.md)).
+*   **Project copy:** back up a whole project (floors, scale, photos, planned points, scans, routes, active runs, IDs and `base.esx`) and restore it on another phone, with verification and an explicit decision when the project already exists ([details](docs/project-backup.md)). An analysis ZIP is not a copy: opening one imports its ESX only.
 *   **Performance export:** projects with results export a ZIP with the untouched `.esx` plus `wiprober-performance.json`, joinable with the ESX by survey ID or by floor-plan position.
 
 ## Limitations & System Requirements
