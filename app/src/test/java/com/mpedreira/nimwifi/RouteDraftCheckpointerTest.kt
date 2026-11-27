@@ -28,6 +28,11 @@ class RouteDraftCheckpointerTest {
         listOf(RouteSegment(1_000L, waypoints = (0 until points).map { RoutePointWrapper(it * 20L, it.toFloat(), 0f) },
             lastObservedMs = points * 20L)))
 
+    private fun awaitWrites(checkpoints: RouteDraftCheckpointer, key: SaveKey, writes: Int) {
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (checkpoints.writes(key) < writes && System.nanoTime() < deadline) Thread.sleep(5)
+    }
+
     @Test
     fun continuousSamplesStillProduceRegularWritesAndARecoverableDraft() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -65,7 +70,7 @@ class RouteDraftCheckpointerTest {
         val checkpoints = RouteDraftCheckpointer(scope, Dispatchers.IO, interval)
         val key = SaveKey("p", "floor-1", "route-2")
         checkpoints.changed(key, build = { draft("route-2", 1) }) { store.save(it) }
-        Thread.sleep(50)
+        awaitWrites(checkpoints, key, 1)
         assertEquals(1, checkpoints.writes(key))
         // A change is pending (its interval has not elapsed) when the route is saved definitively.
         checkpoints.changed(key, build = { draft("route-2", 2) }) { store.save(it) }
@@ -104,11 +109,14 @@ class RouteDraftCheckpointerTest {
         val b = SaveKey("p", "floor-2", "route-b")
         checkpoints.changed(a, build = { draft("route-a", 1) }) { store.save(it) }
         checkpoints.changed(b, build = { draft("route-b", 1) }) { store.save(it) }
+        awaitWrites(checkpoints, a, 1)
+        awaitWrites(checkpoints, b, 1)
         checkpoints.close(a)
         Thread.sleep(100)
         checkpoints.changed(b, build = { draft("route-b", 2) }) { store.save(it) }
-        Thread.sleep(interval + 150)
+        awaitWrites(checkpoints, b, 2)
         assertEquals(2, checkpoints.writes(b))
+        assertEquals("closing A did not touch B", 1, checkpoints.writes(a))
         assertEquals(setOf("route-a", "route-b"), store.list().map { it.sessionId }.toSet())
         scope.cancel()
     }
