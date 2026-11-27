@@ -712,6 +712,9 @@ class MainViewModel @JvmOverloads constructor(
             try {
                 executor(control, runListener(runId))
                 finishRun(runId, RunStatus.COMPLETED, null)
+            } catch (e: NetworkChangedException) {
+                // rc.2 · 3: the approved Wi-Fi changed before any traffic; the run did not start.
+                finishRun(runId, RunStatus.SKIPPED, ErrorCodes.NETWORK_CHANGED)
             } catch (e: MeasurementCancelled) {
                 // Raised inside the run: its deadline expired (or it was cancelled from within).
                 finishRun(runId, if (e.reason == ErrorCodes.TIMEOUT) RunStatus.FAILED else RunStatus.CANCELLED, e.reason)
@@ -760,6 +763,12 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         // Status and value of a phase in one state update (saved together).
+        override fun onNetwork(networkId: String, observedSsid: String?, verification: String) =
+            updateRun(runId) { state, run ->
+                // What the run really used; the preflight's view is replaced, the decision kept.
+                state.replaceRun(run.copy(observedSsid = observedSsid ?: run.observedSsid, networkVerification = verification, networkId = networkId))
+            }
+
         override fun onPhaseResult(key: String, status: String, errorCode: String?, results: PointThroughput) =
             updateRun(runId) { state, run ->
                 val now = clock.now()

@@ -16,6 +16,8 @@ Servers, credentials, tests and scripts are never in the code. They are set on t
 
 DNS, sockets and HTTP of the run stay bound to the selected network. The check is saved with the run (`expectedSsid`, `observedSsid`, `networkVerification`, `networkDecision`).
 
+Since 4.0.0-rc.2 the run is bound to the **network approved in that check** (its Android handle), not to a new selection. Just before any traffic its identity is checked again: if it is gone, has been replaced by another network, or now reports another SSID, nothing is sent, the run ends `skipped` with `network_changed` and the phone asks to check the network and decide again. A BSSID change inside the same SSID and network is an AP change and is measured and recorded (`associationChange`). If the network is lost during the run, finished values are kept and the failed phases carry `wifi_lost`; the run never moves to another Wi-Fi or to mobile data. `observedSsid`, `networkVerification` and the new `networkId` of the run describe the network the run was really bound to; `networkDecision` keeps the technician's decision.
+
 ## Survey guide and signal profile
 
 `guide.profile` sets when a point's signal is weak on the map and in the report: `pda` (handheld scanners, −67 dBm, second AP −72 dBm, default), `voz` (voice, −67/−67) or `datos` (data, −70/−75). The same profiles as the wifianalisys report; they can also be chosen in the survey-guide settings.

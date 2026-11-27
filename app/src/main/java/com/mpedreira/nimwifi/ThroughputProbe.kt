@@ -40,10 +40,18 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         credentials: Map<String, String>,
         scanResults: List<ScanResult>,
         control: MeasurementControl,
-        listener: RunListener
+        listener: RunListener,
+        /** The preflight the technician accepted: the run is bound to that very network (rc.2 · 3). */
+        approved: NetworkPreflight? = null
     ): PointThroughput = runCancellable(control, "active-tests") {
-        // The same choice as the preflight: the expected SSID's network when it is eligible.
-        val selected = wifiNetworks.select(settings.sanitized().expectedSsid)
+        // The approved network by its handle, revalidated before any traffic; without a usable
+        // preflight, the same choice the preflight would make. Never another Wi-Fi or mobile data.
+        val expected = settings.sanitized().expectedSsid
+        val selected = NetworkRevalidation.open(approved, wifiNetworks::selectById, { wifiNetworks.select(expected) }) { it.close() }
+        selected?.let { bound ->
+            val association = runCatching { bound.association() }.getOrNull()
+            listener.onNetwork(bound.id, association?.ssid, NetworkVerification.of(expected, true, association))
+        }
         // Name lookups never hold a phase longer than DNS_TIMEOUT_MILLIS, nor pile up (mejora 7).
         val network: MeasurementNetwork? = selected?.let { BoundedResolveNetwork(it, BoundedCalls(DNS_TIMEOUT_MILLIS, name = "dns")) }
         try {

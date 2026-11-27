@@ -415,6 +415,9 @@ El ESX de origen sin cambios es otra opción del menú de exportación, y los ar
     <string name="export_source_complete">Se ha escrito el ESX de origen sin cambios.
 SHA-256: %1$s</string>
     <string name="action_continue">Continuar</string>
+    <string name="network_changed_title">La Wi-Fi ha cambiado</string>
+    <string name="network_changed_message">La red aprobada para esta prueba (%1$s) ya no es la disponible, así que no se ha enviado nada. Vuelve a comprobar la red y decide antes de probar.</string>
+    <string name="network_changed_check_again">Comprobar de nuevo</string>
     <string name="config_change_failed">No se ha cambiado la configuración: %1$s</string>
     <string name="config_corrupt">No se puede leer la configuración guardada (%1$s). No se usa; quítala y vuelve a importarla.</string>
     <string name="config_export_shareable">Exportar resumen compartible</string>

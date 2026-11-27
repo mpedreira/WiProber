@@ -37,6 +37,7 @@ class ActiveTestsController(
      * rotation neither stops nor restarts it; the executor only captures application-level objects.
      */
     fun start(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>) {
+        lastStart = Triple(pointId, scanId, scanResults)
         val settings = throughputStore.load()
         val imported = configStore.load()
         if (ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isEmpty()) return
@@ -73,7 +74,8 @@ class ActiveTestsController(
             pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS, budgetMillis = budget,
             preflight = preflight, networkDecision = decision
         ) { control, listener ->
-            probe.measure(settings, imported, credentials, scanResults, control, listener)
+            // Bound to the network of this preflight; a changed network stops before any traffic.
+            probe.measure(settings, imported, credentials, scanResults, control, listener, approved = preflight)
         }
     }
 
@@ -86,6 +88,7 @@ class ActiveTestsController(
             val finished = (previous.interaction as? SurveyInteraction.ActiveTesting)?.runId
                 ?.let { id -> state.activeRuns.firstOrNull { it.runId == id } }
             if (finished != null) statusText().text = ActiveRunSummary.format(activity, finished)
+            if (finished?.statusReason == ErrorCodes.NETWORK_CHANGED) askToCheckAgain(finished)
             return
         }
         val budget = state.activeRuns.firstOrNull { it.runId == testing.runId }?.budgetMillis
@@ -93,6 +96,19 @@ class ActiveTestsController(
             activity, onCancel = { viewModel.cancelActiveRun() }, onSkip = { viewModel.skipActiveRun() }
         ).also { it.show(budget); progressDialog = it }
         state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
+    }
+
+    private var lastStart: Triple<String, String?, List<android.net.wifi.ScanResult>>? = null
+
+    /** rc.2 · 3: the approved Wi-Fi changed before the run started: a new check and decision. */
+    private fun askToCheckAgain(run: ActiveRun) {
+        val start = lastStart?.takeIf { it.first == run.pointId } ?: return
+        MaterialAlertDialogBuilder(activity)
+            .setTitle(R.string.network_changed_title)
+            .setMessage(activity.getString(R.string.network_changed_message, run.observedSsid ?: "?"))
+            .setPositiveButton(R.string.network_changed_check_again) { _, _ -> start(start.first, start.second, start.third) }
+            .setNegativeButton(R.string.network_check_skip, null)
+            .show()
     }
 
     /** Android sources of a Continuous capture: scanner, foreground service and, if enabled, the roaming probe. */

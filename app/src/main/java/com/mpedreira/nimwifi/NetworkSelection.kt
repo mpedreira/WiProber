@@ -66,3 +66,48 @@ data class NetworkPreflight(
     /** SSIDs of every eligible Wi-Fi network (null entries: not reported by Android). */
     val eligible: List<String?>
 )
+
+/**
+ * rc.2 · 3: the run measures on the network the technician approved in the preflight, not on a
+ * fresh selection. Just before any traffic the approved network is looked up by its handle and
+ * its identity checked again; anything but [SAME] stops the start (no socket is opened) and asks
+ * for a new decision. A BSSID change inside the same SSID and the same network is [SAME]: it is an
+ * AP change, recorded as such by the run.
+ */
+object NetworkRevalidation {
+    const val SAME = "same"
+    /** The approved network is no longer available. */
+    const val GONE = "gone"
+    /** Another network now has the approved one's place (different handle). */
+    const val REPLACED = "replaced"
+    /** Same handle, but it now reports another SSID than the one approved. */
+    const val SSID_CHANGED = "ssid_changed"
+
+    fun check(approved: NetworkPreflight, current: MeasurementNetwork?, association: Association?): String = when {
+        current == null -> GONE
+        approved.networkId != null && current.id != approved.networkId -> REPLACED
+        approved.observedSsid != null && association?.known == true && association.ssid != null &&
+            association.ssid != approved.observedSsid -> SSID_CHANGED
+        else -> SAME
+    }
+
+    /**
+     * Opens the run's network: the approved one by handle ([byId]), or the fresh choice ([select])
+     * when there was no usable preflight. Throws [NetworkChangedException] (closing what it
+     * looked up) when the approved network changed. Nothing is sent here.
+     */
+    fun <N : MeasurementNetwork> open(approved: NetworkPreflight?, byId: (String) -> N?, select: () -> N?, close: (N) -> Unit): N? {
+        val approvedId = approved?.networkId ?: return select()
+        val current = byId(approvedId)
+        val state = check(approved, current, current?.let { runCatching { it.association() }.getOrNull() })
+        if (state != SAME) {
+            current?.let(close)
+            throw NetworkChangedException(state, approved)
+        }
+        return current
+    }
+}
+
+/** The approved Wi-Fi network changed before the run started; nothing was sent. */
+class NetworkChangedException(val state: String, val approved: NetworkPreflight) :
+    MeasurementException(ErrorCodes.NETWORK_CHANGED, "approved Wi-Fi network ${approved.observedSsid ?: approved.networkId}: $state")

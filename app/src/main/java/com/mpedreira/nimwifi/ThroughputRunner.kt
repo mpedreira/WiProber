@@ -43,6 +43,12 @@ interface RunListener {
     /** A phase is starting. */
     fun onProgress(progress: ThroughputProgress) {}
 
+    /**
+     * rc.2 · 3: the network the run is actually bound to, read just before the first traffic
+     * ([observedSsid] null when Android does not say).
+     */
+    fun onNetwork(networkId: String, observedSsid: String?, verification: String) {}
+
     /** A planned phase ([PhaseRecord.key]) finished with [status] ([RunStatus]) and an optional error code. */
     fun onPhase(key: String, status: String, errorCode: String?) {}
 

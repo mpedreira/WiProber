@@ -95,6 +95,8 @@ object AddressPolicy {
 object ErrorCodes {
     const val NOT_ON_WIFI = "not_on_wifi"
     const val WIFI_LOST = "wifi_lost"
+    /** The Wi-Fi approved before the run is gone or replaced: nothing was sent (rc.2 · 3). */
+    const val NETWORK_CHANGED = "network_changed"
     const val NOT_CONFIGURED = "not_configured"
     const val PORT_NOT_CONFIGURED = "port_not_configured"
     const val RESOLUTION_FAILED = "resolution_failed"

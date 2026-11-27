@@ -57,7 +57,9 @@ data class ActiveRun(
     val observedSsid: String? = null,
     val networkVerification: String? = null,
     /** `confirmed`: the technician chose to test although the network did not match or was unknown. */
-    val networkDecision: String? = null
+    val networkDecision: String? = null,
+    /** rc.2 · 3: handle of the Wi-Fi network the run was bound to (null in runs saved before). */
+    val networkId: String? = null
 ) {
     val isFinished: Boolean get() = status !in RunStatus.UNFINISHED
 

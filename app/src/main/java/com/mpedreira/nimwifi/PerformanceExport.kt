@@ -293,6 +293,7 @@ object PerformanceExport {
         addProperty("observedSsid", run.observedSsid)
         addProperty("networkVerification", run.networkVerification)
         addProperty("networkDecision", run.networkDecision)
+        addProperty("networkId", run.networkId)
         // The run's status is separate from what its phases produced.
         add("phaseSummary", JsonObject().apply { run.phaseSummary.toSortedMap().forEach { (status, n) -> addProperty(status, n) } })
         add("phases", JsonArray().apply {
