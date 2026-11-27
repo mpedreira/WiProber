@@ -18,6 +18,11 @@ class ExampleConfigTest {
         assertEquals("Item lookup", config.scripts!!.single().displayAlias)
         assertEquals(setOf("password"), config.scripts!!.single().credentialReferences())
         assertEquals(setOf("password"), config.credentials!!.keys)
+        // Report verdict thresholds and the BSSID → AP table (two radios of one AP, explicitly).
+        assertEquals(listOf("corporate"), config.requirements!!.throughput!!.map { it.alias })
+        assertEquals(listOf("gateway", "app-web"), config.requirements!!.networkTests!!.map { it.alias })
+        assertEquals(500L, config.requirements!!.roaming!!.maxOutageMs)
+        assertEquals(listOf("AP-P3-04", "AP-P3-04", "AP-P3-05"), config.apNames!!.map { it.name })
     }
 
     @Test

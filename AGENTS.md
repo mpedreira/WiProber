@@ -50,6 +50,8 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file + `wiprober-report.html`). It is never written inside the ESX.
 - `SsidCoverage.kt`: Android-free per-SSID point states (ok, weak, SSID not detected in a valid scan, no local measurement), point labels and tap hit-testing.
 - `SurveyReport.kt`: readable per-floor/per-SSID report model and its self-contained HTML.
+- `Requirements.kt`: Android-free report verdict: optional `requirements` thresholds and `VerdictEvaluator` (meets / does not meet / missing data per point and per SSID/floor; null is missing data, never 0).
+- `ApNames.kt`: the user's BSSID → AP name table (`apNames` / `ap-names.csv`), BSSID normalization; display only, never inferred or merged.
 - `PointTemplate.kt`: parser of point templates (`wiprober-points` JSON or CSV) with plan-size scaling and repeatable ids.
 - `PointActionsDialogs.kt`: point actions (measure again / active tests only / new point), template preview and map-SSID picker dialogs.
 - `SurveyGuide.kt`: Android-free survey guide: grid next-point suggestion (needs a calibrated scale), coverage samples (Continuous scans placed along the route by time) and the RSSI colour gradient.

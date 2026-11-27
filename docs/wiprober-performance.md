@@ -37,7 +37,10 @@ Nothing from nimWifi is written inside the `.esx`, and Ekahau's native `throughp
   "networkTests":    [ { …row… }, … ],
   "scriptSteps":     [ { …row… }, … ],
   "roamingSessions": [ { …row… }, … ],
-  "roamingEvents":   [ { …row… }, … ]
+  "roamingEvents":   [ { …row… }, … ],
+  "requirements":    { … },            // only with requirements configured
+  "verdicts":        [ { …row… }, … ], // only with requirements configured
+  "apNames":         [ { …row… }, … ]  // only with an AP table
 }
 ```
 
@@ -54,7 +57,27 @@ Nothing from nimWifi is written inside the `.esx`, and Ekahau's native `throughp
 | `roamingSessions` | array | One row per **Continuous track with a roaming probe** — section 3d |
 | `roamingEvents` | array | One row per **roam or outage** found in those tracks — section 3d |
 
-Every array is always present (empty when there is no data).
+Every array is always present (empty when there is no data), except the additive `requirements`, `verdicts` and `apNames`, which only appear when the configuration has them (section 3e).
+
+## 3e. Verdict and AP names (optional, additive)
+
+`requirements`: the thresholds applied (see `docs/wiprober-config.md`), plus `rssiThresholdDbm` and `signalProfile`.
+
+`verdicts`: one row per floor and SSID of the report:
+
+| Field | Description |
+|---|---|
+| `floorName`, `floorPlanId`, `ssid` | Where (join with the `.esx` by `floorPlanId`) |
+| `state` | `pass`, `fail` or `missing_data` |
+| `pointsPassing`, `pointsFailing`, `pointsMissingData` | Points by verdict |
+| `pointsWithData`, `percentPassing` | Denominator (points with valid data for every requirement) and passing % over it; `null` without data |
+| `outagesOnFloor` | Reachability/association losses of the SSID on the floor (also without a roaming requirement) |
+| `floorChecks[]` | Checks of the SSID on the floor: p95 and roaming |
+| `points[]` | `pointId`, `label`, `state`, `checks[]` |
+
+Each check: `requirement` (e.g. `rssi`, `iperf3:corporate:download`, `service:ERP:time`, `outage-during-measurement`, `roaming:outage`), `label`, `state`, `value` (`null` when not measured validly — never 0), `threshold`, `unit`, `runId` (the `activeRuns` row the value comes from) and `reason`.
+
+`apNames`: the user's BSSID → AP table (`bssid`, `name`, `location`, `floor`). With a table, every mapped BSSID field of the arrays above gets its name next to it: `bssid` → `apName`, `bssidStart` → `apNameStart`, `bssidEnd` → `apNameEnd`, `fromBssid` → `fromApName`, `toBssid` → `toApName`. Unmapped BSSIDs get no name; existing fields never change. The `.esx` is not touched.
 
 ## 2b. Points, scans and runs (`activeRuns`)
 
@@ -362,6 +385,8 @@ The report is a self-contained HTML page **in Spanish** (no scripts) for Operati
 - **roaming and outages**: time in UTC with milliseconds, the observed window (last reachable → first reachable), the association before and after, the incident, and the approximate position on the route when there is one. Events in the same second keep their order.
 
 The SSIDs reported are the map SSID, the SSIDs used by the tests and the three most widely detected (at most five).
+
+With **requirements** configured, the report starts with a **verdict** per floor and SSID: meets / does not meet / missing data, points meeting over points with valid data (explicit denominator) and how many lack data, and the floor checks; each SSID section then lists what fails (point, requirement, value, threshold, `runId`, detail), the points without enough data and why, and the outages of the floor. The requirements applied are listed. With an **AP table**, AP names are shown next to the BSSIDs (worst points, associated AP, roaming, verdict). Without either, the report is as before.
 
 Each floor shows its **plan per SSID** (mejora 8): Stop-and-Go points at their exact position, Continuous scans as small dots placed on the route by time (approximate; only where two waypoints surround the scan time — the others are counted as *without enough route geometry*, never drawn), planned points and imported points without local RF as dashed rings. Weak points show their value and the threshold. Areas without marks have no sample. A source line counts each kind of evidence, and Continuous scans add their weak and not-detected counts and the worst value to the SSID figures.
 

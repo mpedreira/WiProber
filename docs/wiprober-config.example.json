@@ -32,6 +32,55 @@
     "port": 443,
     "intervalMs": 200
   },
+  "requirements": {
+    "_comment": "Optional thresholds of the report verdict (example values, not defaults). Omit the section for no verdict.",
+    "throughput": [
+      {
+        "alias": "corporate",
+        "minDownMbps": 20,
+        "minUpMbps": 10,
+        "maxLatencyMedianMs": 30,
+        "maxLatencyP95Ms": 80,
+        "maxLatencyLossPct": 5
+      }
+    ],
+    "networkTests": [
+      {
+        "alias": "gateway",
+        "maxMedianMs": 20,
+        "maxLossPct": 2
+      },
+      {
+        "alias": "app-web",
+        "maxMedianMs": 300,
+        "maxP95Ms": 800
+      }
+    ],
+    "roaming": {
+      "maxOutageMs": 500,
+      "maxLossesPerFloor": 3
+    }
+  },
+  "apNames": [
+    {
+      "bssid": "02:00:00:00:30:04",
+      "name": "AP-P3-04",
+      "location": "Pasillo 3",
+      "floor": "Baja"
+    },
+    {
+      "bssid": "02:00:00:00:31:04",
+      "name": "AP-P3-04",
+      "location": "Pasillo 3",
+      "floor": "Baja"
+    },
+    {
+      "bssid": "02:00:00:00:30:05",
+      "name": "AP-P3-05",
+      "location": "Muelle 5",
+      "floor": "Baja"
+    }
+  ],
   "tests": [
     {
       "name": "gateway",

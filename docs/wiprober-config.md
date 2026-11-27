@@ -88,6 +88,46 @@ The preview lists what was stripped and which credentials must be provided for t
 
 `alias` names the target in the report, `trace: true` keeps a bounded log of every attempt. Results are `replied` (ICMP) or `connected`/`refused` (TCP), `timeout`, `unreachable`, `resolution_failed`, `invalid_target` or `no_wifi`; the export says which `method` was used.
 
+## Report requirements (verdict)
+
+`requirements` (optional) turns the report into a decision: for each SSID and floor, whether it meets the thresholds and which points fail. **Every value is yours: there is no default.** Without the section (or with it empty) the report and the export are exactly as before.
+
+```json
+"requirements": {
+  "throughput":   [{ "alias": "corporate", "minDownMbps": 20, "minUpMbps": 10, "maxLatencyMedianMs": 30, "maxLatencyP95Ms": 80, "maxLatencyLossPct": 5 }],
+  "networkTests": [{ "alias": "gateway", "maxMedianMs": 20, "maxLossPct": 2 }, { "alias": "app-web", "maxMedianMs": 300, "maxP95Ms": 800 }],
+  "roaming":      { "maxOutageMs": 500, "maxLossesPerFloor": 3 }
+}
+```
+
+| Field | Applies to |
+|---|---|
+| `throughput[].alias` | A private iPerf3 target by its label (`throughput.iperf.label`); Internet tests are not judged |
+| `minDownMbps`, `minUpMbps` | The point's last valid download/upload |
+| `maxLatencyMedianMs` | The point's TCP-connect latency (the median of its samples) |
+| `maxLatencyP95Ms` | 95th percentile (nearest rank, no interpolation) of the points' latencies of the SSID on the floor |
+| `maxLatencyLossPct` | Failed handshakes over latency samples at the point |
+| `networkTests[].alias` | A network test by alias (or name without alias); `maxMedianMs`: its time at the point (DNS lookup, ping average RTT, TCP connect, HTTP total), `maxP95Ms` over the floor, `maxLossPct`: ping loss |
+| `roaming.maxOutageMs` | Upper bound of each observed outage window of the SSID on the floor (an open outage fails; one whose duration cannot be bounded is *missing data*) |
+| `roaming.maxLossesPerFloor` | Reachability/association losses of the SSID on the floor |
+
+Signal uses the **signal profile's threshold** (`guide.profile`), the same as the map. Limits are inclusive (a value equal to the threshold meets it). Aliases are unique; numbers must be ≥ 0 and percentages ≤ 100, otherwise the import is refused with the reason.
+
+The verdict has three states per point and per SSID/floor: **meets**, **does not meet**, **missing data**. A point has *missing data* when a requirement has no valid measurement there (planned point, imported point without local RF, a run skipped, cancelled or without value): `null` is never `0` nor a network failure. Any failure decides; otherwise any missing datum; otherwise it meets. A loss of reachability inside a point's measurement window makes the point fail even when its median is good; an AP change without loss is only explained. Each SSID is judged on its own.
+
+## AP names (BSSID → AP)
+
+`apNames` (optional) names the physical APs in the report and the export:
+
+```json
+"apNames": [
+  { "bssid": "02:00:00:00:30:04", "name": "AP-P3-04", "location": "Pasillo 3", "floor": "Baja" },
+  { "bssid": "02:00:00:00:31:04", "name": "AP-P3-04" }
+]
+```
+
+or, in a configuration ZIP, `ap-names.csv` with the header `bssid,name,location,floor` (`;` also works; location and floor optional). Both form one table. BSSIDs are normalized (`AA-BB-…`, `aa:bb:…` or `aabb…` → `aa:bb:cc:dd:ee:ff`); a malformed or repeated BSSID refuses the import. Nothing is ever grouped by prefix, OUI or similarity: each BSSID stays a separate measured AP, and an unmapped BSSID is shown as it is. Giving several BSSIDs (the radios of one AP) the same name is your explicit decision, used only for display.
+
 ## Redirects
 
 HTTP tests and script steps succeed on 2xx. A 3xx is reported as `redirect` (with where it went) unless the test or step sets `"allowRedirect": true` or `expectStatus` to that code — so a redirect to a login page is never counted as a working service by accident.

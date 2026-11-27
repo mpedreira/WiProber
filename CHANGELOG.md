@@ -2,6 +2,12 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
+## Next release candidate (after 4.0.0-rc.3, not tagged)
+
+### Added
+- **Report verdict**: optional `requirements` in `wiprober-config.json` (private iPerf3 minimum download/upload, latency median and p95, sample/ping loss, roaming outage window and losses per floor; no defaults). The report and the export say, per floor and SSID, whether it meets them (meets / does not meet / missing data, with explicit denominators) and which points fail with requirement, value, threshold and `runId`. Without requirements nothing changes.
+- **AP names**: an optional BSSID → AP table (`apNames`, or `ap-names.csv` in the configuration ZIP) shows AP names next to BSSIDs in the report and adds them to the export. Display only: nothing is inferred or merged.
+
 ## 4.0.0-rc.3
 
 Fixes over `v4.0.0-rc.2` (not tagged yet).
