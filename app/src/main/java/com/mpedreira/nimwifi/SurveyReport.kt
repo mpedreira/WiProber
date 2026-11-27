@@ -66,6 +66,8 @@ object SurveyReport {
         val runs: List<RunFact> = emptyList()
     ) {
         fun count(state: String) = points.count { it.state == state }
+        /** Mejora 11: good primary signal and a second AP of the same SSID above the secondary threshold. */
+        val redundant: Int get() = points.count { it.secondaryOk }
     }
 
     data class FloorSection(
@@ -119,7 +121,7 @@ object SurveyReport {
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
-                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection) },
+                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm) },
                 unknownAssociation = section(null, survey, runs, weakDbm, selection).takeIf { it.runs.isNotEmpty() }
             )
         }
@@ -150,7 +152,7 @@ object SurveyReport {
         else -> Outcome.FAILED
     }
 
-    private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection): SsidSection {
+    private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection, secondaryDbm: Int = SignalProfile.of(null).secondaryDbm): SsidSection {
         val labels = SsidCoverage.labels(survey.scanPoints, survey.plannedPoints)
         // Runs of this SSID: by the SSID of their results, else by the network observed before the run.
         val ssidRuns = runs.filter { run ->
@@ -280,7 +282,7 @@ object SurveyReport {
                 }
             }
         }
-        val coverage = ssid?.let { SsidCoverage.points(survey.scanPoints, survey.plannedPoints, it, weakDbm) }.orEmpty()
+        val coverage = ssid?.let { SsidCoverage.points(survey.scanPoints, survey.plannedPoints, it, weakDbm, secondaryDbm, survey.activeRuns) }.orEmpty()
         return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts)
     }
 
@@ -315,13 +317,16 @@ object SurveyReport {
                 append("<li class=\"weak\">Weak signal measured: ").append(section.count(PointState.WEAK)).append(" points</li>")
                 append("<li class=\"bad\">SSID not detected in a valid scan: ").append(section.count(PointState.SSID_NOT_DETECTED)).append(" points</li>")
                 append("<li>No local measurement: ").append(section.count(PointState.NOT_MEASURED)).append(" points</li>")
+                append("<li>Second AP of the same SSID above the secondary threshold (redundancy hint): ").append(section.redundant).append(" points</li>")
                 append("<li>AP changes: ").append(section.apChanges.size).append("; outages: ").append(section.outages.size).append("</li></ul>")
                 val attention = section.points.filter { it.state != PointState.OK }.sortedBy { it.state }
                 if (attention.isNotEmpty()) {
-                    append("<table><tr><th>Point</th><th>State</th><th>Strongest AP (scan)</th><th>dBm</th><th>x, y (px)</th></tr>")
+                    append("<table><tr><th>Point</th><th>State</th><th>Strongest AP (scan)</th><th>dBm</th><th>Second AP</th><th>Associated AP (tests)</th><th>x, y (px)</th></tr>")
                     attention.forEach { p ->
                         append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(stateLabel(p.state))).append("</td><td>")
                             .append(e(p.strongestBssid)).append("</td><td>").append(e(p.strongestRssi)).append("</td><td>")
+                            .append(e(p.secondBssid?.let { "$it ${p.secondRssi} dBm" } ?: "none")).append("</td><td>")
+                            .append(e(p.associatedBssid?.let { "$it ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} AP changes" else "" } ?: "—")).append("</td><td>")
                             .append(e("%.0f, %.0f".format(java.util.Locale.ROOT, p.x, p.y))).append("</td></tr>")
                     }
                     append("</table>")

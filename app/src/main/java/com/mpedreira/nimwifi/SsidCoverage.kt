@@ -29,7 +29,20 @@ data class PointCoverage(
     /** Valid local scans at the point; the state uses the latest one. */
     val scans: Int = 0,
     val imported: Boolean = false,
-    val planned: Boolean = false
+    val planned: Boolean = false,
+    /**
+     * Mejora 11: the second strongest *distinct* BSSID of the same SSID in the latest valid scan,
+     * a hint of redundancy for roaming (not proof of how the client roams).
+     */
+    val secondBssid: String? = null,
+    val secondRssi: Int? = null,
+    /** Second AP at or above the profile's secondary threshold. */
+    val secondaryOk: Boolean = false,
+    /** RSSI of the AP the phone was associated with during the latest active test on this SSID, if any. */
+    val associatedBssid: String? = null,
+    val associatedRssi: Int? = null,
+    /** AP changes observed during active tests at this point (evidence to read with the second AP). */
+    val apChanges: Int = 0
 )
 
 /**
@@ -63,7 +76,9 @@ object SsidCoverage {
         scanPoints: List<ScanPoint>,
         planned: List<PlannedPoint>,
         ssid: String,
-        weakDbm: Int = DEFAULT_WEAK_DBM
+        weakDbm: Int = DEFAULT_WEAK_DBM,
+        secondaryDbm: Int = SignalProfile.DEFAULT.secondaryDbm,
+        runs: List<ActiveRun> = emptyList()
     ): List<PointCoverage> {
         val labels = labels(scanPoints, planned)
         val byPoint = scanPoints.filter { it.pointId != null }.groupBy { it.pointId!! }
@@ -71,7 +86,15 @@ object SsidCoverage {
             val valid = scans.filter(::isValidScan).sortedBy(ScanPoint::timestamp)
             val first = scans.first()
             val latest = valid.lastOrNull()
-            val strongest = latest?.wifiNetworks?.filter { it.ssid == ssid }?.maxByOrNull(WifiNetworkInfo::level)
+            // Distinct BSSIDs of this SSID only: a strong guest SSID never counts as a second AP.
+            val ranked = latest?.wifiNetworks.orEmpty().filter { it.ssid == ssid }
+                .groupBy { it.bssid.lowercase() }.values.map { list -> list.maxBy(WifiNetworkInfo::level) }
+                .sortedByDescending(WifiNetworkInfo::level)
+            val strongest = ranked.firstOrNull()
+            val second = ranked.getOrNull(1)
+            val tests = runs.filter { it.pointId == pointId }.sortedBy { it.startedAt }
+                .flatMap { run -> run.results?.tests.orEmpty().filter { it.ssid == ssid } }
+            val associated = tests.lastOrNull { it.bssidStart != null }
             PointCoverage(
                 pointId = pointId,
                 label = labels.getValue(pointId),
@@ -87,7 +110,13 @@ object SsidCoverage {
                 strongestRssi = strongest?.level,
                 scans = valid.size,
                 imported = scans.all { it.importedFromEsx },
-                planned = planned.any { it.pointId == pointId }
+                planned = planned.any { it.pointId == pointId },
+                secondBssid = second?.bssid,
+                secondRssi = second?.level,
+                secondaryOk = strongest != null && strongest.level >= weakDbm && second != null && second.level >= secondaryDbm,
+                associatedBssid = associated?.bssidStart,
+                associatedRssi = associated?.rssi,
+                apChanges = tests.count { it.associationChange == AssociationChange.BSSID_CHANGED || it.associationChange == AssociationChange.SSID_CHANGED }
             )
         }
         val pending = planned.filter { it.pointId !in byPoint }.map {

@@ -527,7 +527,8 @@ class SurveyActivity : AppCompatActivity() {
                 state.scanPoints.map { PointsOverlayView.PointMarker(it.x, it.y, null) } +
                     state.plannedPoints.map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED) }
             } else {
-                SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid, surveyGuideStore.load().signal.primaryDbm).map { PointsOverlayView.PointMarker(it.x, it.y, it.state) } +
+                SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid, surveyGuideStore.load().signal.primaryDbm,
+                    surveyGuideStore.load().signal.secondaryDbm, state.activeRuns).map { PointsOverlayView.PointMarker(it.x, it.y, it.state, it.secondaryOk) } +
                     state.scanPoints.filter { it.pointId == null }.map { PointsOverlayView.PointMarker(it.x, it.y, null) }
             }
         )

@@ -69,14 +69,18 @@ object SurveyGuide {
     const val WEAK_RSSI = -85
     const val STRONG_RSSI = -55
 
-    /** Stop-and-Go points plus every scan of the Continuous routes, placed along the route by time. */
+    /**
+     * Local RF samples: valid Stop-and-Go scans plus every scan of the local Continuous routes,
+     * placed along the route by time. Imported geometry (no local RF), planned points and route
+     * waypoints are not samples.
+     */
     fun coverageSamples(
         scanPoints: List<ScanPoint>,
         sessions: List<ContinuousScanSession>,
         ssidFilter: String = ""
     ): List<CoverageSample> = buildList {
-        scanPoints.forEach { add(CoverageSample(it.x, it.y, bestRssi(it.wifiNetworks, ssidFilter))) }
-        sessions.forEach { session ->
+        scanPoints.filter(SsidCoverage::isValidScan).forEach { add(CoverageSample(it.x, it.y, bestRssi(it.wifiNetworks, ssidFilter))) }
+        sessions.filterNot { it.importedFromEsx }.forEach { session ->
             val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
             session.scanResults.forEach { scan ->
                 positionAt(route, scan.timestamp)?.let { (x, y) ->
@@ -86,11 +90,18 @@ object SurveyGuide {
         }
     }
 
-    /** Positions in the order they were measured; the last two give the walking direction. */
+    /**
+     * Mejora 11: positions with local RF, in the order they were measured (the last two give the
+     * walking direction): valid Stop-and-Go scans and Continuous scans placed on their route.
+     * Waypoints alone, planned points and imported geometry without local RF are not measured.
+     */
     fun measurementOrder(scanPoints: List<ScanPoint>, sessions: List<ContinuousScanSession>): List<SurveyCoordinate> =
-        (scanPoints.map { it.timestamp to SurveyCoordinate(it.x, it.y) } +
-            sessions.flatMap { session ->
-                session.waypoints.map { (session.startTime + it.timestamp) to SurveyCoordinate(it.x, it.y) }
+        (scanPoints.filter(SsidCoverage::isValidScan).map { it.timestamp to SurveyCoordinate(it.x, it.y) } +
+            sessions.filterNot { it.importedFromEsx }.flatMap { session ->
+                val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
+                session.scanResults.mapNotNull { scan ->
+                    positionAt(route, scan.timestamp)?.let { (x, y) -> (session.startTime + scan.timestamp) to SurveyCoordinate(x, y) }
+                }
             })
             .sortedBy { it.first }
             .map { it.second }

@@ -95,8 +95,11 @@ class SurveyGuideTest {
 
     @Test
     fun measurementOrderMergesPointsAndRoutesByTime() {
-        val points = listOf(ScanPoint(10, 1f, 1f, emptyList()), ScanPoint(30, 3f, 3f, emptyList()))
-        val session = ContinuousScanSession("s", 15, 20, listOf(RoutePointWrapper(5, 2f, 2f)), emptyList())
+        // Only local RF counts (mejora 11): scans with networks, and route scans placed on the route.
+        val net = WifiNetworkInfo("Ops", "aa:01", -60, 5_180, "WPA2", emptyList(), "")
+        val points = listOf(ScanPoint(10, 1f, 1f, listOf(net)), ScanPoint(30, 3f, 3f, listOf(net)), ScanPoint(12, 9f, 9f, emptyList()))
+        val session = ContinuousScanSession("s", 15, 20, listOf(RoutePointWrapper(0, 2f, 2f), RoutePointWrapper(10, 2f, 2f)),
+            listOf(ScanResultWrapper(5, 1, listOf(net))))
         assertEquals(
             listOf(SurveyCoordinate(1f, 1f), SurveyCoordinate(2f, 2f), SurveyCoordinate(3f, 3f)),
             SurveyGuide.measurementOrder(points, listOf(session))

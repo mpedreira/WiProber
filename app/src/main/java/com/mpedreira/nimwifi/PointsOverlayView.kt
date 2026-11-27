@@ -187,10 +187,12 @@ class PointsOverlayView @JvmOverloads constructor(
     // ================== DATA SETTERS ==================
 
     /** Point marker coloured by its [PointState] for the selected SSID; null state = no SSID selected. */
-    data class PointMarker(val x: Float, val y: Float, val state: String?)
+    /** [redundant]: a second AP of the same SSID above the secondary threshold (drawn as an outer ring). */
+    data class PointMarker(val x: Float, val y: Float, val state: String?, val redundant: Boolean = false)
 
     private val pointMarkers = mutableListOf<PointMarker>()
     private val okPaint = Paint().apply { color = Color.rgb(27, 110, 32); style = Paint.Style.FILL; isAntiAlias = true }
+    private val okRingPaint = Paint().apply { color = Color.rgb(27, 110, 32); style = Paint.Style.STROKE; strokeWidth = 3f; isAntiAlias = true }
     private val weakPaint = Paint().apply { color = Color.rgb(230, 126, 0); style = Paint.Style.FILL; isAntiAlias = true }
     private val unmeasuredPaint = Paint().apply {
         color = Color.DKGRAY; style = Paint.Style.STROKE; strokeWidth = 5f; isAntiAlias = true
@@ -296,6 +298,7 @@ class PointsOverlayView @JvmOverloads constructor(
         // cross (SSID not detected), hollow ring (no local measurement: planned or imported).
         for (marker in pointMarkers) {
             val t = transformPoint(marker.x, marker.y, currentMatrix)
+            if (marker.redundant) canvas.drawCircle(t[0], t[1], radius + 7f, okRingPaint)
             when (marker.state) {
                 PointState.NOT_MEASURED -> {
                     canvas.drawCircle(t[0], t[1], radius, strokePaint)
