@@ -60,7 +60,9 @@ data class NetworkTestResult(
 data class NetworkContext(
     val gateway: String? = null,
     val dnsServers: List<InetAddress> = emptyList(),
-    val interfaceName: String? = null
+    val interfaceName: String? = null,
+    /** Addresses of the measured network's interface: the source of ICMP pings. */
+    val localAddresses: List<InetAddress> = emptyList()
 )
 
 /** Round-trip samples of a ping-like test; null entries are lost probes. */
@@ -159,7 +161,8 @@ class NetworkTestRunner(
      * ICMP ping through the system `ping`, given an already resolved IP and the Wi-Fi interface
      * name; null where unavailable (a TCP probe bound to the Wi-Fi network is used instead).
      */
-    private val systemPing: ((ip: String, count: Int, interfaceName: String, control: MeasurementControl) -> String)? = null,
+    /** ICMP ping from [source] (an address of the measured interface) to [ip]. */
+    private val systemPing: ((ip: String, count: Int, source: String, control: MeasurementControl) -> String)? = null,
     private val clock: MillisClock = SystemMillisClock,
     /** DNS server port; tests point it at a local fake server. */
     private val dnsPort: Int = 53,
@@ -231,11 +234,14 @@ class NetworkTestRunner(
         val host = substitute(test.host!!, link)
         val address = resolveFirst(net, host)
         val count = test.count ?: DEFAULT_PING_COUNT
-        // ICMP only with a known Wi-Fi interface and an address resolved on that network.
-        val iface = link.interfaceName
+        // ICMP only from an address of the Wi-Fi interface (binding to the interface name needs
+        // CAP_NET_RAW, which apps do not have; binding to its source address does not) and to an
+        // address resolved on that network. Otherwise, or if ping fails, a labelled TCP probe.
+        val source = link.localAddresses.firstOrNull { it.javaClass == address.javaClass }?.hostAddress
         val pinger = systemPing
-        val icmp = if (pinger != null && iface != null) {
-            runCatching { PingOutputParser.parse(pinger(address.hostAddress!!, count, iface, control)) }.getOrNull()
+        val icmp = if (pinger != null && source != null) {
+            runCatching { PingOutputParser.parse(pinger(address.hostAddress!!, count, source, control)) }.getOrNull()
+                ?.takeIf { it.sent > 0 }
         } else {
             null
         }
@@ -351,14 +357,14 @@ class NetworkTestRunner(
         private const val PROBE_GAP_MILLIS = 100L
 
         /** System ping bound to the Wi-Fi interface: 0.2 s apart (the unprivileged minimum). */
-        fun systemPingCommand(ip: String, count: Int, interfaceName: String): List<String> =
-            listOf("ping", "-n", "-c", count.toString(), "-i", "0.2", "-W", "2", "-I", interfaceName, ip)
+        fun systemPingCommand(ip: String, count: Int, source: String): List<String> =
+            listOf(if (':' in ip) "ping6" else "ping", "-n", "-c", count.toString(), "-i", "0.2", "-W", "2", "-I", source, ip)
 
         /** Runs [systemPingCommand] on an IP literal; returns its output (also when probes were lost). */
-        fun runSystemPing(ip: String, count: Int, interfaceName: String, control: MeasurementControl): String {
+        fun runSystemPing(ip: String, count: Int, source: String, control: MeasurementControl): String {
             require(ip.matches(Regex("[0-9a-fA-F.:]+"))) { "ping target must be an IP address" }
-            require(interfaceName.matches(Regex("[A-Za-z0-9_.-]+"))) { "invalid interface name" }
-            val process = control.track(ProcessBuilder(systemPingCommand(ip, count, interfaceName)).redirectErrorStream(true).start())
+            require(source.matches(Regex("[0-9a-fA-F.:]+"))) { "ping source must be an IP address" }
+            val process = control.track(ProcessBuilder(systemPingCommand(ip, count, source)).redirectErrorStream(true).start())
             try {
                 if (!process.waitFor(count * 1L + 5L, TimeUnit.SECONDS)) {
                     process.destroyForcibly()

@@ -82,7 +82,8 @@ class AndroidMeasurementNetwork internal constructor(
             gateway = link.routes.firstOrNull { it.isDefaultRoute && it.gateway?.isAnyLocalAddress == false }
                 ?.gateway?.hostAddress,
             dnsServers = link.dnsServers,
-            interfaceName = link.interfaceName
+            interfaceName = link.interfaceName,
+            localAddresses = link.linkAddresses.map { it.address }.filterNot { it.isLinkLocalAddress || it.isLoopbackAddress }
         )
     }
 

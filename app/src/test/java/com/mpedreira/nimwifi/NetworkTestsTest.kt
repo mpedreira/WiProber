@@ -49,7 +49,7 @@ class NetworkTestsTest {
     @Test
     fun pingFallsBackToTcpAndCountsRefusedAsAReply() {
         val closedPort = ServerSocket(0).use { it.localPort }
-        val network = FakeMeasurementNetwork(link = NetworkContext(interfaceName = "wlan0"))
+        val network = FakeMeasurementNetwork(link = NetworkContext(interfaceName = "wlan0", localAddresses = listOf(InetAddress.getByName("127.0.0.1"))))
         val result = runner(network, ping = { _, _, _, _ -> "ping: socket: Operation not permitted" })
             .run(NetworkTest(name = "gw", type = "ping", host = "127.0.0.1", port = closedPort, count = 3))
 
@@ -61,10 +61,10 @@ class NetworkTestsTest {
     }
 
     @Test
-    fun pingWithoutAKnownWifiInterfaceNeverUsesTheSystemPing() {
+    fun pingWithoutAnAddressOnTheWifiInterfaceNeverUsesTheSystemPing() {
         val result = runner(
-            FakeMeasurementNetwork(link = NetworkContext(interfaceName = null)),
-            ping = { _, _, _, _ -> throw AssertionError("system ping must not run without the Wi-Fi interface") }
+            FakeMeasurementNetwork(link = NetworkContext(interfaceName = "wlan0")),
+            ping = { _, _, _, _ -> throw AssertionError("system ping must not run without a Wi-Fi source address") }
         ).run(NetworkTest(name = "gw", type = "ping", host = "127.0.0.1", port = ServerSocket(0).use { it.localPort }, count = 2))
         assertEquals("tcp", result.method)
     }
@@ -73,13 +73,16 @@ class NetworkTestsTest {
     fun icmpPingIsUsedWhenTheSystemPingWorks() {
         val network = FakeMeasurementNetwork(
             hosts = mapOf("gw.internal" to listOf(InetAddress.getByName("10.0.0.1"))),
-            link = NetworkContext(gateway = "gw.internal", interfaceName = "wlan0")
+            link = NetworkContext(
+                gateway = "gw.internal", interfaceName = "wlan0",
+                localAddresses = listOf(InetAddress.getByName("fe80::1"), InetAddress.getByName("10.0.0.23"))
+            )
         )
         val result = runner(
             network,
-            ping = { ip, count, iface, _ ->
+            ping = { ip, count, source, _ ->
                 assertEquals("10.0.0.1", ip) // resolved on the Wi-Fi before pinging
-                assertEquals("wlan0", iface)
+                assertEquals("10.0.0.23", source) // the Wi-Fi address of the same family, not the interface name
                 (1..count).joinToString("\n") { "64 bytes from $ip: icmp_seq=$it ttl=64 time=1.0 ms" } +
                     "\n$count packets transmitted, $count received, 0% packet loss"
             }
@@ -90,6 +93,13 @@ class NetworkTestsTest {
         assertEquals("10.0.0.1", result.resolvedAddress)
         assertEquals(4, result.sent)
         assertTrue(result.ok)
+    }
+
+    @Test
+    fun systemPingBindsToTheSourceAddress() {
+        assertEquals(listOf("ping", "-n", "-c", "3", "-i", "0.2", "-W", "2", "-I", "10.0.0.23", "10.0.0.1"),
+            NetworkTestRunner.systemPingCommand("10.0.0.1", 3, "10.0.0.23"))
+        assertEquals("ping6", NetworkTestRunner.systemPingCommand("fd00::1", 1, "fd00::23").first())
     }
 
     @Test
