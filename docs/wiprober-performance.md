@@ -71,6 +71,8 @@ A **point** (`pointId`) is a physical position on a floor; each passive Wi-Fi **
 | `profile` | string \| null | Configuration used (`device-settings`, `legacy` for migrated results) |
 | `phases` | array | Every planned phase: `key` (`target:<targetId>:latency\|download\|upload`, `test:<name>`, `script:<name>:<step>`), `label`, `status` (`pending`, `completed`, `failed`, `skipped`, `cancelled`, `interrupted`), `errorCode`, `endedAt` |
 
+Each phase is saved together with its value as soon as it finishes (latency, download, upload, every network test and every script step), so a later failure, cancel, skip or process death keeps the finished values: the unfinished phases of the result get the run's final status and reason (`uploadStatus: "cancelled"`, `uploadErrorCode: "cancelled"`; a script cut after its first step keeps that step and gets `errorCode`). `phaseSummary` counts the planned phases by final status, separately from the run `status`. Runs saved by earlier versions are read unchanged.
+
 Every phase has a monotonic deadline (latency 15 s, transfers duration + 10 s, network tests by type, script steps 20 s) and the point has one more (all phases plus 15 s). On a deadline or cancel the run's sockets, HTTP connections, worker threads and ping processes are closed, so a blocked transfer ends at once.
 
 ## 3. Throughput rows (`measurements`)

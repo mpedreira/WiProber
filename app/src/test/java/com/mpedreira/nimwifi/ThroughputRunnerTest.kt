@@ -292,7 +292,9 @@ class ThroughputRunnerTest {
         assertEquals(ThroughputRunner.plan(settings, emptyList(), emptyList()).map { it.key }, phases.map { it.first })
         assertEquals(listOf(RunStatus.FAILED, RunStatus.SKIPPED, RunStatus.SKIPPED), phases.map { it.second })
         assertEquals(listOf(ErrorCodes.CONNECTION_REFUSED, ErrorCodes.SKIPPED_UNREACHABLE, ErrorCodes.SKIPPED_UNREACHABLE), phases.map { it.third })
-        assertEquals(1, partials.size)
+        // One update per finished phase, each with the target's result so far (mejora 4).
+        assertEquals(3, partials.size)
+        assertTrue(partials.all { it.tests.size == 1 })
     }
 
     @Test

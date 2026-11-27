@@ -53,7 +53,10 @@ data class ActiveRun(
 ) {
     val isFinished: Boolean get() = status !in RunStatus.UNFINISHED
 
-    /** Marks every unfinished phase and the run with [status] (cancelled, interrupted, failed). */
+    /**
+     * Marks every unfinished phase and the run with [status] (cancelled, interrupted, failed).
+     * Finished values stay; the phases of the results that had not finished get the same status.
+     */
     fun end(status: String, reason: String?, at: Long): ActiveRun = copy(
         status = status,
         statusReason = reason,
@@ -61,8 +64,15 @@ data class ActiveRun(
         phases = phases.map { phase ->
             if (phase.status in RunStatus.UNFINISHED) phase.copy(status = status, errorCode = phase.errorCode ?: reason, endedAt = at)
             else phase
-        }
+        },
+        results = results?.endUnfinished(status, reason)
     )
+
+    /**
+     * Mejora 4: the run's own status is separate from what its phases produced. Counts of the
+     * planned phases by final status.
+     */
+    val phaseSummary: Map<String, Int> get() = phases.groupingBy { it.status }.eachCount()
 }
 
 /** Stable identifiers and repeatable migration of points and runs saved by earlier versions. */
@@ -107,4 +117,23 @@ object SurveyIds {
     fun reconcile(runs: List<ActiveRun>, now: Long): List<ActiveRun> = runs.map { run ->
         if (run.isFinished) run else run.end(RunStatus.INTERRUPTED, ErrorCodes.INTERRUPTED, now)
     }
+}
+
+
+/** Phases of results still pending/running when the run ended get the run's final status. */
+fun PointThroughput.endUnfinished(status: String, reason: String?): PointThroughput {
+    fun close(phaseStatus: String?, code: String?): Pair<String?, String?> =
+        if (phaseStatus in RunStatus.UNFINISHED) status to (code ?: reason) else phaseStatus to code
+    return copy(
+        tests = tests.map { t ->
+            val (ls, lc) = close(t.latencyStatus, t.latencyErrorCode)
+            val (ds, dc) = close(t.downloadStatus, t.downloadErrorCode)
+            val (us, uc) = close(t.uploadStatus, t.uploadErrorCode)
+            t.copy(latencyStatus = ls, latencyErrorCode = lc, downloadStatus = ds, downloadErrorCode = dc, uploadStatus = us, uploadErrorCode = uc)
+        },
+        scripts = scripts?.map { run ->
+            val total = run.stepsTotal ?: run.steps.size
+            if (run.steps.size < total && run.errorCode == null) run.copy(errorCode = reason ?: status) else run
+        }
+    )
 }

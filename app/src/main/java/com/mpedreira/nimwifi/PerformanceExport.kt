@@ -236,6 +236,8 @@ object PerformanceExport {
         addProperty("status", run.status)
         addProperty("statusReason", run.statusReason)
         addProperty("profile", run.profile)
+        // The run's status is separate from what its phases produced.
+        add("phaseSummary", JsonObject().apply { run.phaseSummary.toSortedMap().forEach { (status, n) -> addProperty(status, n) } })
         add("phases", JsonArray().apply {
             run.phases.forEach { phase ->
                 add(JsonObject().apply {

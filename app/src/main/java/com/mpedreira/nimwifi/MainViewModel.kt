@@ -740,6 +740,18 @@ class MainViewModel @JvmOverloads constructor(
         override fun onPartial(results: PointThroughput) = updateRun(runId) { state, run ->
             state.replaceRun(run.copy(results = results))
         }
+
+        // Status and value of a phase in one state update (saved together).
+        override fun onPhaseResult(key: String, status: String, errorCode: String?, results: PointThroughput) =
+            updateRun(runId) { state, run ->
+                val now = clock.now()
+                state.replaceRun(run.copy(
+                    results = results,
+                    phases = run.phases.map { phase ->
+                        if (phase.key == key) phase.copy(status = status, errorCode = errorCode, endedAt = now) else phase
+                    }
+                ))
+            }
     }
 
     private fun updateRun(runId: String, change: (SurveyScreenState, ActiveRun) -> SurveyScreenState) {

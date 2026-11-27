@@ -48,6 +48,15 @@ interface RunListener {
 
     /** Results finished so far, to be saved progressively. */
     fun onPartial(results: PointThroughput) {}
+
+    /**
+     * Mejora 4: a phase finished; [results] already holds its value (and every earlier one), so
+     * the phase status and its value are saved as one coherent update.
+     */
+    fun onPhaseResult(key: String, status: String, errorCode: String?, results: PointThroughput) {
+        onPhase(key, status, errorCode)
+        onPartial(results)
+    }
 }
 
 /**
@@ -112,18 +121,26 @@ class ThroughputRunner(
             targets.size * TARGET_PHASES + enabledTests.size + enabledScripts.sumOf { it.steps.size },
             listener
         )
+        // Every finished phase is published with the results so far, including the target, test
+        // or script still in progress, so a later cancel or failure never loses a finished value.
         var partial = PointThroughput(measuredAt = clock.now(), tests = emptyList(), networkTests = emptyList(), scripts = emptyList())
         targets.forEach { target ->
-            partial = partial.copy(tests = partial.tests + measureTarget(target, tracker))
-            listener.onPartial(partial)
+            val done = partial
+            partial = partial.copy(tests = partial.tests + measureTarget(target, tracker) { key, status, code, current ->
+                listener.onPhaseResult(key, status, code, done.copy(tests = done.tests + current))
+            })
         }
         enabledTests.forEach { test ->
-            partial = partial.copy(networkTests = partial.networkTests.orEmpty() + runNetworkTest(test, tracker))
-            listener.onPartial(partial)
+            val done = partial
+            partial = partial.copy(networkTests = partial.networkTests.orEmpty() + runNetworkTest(test, tracker) { key, status, code, current ->
+                listener.onPhaseResult(key, status, code, done.copy(networkTests = done.networkTests.orEmpty() + current))
+            })
         }
         enabledScripts.forEach { script ->
-            partial = partial.copy(scripts = partial.scripts.orEmpty() + runScript(script, tracker))
-            listener.onPartial(partial)
+            val done = partial
+            partial = partial.copy(scripts = partial.scripts.orEmpty() + runScript(script, tracker) { key, status, code, current ->
+                listener.onPhaseResult(key, status, code, done.copy(scripts = done.scripts.orEmpty() + current))
+            })
         }
         return partial
     }
@@ -133,7 +150,11 @@ class ThroughputRunner(
         if (config.internetEnabled) add(internetTarget(config))
     }
 
-    private fun runNetworkTest(test: NetworkTest, tracker: ProgressTracker): NetworkTestResult {
+    private fun runNetworkTest(
+        test: NetworkTest,
+        tracker: ProgressTracker,
+        report: (String, String, String?, NetworkTestResult) -> Unit
+    ): NetworkTestResult {
         var result: NetworkTestResult? = null
         tracker.run(test.displayAlias, ThroughputPhase.NETWORK_TEST, null, detail = test.type) {
             val runner = networkTests
@@ -158,11 +179,15 @@ class ThroughputRunner(
             result?.takeIf { it.ok }?.let { it.dnsMs ?: it.rttAvgMs ?: it.totalMs }
         }
         val finished = result!!
-        tracker.phaseDone(testKey(test), if (finished.ok) RunStatus.COMPLETED else RunStatus.FAILED, finished.errorCode)
+        report(testKey(test), if (finished.ok) RunStatus.COMPLETED else RunStatus.FAILED, finished.errorCode, finished)
         return finished
     }
 
-    private fun runScript(script: HttpScript, tracker: ProgressTracker): ScriptRun {
+    private fun runScript(
+        script: HttpScript,
+        tracker: ProgressTracker,
+        report: (String, String, String?, ScriptRun) -> Unit
+    ): ScriptRun {
         val before = network?.association()
         val base = ScriptRun(
             name = script.name, measuredAt = clock.now(), alias = script.displayAlias, stepsTotal = script.steps.size,
@@ -176,11 +201,13 @@ class ThroughputRunner(
             else -> null
         }
         if (unavailable != null || runner == null) {
-            script.steps.indices.forEach { index -> tracker.phaseDone(scriptKey(script, index), RunStatus.SKIPPED, unavailable) }
+            val skipped = base.copy(error = if (unavailable == ErrorCodes.NOT_ON_WIFI) NOT_ON_WIFI else unavailable, errorCode = unavailable)
+            script.steps.indices.forEach { index -> report(scriptKey(script, index), RunStatus.SKIPPED, unavailable, skipped) }
             tracker.skipSteps(script.displayAlias, script.steps.size)
-            return base.copy(error = if (unavailable == ErrorCodes.NOT_ON_WIFI) NOT_ON_WIFI else unavailable, errorCode = unavailable)
+            return skipped
         }
         var index = 0
+        val soFar = mutableListOf<ScriptStepResult>()
         val results = runner.run(
             script,
             onStep = { i, step ->
@@ -190,7 +217,9 @@ class ThroughputRunner(
             },
             onResult = { result ->
                 tracker.finishStep(script.displayAlias, result)
-                tracker.phaseDone(scriptKey(script, index), if (result.ok) RunStatus.COMPLETED else RunStatus.FAILED, result.errorCode)
+                soFar += result
+                report(scriptKey(script, index), if (result.ok) RunStatus.COMPLETED else RunStatus.FAILED, result.errorCode,
+                    base.copy(steps = soFar.toList()))
             }
         )
         return base.copy(bssidEnd = network?.association()?.bssid, steps = results)
@@ -248,7 +277,11 @@ class ThroughputRunner(
         return association.toConnectionInfo(beacon?.channelWidthMhz, beacon?.bssLoad)
     }
 
-    private fun measureTarget(target: Target, tracker: ProgressTracker): ThroughputTestResult {
+    private fun measureTarget(
+        target: Target,
+        tracker: ProgressTracker,
+        report: (String, String, String?, ThroughputTestResult) -> Unit
+    ): ThroughputTestResult {
         val startAssociation = network?.association()
         val before = connectionInfo(startAssociation)
         val base = ThroughputTestResult(
@@ -286,14 +319,15 @@ class ThroughputRunner(
         }
         if (notRunCode != null) {
             tracker.skip(target.alias)
-            keys.forEach { tracker.phaseDone(it, RunStatus.SKIPPED, notRunCode) }
-            return base.copy(
+            val skipped = base.copy(
                 error = if (network == null) NOT_ON_WIFI else target.missingConfiguration,
                 associationChange = AssociationChange.UNKNOWN,
                 latencyStatus = RunStatus.SKIPPED, latencyErrorCode = notRunCode,
                 downloadStatus = RunStatus.SKIPPED, downloadErrorCode = notRunCode,
                 uploadStatus = RunStatus.SKIPPED, uploadErrorCode = notRunCode
             )
+            keys.forEach { report(it, RunStatus.SKIPPED, notRunCode, skipped) }
+            return skipped
         }
 
         val errors = mutableListOf<String>()
@@ -304,7 +338,33 @@ class ThroughputRunner(
         }
         val stats = latency!!.value
         val latencyCode = latency!!.code ?: if (stats != null && stats.failures > 0) ErrorCodes.PARTIAL_LOSS else null
-        tracker.phaseDone(keys[0], latency!!.status, latencyCode)
+
+        /** The result with the phases finished so far; the others stay pending. */
+        fun assemble(download: PhaseOutcome<TransferResult>?, upload: PhaseOutcome<TransferResult>?, end: Association?) = base.copy(
+            ssidEnd = end?.ssid,
+            bssidEnd = end?.bssid,
+            associationChange = end?.let { AssociationChange.between(startAssociation, it) },
+            resolvedAddress = stats?.address?.hostAddress,
+            latencyMs = stats?.min?.let(::round),
+            latencyAvgMs = stats?.mean?.let(::round),
+            jitterMs = stats?.jitter?.let(::round),
+            latencySamples = stats?.samples,
+            latencyFailures = stats?.failures,
+            latencyStatus = latency!!.status,
+            latencyErrorCode = latencyCode,
+            downMbps = download?.value?.let { toMbps(it.bitsPerSecond) },
+            downBytes = download?.value?.bytes,
+            downSeconds = download?.value?.seconds?.let(::round),
+            downloadStatus = download?.status ?: RunStatus.PENDING,
+            downloadErrorCode = download?.code,
+            upMbps = upload?.value?.let { toMbps(it.bitsPerSecond) },
+            upBytes = upload?.value?.bytes,
+            upSeconds = upload?.value?.seconds?.let(::round),
+            uploadStatus = upload?.status ?: RunStatus.PENDING,
+            uploadErrorCode = upload?.code,
+            error = errors.joinToString("; ").ifEmpty { null }
+        )
+        report(keys[0], latency!!.status, latencyCode, assemble(null, null, null))
 
         val address = stats?.address
         val transferDeadline = (target.durationSeconds + TRANSFER_GRACE_SECONDS) * 1_000L
@@ -322,7 +382,7 @@ class ThroughputRunner(
             }
             download = outcome!!
         }
-        tracker.phaseDone(keys[1], download.status, download.code)
+        report(keys[1], download.status, download.code, assemble(download, null, null))
 
         val uploadTest = target.upload
         val upload: PhaseOutcome<TransferResult> = when {
@@ -345,33 +405,9 @@ class ThroughputRunner(
                 outcome!!
             }
         }
-        tracker.phaseDone(keys[2], upload.status, upload.code)
-
-        val endAssociation = network!!.association()
-        return base.copy(
-            ssidEnd = endAssociation.ssid,
-            bssidEnd = endAssociation.bssid,
-            associationChange = AssociationChange.between(startAssociation, endAssociation),
-            resolvedAddress = address?.hostAddress,
-            latencyMs = stats?.min?.let(::round),
-            latencyAvgMs = stats?.mean?.let(::round),
-            jitterMs = stats?.jitter?.let(::round),
-            latencySamples = stats?.samples,
-            latencyFailures = stats?.failures,
-            latencyStatus = latency!!.status,
-            latencyErrorCode = latencyCode,
-            downMbps = download.value?.let { toMbps(it.bitsPerSecond) },
-            downBytes = download.value?.bytes,
-            downSeconds = download.value?.seconds?.let(::round),
-            downloadStatus = download.status,
-            downloadErrorCode = download.code,
-            upMbps = upload.value?.let { toMbps(it.bitsPerSecond) },
-            upBytes = upload.value?.bytes,
-            upSeconds = upload.value?.seconds?.let(::round),
-            uploadStatus = upload.status,
-            uploadErrorCode = upload.code,
-            error = errors.joinToString("; ").ifEmpty { null }
-        )
+        val final = assemble(download, upload, network!!.association())
+        report(keys[2], upload.status, upload.code, final)
+        return final
     }
 
     /**
