@@ -27,8 +27,18 @@ object SurveyReport {
         /** Mejora 9: the series the figures belong to; only results of one series are combined. */
         val seriesId: String = "",
         val seriesLabel: String = "",
-        val comparable: Boolean = true
+        val comparable: Boolean = true,
+        /** Mejora 1: per point of this SSID, its last attempt and its last valid measurement. */
+        val points: List<PointFact> = emptyList()
     )
+
+    /** One attempt of a series at a point: which run, when, how it ended and its value (null = none). */
+    data class Fact(val runId: String, val at: Long, val status: String, val value: Double?, val code: String?)
+
+    data class PointFact(val pointId: String, val label: String, val lastAttempt: Fact, val lastValid: Fact?)
+
+    /** A run that belongs to this SSID (by its results or, without results, by the network it observed). */
+    data class RunFact(val runId: String, val pointLabel: String, val at: Long, val status: String, val reason: String?, val withValues: Boolean)
 
     data class Event(val kind: String, val at: Long?, val from: String?, val to: String?, val detail: String?)
 
@@ -37,7 +47,8 @@ object SurveyReport {
         val points: List<PointCoverage>,
         val metrics: List<Metric>,
         val apChanges: List<Event>,
-        val outages: List<Event>
+        val outages: List<Event>,
+        val runs: List<RunFact> = emptyList()
     ) {
         fun count(state: String) = points.count { it.state == state }
     }
@@ -50,7 +61,9 @@ object SurveyReport {
         val selection: RunSelection,
         val weakDbm: Int,
         val profile: String = SignalProfile.DEFAULT.id,
-        val floors: List<FloorSection>
+        val floors: List<FloorSection>,
+        /** Mejora 1: what the selection covers (all runs, one run, an interval). */
+        val selectionDetail: String? = null
     )
 
     fun build(
@@ -59,96 +72,144 @@ object SurveyReport {
         chosenSsid: String = "",
         selection: RunSelection = RunSelection.LATEST_PER_POINT,
         weakDbm: Int = SsidCoverage.DEFAULT_WEAK_DBM,
-        profile: String = SignalProfile.DEFAULT.id
+        profile: String = SignalProfile.DEFAULT.id,
+        /** Only this run (a pass), or only runs started inside [fromMs]..[toMs] (a campaign). */
+        runId: String? = null,
+        fromMs: Long? = null,
+        toMs: Long? = null
     ): Model = Model(
         profile = profile,
+        selectionDetail = listOfNotNull(runId?.let { "run $it" },
+            if (fromMs != null || toMs != null) "runs from ${fromMs ?: "start"} to ${toMs ?: "end"}" else null).joinToString("; ").ifEmpty { null },
         title = snapshot.title,
         generatedAt = generatedAt,
         selection = selection,
         weakDbm = weakDbm,
         floors = snapshot.floors.map { floor ->
             val survey = floor.survey
-            val runs = select(survey.activeRuns, selection)
+            // Selection is applied per SSID and series in section(), never across SSIDs.
+            val runs = survey.activeRuns.filter { run ->
+                (runId == null || run.runId == runId) &&
+                    (fromMs == null || run.startedAt >= fromMs) && (toMs == null || run.startedAt <= toMs)
+            }
             FloorSection(
                 floorName = floor.name,
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
-                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm) }
+                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection) }
             )
         }
     )
 
     /** The chosen SSID, the SSIDs associated during active tests, else the three most widely detected. */
     fun ssidsFor(survey: ProjectSnapshot, chosen: String): List<String> {
-        val associated = survey.activeRuns.mapNotNull { it.results }.flatMap { results ->
-            results.tests.mapNotNull { it.ssid } + results.networkTests.orEmpty().mapNotNull { it.ssid } +
-                results.scripts.orEmpty().mapNotNull { it.ssid }
+        val associated = survey.activeRuns.flatMap { run ->
+            val results = run.results
+            listOfNotNull(run.observedSsid) + results?.tests.orEmpty().mapNotNull { it.ssid } +
+                results?.networkTests.orEmpty().mapNotNull { it.ssid } + results?.scripts.orEmpty().mapNotNull { it.ssid }
         }
         val list = (listOfNotNull(chosen.trim().ifEmpty { null }) + associated).filter(String::isNotEmpty).distinct()
         return list.ifEmpty { SsidCoverage.ssids(survey.scanPoints, survey.continuousScanSessions).take(3) }
     }
 
-    fun select(runs: List<ActiveRun>, selection: RunSelection): List<ActiveRun> = when (selection) {
-        RunSelection.ALL -> runs
-        RunSelection.LATEST_PER_POINT -> runs.groupBy(ActiveRun::pointId).values.map { it.maxBy(ActiveRun::startedAt) }
-    }
+    /** One measurement of a series at a point in one run (value null = attempted without a value). */
+    private class Entry(val series: Series, val pointId: String, val run: ActiveRun, val value: Double?, val status: String, val code: String?)
 
-    private fun section(ssid: String, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int): SsidSection {
-        val results = runs.mapNotNull { it.results }
+    private fun section(ssid: String, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection): SsidSection {
+        val labels = SsidCoverage.labels(survey.scanPoints, survey.plannedPoints)
+        // Runs of this SSID: by the SSID of their results, else by the network observed before the run.
+        val ssidRuns = runs.filter { run ->
+            val r = run.results
+            val fromResults = r?.tests.orEmpty().map { it.ssid } + r?.networkTests.orEmpty().map { it.ssid } + r?.scripts.orEmpty().map { it.ssid }
+            ssid in fromResults || (fromResults.all { it == null } && run.observedSsid == ssid)
+        }
         val metrics = mutableListOf<Metric>()
-        fun metric(category: String, alias: String, measure: String, unit: String, method: String?, values: List<Double?>, failures: Int, series: Series) {
-            val ok = values.filterNotNull().sorted()
-            if (ok.isEmpty() && failures == 0) return
+        fun metric(category: String, alias: String, measure: String, unit: String, method: String?, entries: List<Entry>) {
+            if (entries.isEmpty()) return
+            val series = entries.first().series
+            // Mejora 1: per point, the last attempt and the last valid value are different facts.
+            val points = entries.groupBy { it.pointId }.map { (pointId, list) ->
+                val sorted = list.sortedBy { it.run.startedAt }
+                fun fact(e: Entry) = Fact(e.run.runId, e.run.startedAt, e.status, e.value, e.code)
+                PointFact(pointId, labels[pointId] ?: pointId, fact(sorted.last()), sorted.lastOrNull { it.value != null }?.let(::fact))
+            }.sortedBy { it.label }
+            val values = when (selection) {
+                RunSelection.ALL -> entries.mapNotNull { it.value }
+                RunSelection.LATEST_PER_POINT -> points.mapNotNull { it.lastValid?.value }
+            }.sorted()
+            val failures = when (selection) {
+                RunSelection.ALL -> entries.count { it.value == null }
+                RunSelection.LATEST_PER_POINT -> points.count { it.lastAttempt.value == null }
+            }
+            if (values.isEmpty() && failures == 0) return
             metrics += Metric(
-                category, alias, measure, unit, method, ok.size, failures,
-                ok.takeIf { it.isNotEmpty() }?.let { round1(if (it.size % 2 == 1) it[it.size / 2] else (it[it.size / 2 - 1] + it[it.size / 2]) / 2) },
-                ok.firstOrNull(), ok.lastOrNull(), series.id, series.label, series.comparable
+                category, alias, measure, unit, method, values.size, failures,
+                values.takeIf { it.isNotEmpty() }?.let { round1(if (it.size % 2 == 1) it[it.size / 2] else (it[it.size / 2 - 1] + it[it.size / 2]) / 2) },
+                values.firstOrNull(), values.lastOrNull(), series.id, series.label, series.comparable, points
             )
         }
         fun categoryOf(t: ThroughputTestResult) = t.category ?: if (t.method == ThroughputTestResult.METHOD_IPERF3_TCP) TargetCategory.PRIVATE_IPERF else TargetCategory.INTERNET
-        val throughput = results.flatMap { it.tests }.filter { it.ssid == ssid }
-        // Grouped by series, never by alias: the same alias on another endpoint, port, direction
-        // or method is another series.
+        fun status(s: String?, value: Double?) = s ?: if (value != null) RunStatus.COMPLETED else RunStatus.FAILED
+
+        // Throughput: grouped by series, never by alias, and only results of this SSID.
+        val throughput = ssidRuns.flatMap { run -> run.results?.tests.orEmpty().filter { it.ssid == ssid }.map { run to it } }
         listOf(Series.DOWNLOAD, Series.UPLOAD, Series.LATENCY).forEach { direction ->
-            throughput.groupBy { Series.throughput(it, direction).id }.forEach { (_, tests) ->
-                val first = tests.first()
-                val series = Series.throughput(first, direction)
+            val entries = throughput.map { (run, t) ->
+                val series = Series.throughput(t, direction)
                 when (direction) {
-                    Series.DOWNLOAD -> metric(categoryOf(first), first.target, "download", "Mbit/s", first.method, tests.map { it.downMbps },
-                        tests.count { it.downMbps == null && (it.downloadErrorCode != null || it.error != null) }, series)
-                    Series.UPLOAD -> metric(categoryOf(first), first.target, "upload", "Mbit/s", first.method, tests.map { it.upMbps },
-                        tests.count { it.upMbps == null && (it.uploadErrorCode != null || it.error != null) }, series)
-                    else -> metric(categoryOf(first), first.target, "latency", "ms", first.latencyMethod ?: "tcp-connect", tests.map { it.latencyMs },
-                        tests.count { it.latencyMs == null && (it.latencyErrorCode != null || it.error != null) }, series)
+                    Series.DOWNLOAD -> Entry(series, run.pointId, run, t.downMbps, status(t.downloadStatus, t.downMbps), t.downloadErrorCode)
+                    Series.UPLOAD -> Entry(series, run.pointId, run, t.upMbps, status(t.uploadStatus, t.upMbps), t.uploadErrorCode)
+                    else -> Entry(series, run.pointId, run, t.latencyMs, status(t.latencyStatus, t.latencyMs), t.latencyErrorCode)
+                }
+            }.toMutableList()
+            // A run of this SSID cut before this target produced a result still counts as an attempt
+            // of the target's series (its phase status says how it ended).
+            ssidRuns.filter { run -> run.results?.tests.orEmpty().none { it.ssid == ssid } }.forEach { run ->
+                run.phases.filter { it.key.startsWith("target:") && it.key.endsWith(":$direction") }.forEach { phase ->
+                    val targetId = phase.key.removePrefix("target:").substringBeforeLast(':')
+                    val known = throughput.lastOrNull { it.second.targetId == targetId }?.second ?: return@forEach
+                    entries += Entry(Series.throughput(known, direction), run.pointId, run, null, phase.status, phase.errorCode ?: run.statusReason)
+                }
+            }
+            entries.groupBy { it.series.id }.forEach { (_, list) ->
+                val first = throughput.first { Series.throughput(it.second, direction).id == list.first().series.id }.second
+                when (direction) {
+                    Series.DOWNLOAD -> metric(categoryOf(first), first.target, "download", "Mbit/s", first.method, list)
+                    Series.UPLOAD -> metric(categoryOf(first), first.target, "upload", "Mbit/s", first.method, list)
+                    else -> metric(categoryOf(first), first.target, "latency", "ms", first.latencyMethod ?: "tcp-connect", list)
                 }
             }
         }
-        results.flatMap { it.networkTests.orEmpty() }.filter { it.ssid == ssid }
-            .groupBy { Series.networkTest(it).id }
-            .forEach { (_, tests) ->
-                val category = tests.first().category ?: TargetCategory.INTERNAL
-                val alias = tests.first().alias ?: tests.first().name
-                val type = tests.first().type
-                val (measure, values) = when (type) {
-                    NetworkTest.DNS -> "dns lookup" to tests.map { it.dnsMs }
-                    NetworkTest.PING -> "round trip" to tests.map { it.rttAvgMs }
-                    NetworkTest.TCP -> "tcp connect" to tests.map { it.connectMs }
-                    else -> "http request" to tests.map { it.totalMs }
+        ssidRuns.flatMap { run -> run.results?.networkTests.orEmpty().filter { it.ssid == ssid }.map { run to it } }
+            .groupBy { Series.networkTest(it.second).id }
+            .forEach { (_, list) ->
+                val first = list.first().second
+                val (measure, read) = when (first.type) {
+                    NetworkTest.DNS -> "dns lookup" to { t: NetworkTestResult -> t.dnsMs }
+                    NetworkTest.PING -> "round trip" to { t: NetworkTestResult -> t.rttAvgMs }
+                    NetworkTest.TCP -> "tcp connect" to { t: NetworkTestResult -> t.connectMs }
+                    else -> "http request" to { t: NetworkTestResult -> t.totalMs }
                 }
-                metric(category, alias, measure, "ms", tests.firstNotNullOfOrNull { it.method } ?: type, values.zip(tests) { v, t -> v.takeIf { t.ok } },
-                    tests.count { !it.ok }, Series.networkTest(tests.first()))
+                metric(first.category ?: TargetCategory.INTERNAL, first.alias ?: first.name, measure, "ms", first.method ?: first.type,
+                    list.map { (run, t) -> Entry(Series.networkTest(t), run.pointId, run, read(t).takeIf { t.ok }, if (t.ok) RunStatus.COMPLETED else RunStatus.FAILED, t.errorCode) })
             }
-        results.flatMap { it.scripts.orEmpty() }.filter { it.ssid == ssid }
-            .groupBy { Series.script(it).id }
-            .forEach { (_, scriptRuns) ->
-                metric(
-                    TargetCategory.INTERNAL, scriptRuns.first().alias ?: scriptRuns.first().name, "script", "ms", "http-script",
-                    scriptRuns.map { run -> run.steps.takeIf { s -> s.isNotEmpty() && s.all { it.ok } }?.sumOf { it.totalMs ?: 0.0 } },
-                    scriptRuns.count { run -> run.steps.isEmpty() || run.steps.any { !it.ok } },
-                    Series.script(scriptRuns.first())
-                )
+        ssidRuns.flatMap { run -> run.results?.scripts.orEmpty().filter { it.ssid == ssid }.map { run to it } }
+            .groupBy { Series.script(it.second).id }
+            .forEach { (_, list) ->
+                val first = list.first().second
+                metric(TargetCategory.INTERNAL, first.alias ?: first.name, "script", "ms", "http-script",
+                    list.map { (run, sr) ->
+                        val complete = sr.steps.isNotEmpty() && sr.steps.all { it.ok } && sr.steps.size == (sr.stepsTotal ?: sr.steps.size)
+                        Entry(Series.script(sr), run.pointId, run, if (complete) sr.steps.sumOf { it.totalMs ?: 0.0 } else null,
+                            if (complete) RunStatus.COMPLETED else RunStatus.FAILED, sr.errorCode ?: sr.steps.firstOrNull { !it.ok }?.errorCode)
+                    })
             }
+        val runFacts = ssidRuns.sortedBy { it.startedAt }.map { run ->
+            RunFact(run.runId, labels[run.pointId] ?: run.pointId, run.startedAt, run.status, run.statusReason,
+                run.results?.let { !it.isEmpty } == true)
+        }
+        val results = ssidRuns.mapNotNull { it.results }
 
         val apChanges = mutableListOf<Event>()
         val outages = mutableListOf<Event>()
@@ -171,7 +232,7 @@ object SurveyReport {
                 }
             }
         }
-        return SsidSection(ssid, SsidCoverage.points(survey.scanPoints, survey.plannedPoints, ssid, weakDbm), metrics, apChanges, outages)
+        return SsidSection(ssid, SsidCoverage.points(survey.scanPoints, survey.plannedPoints, ssid, weakDbm), metrics, apChanges, outages, runFacts)
     }
 
     fun html(model: Model): String = buildString {
@@ -186,7 +247,8 @@ object SurveyReport {
         append("</style></head><body>")
         append("<h1>").append(e(model.title)).append("</h1>")
         append("<p class=\"muted\">Generated ").append(e(at(model.generatedAt))).append(". Service figures use ")
-        append(if (model.selection == RunSelection.ALL) "every run" else "the latest run at each point")
+        append(if (model.selection == RunSelection.ALL) "every run" else "the last valid value at each point, per SSID and series")
+        model.selectionDetail?.let { append(" (").append(e(it)).append(")") }
         append(". Weak signal (profile ").append(e(model.profile)).append("): strongest AP of the SSID below ").append(model.weakDbm).append(" dBm in the latest valid scan. ")
         append("Signal values are the strongest AP of each SSID seen by the passive scan, not necessarily the AP the phone was connected to during the tests. ")
         append("Points imported from an ESX have no local measurement (their Ekahau data is kept untouched in the .esx).</p>")
@@ -222,6 +284,24 @@ object SurveyReport {
                             .append(e(m.method)).append("</td><td>").append(m.samples).append("</td><td>").append(m.failures).append("</td></tr>")
                     }
                     append("</table>")
+                }
+                section.metrics.filter { it.points.isNotEmpty() }.forEach { m ->
+                    append("<details><summary>").append(e(m.alias)).append(" · ").append(e(m.measure)).append(" · per point</summary>")
+                    append("<table><tr><th>Point</th><th>Last attempt</th><th>Last valid</th></tr>")
+                    m.points.forEach { p ->
+                        fun fact(f: Fact?) = f?.let { "${at(it.at)} · ${it.status}${it.code?.let { c -> " ($c)" } ?: ""}${it.value?.let { v -> " · $v ${m.unit}" } ?: ""} · run ${it.runId}" } ?: "—"
+                        append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(fact(p.lastAttempt))).append("</td><td>").append(e(fact(p.lastValid))).append("</td></tr>")
+                    }
+                    append("</table></details>")
+                }
+                if (section.runs.isNotEmpty()) {
+                    append("<details><summary>Runs on this SSID (").append(section.runs.size).append(")</summary><table><tr><th>Run</th><th>Point</th><th>Started</th><th>Status</th><th>Values</th></tr>")
+                    section.runs.forEach { r ->
+                        append("<tr><td>").append(e(r.runId)).append("</td><td>").append(e(r.pointLabel)).append("</td><td>").append(e(at(r.at)))
+                            .append("</td><td>").append(e(r.status)).append(r.reason?.let { " (" + e(it) + ")" } ?: "").append("</td><td>")
+                            .append(if (r.withValues) "yes" else "none").append("</td></tr>")
+                    }
+                    append("</table></details>")
                 }
                 (section.apChanges.map { "AP change" to it } + section.outages.map { "Outage" to it }).takeIf { it.isNotEmpty() }?.let { events ->
                     append("<table><tr><th>Event</th><th>Kind</th><th>When</th><th>From</th><th>To</th><th>Detail</th></tr>")

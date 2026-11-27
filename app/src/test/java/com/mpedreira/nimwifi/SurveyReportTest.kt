@@ -71,18 +71,21 @@ class SurveyReportTest {
     fun servicesAreSeparatedByCategoryAndAliasWithUnitsMethodsSamplesAndFailures() {
         val latest = SurveyReport.build(snapshot, 0L, "Operativa").floors[0].ssids.single()
         val iperfDown = latest.metrics.single { it.category == TargetCategory.PRIVATE_IPERF && it.measure == "download" }
-        // Latest run per point: r2 (failed download) for "a", r3 for "b".
-        assertEquals(1, iperfDown.samples)
+        // Last valid value per point within the SSID: r1 (300) for "a" — its last attempt r2 failed — and r3 (100) for "b".
+        assertEquals(2, iperfDown.samples)
         assertEquals(1, iperfDown.failures)
-        assertEquals(100.0, iperfDown.median)
+        assertEquals(200.0, iperfDown.median)
+        val pointA = iperfDown.points.single { it.pointId == "a" }
+        assertEquals("r2", pointA.lastAttempt.runId)
+        assertEquals("r1", pointA.lastValid!!.runId)
         assertEquals("Mbit/s", iperfDown.unit)
         assertEquals(ThroughputTestResult.METHOD_IPERF3_TCP, iperfDown.method)
         val internetDown = latest.metrics.single { it.category == TargetCategory.INTERNET && it.measure == "download" }
         assertEquals(80.0, internetDown.median)
         val dnsMetric = latest.metrics.single { it.alias == "Corporate DNS" }
         assertEquals(TargetCategory.INTERNAL, dnsMetric.category)
-        assertEquals(0, dnsMetric.samples)
-        assertEquals(1, dnsMetric.failures)
+        assertEquals(1, dnsMetric.samples) // r1's valid value is kept…
+        assertEquals(1, dnsMetric.failures) // …and the failed last attempt (r2) is counted
         assertEquals(1, latest.apChanges.size)
 
         val all = SurveyReport.build(snapshot, 0L, "Operativa", SurveyReport.RunSelection.ALL).floors[0].ssids.single()
