@@ -15,7 +15,9 @@ nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (M
 
 ### Changed
 - Spanish and English interface (English is the default).
-- Version scheme: semantic versioning (`vX.Y.Z` tags), versionCode 4000000.
+- Version scheme: semantic versioning (`vX.Y.Z` tags, `-rc.N` test builds); versionCode `X·10⁶ + Y·10⁴ + Z·100 + slot` with slot = RC number or 99 for the stable release, so `4.0.0-rc.N` < `4.0.0` (4000099) < `4.0.1-rc.1`.
+- Field workflow (`field-build.yml`): builds and verifies the tag's exact APK (package, version, source SHA, APK SHA-256, signer), runs the iPerf3 integration test against a real iperf3, builds the R8 variant and keeps development and field-channel APKs apart. It does not publish.
+- Project copy (*Back up project*) and restore; analysis ZIPs open as *Import ESX only*.
 - About: description, build identity and links to nimWifi and to WiProber.
 - Autosave runs outside the survey screen, retries and warns when saving keeps failing.
 - Active tests, roaming and template import moved out of the survey screen code.
