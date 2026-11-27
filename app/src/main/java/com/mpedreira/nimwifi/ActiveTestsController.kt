@@ -118,7 +118,7 @@ class ActiveTestsController(
     }
 
     /** Reads a point template, previews it and adds the planned points to the current floor. */
-    fun importPointTemplate(uri: Uri, floorKey: String) {
+    fun importPointTemplate(uri: Uri, floorKey: String, mapFile: java.io.File? = null, floorPlanId: String? = null) {
         val state = viewModel.screenState.value
         val map = state.mapInfo ?: return
         activity.lifecycleScope.launch {
@@ -127,14 +127,17 @@ class ActiveTestsController(
                     val text = requireNotNull(activity.contentResolver.openInputStream(uri)) { "Cannot open the file" }.use { input ->
                         String(BoundedIo.readBytes(input, 0L, WiproberConfigStore.MAX_FILE_BYTES, "File larger than 2 MB"), Charsets.UTF_8)
                     }
+                    // Plan identity (mejora 20): the ESX floor-plan ID and the image hash, when known.
+                    val identity = PointTemplateParser.PlanIdentity(floorPlanId, mapFile?.takeIf { it.isFile }?.let(Hashes::sha256))
                     PointTemplateParser.parse(
                         text, map.width, map.height, floorKey, java.util.UUID.randomUUID().toString(),
-                        existing = state.plannedPoints.map(PlannedPoint::pointId).toSet()
+                        existing = state.plannedPoints.map(PlannedPoint::pointId).toSet(),
+                        plan = identity
                     )
                 }
             }
             parsed.onSuccess { preview ->
-                PointActionsDialogs.showTemplatePreview(activity, preview) {
+                PointActionsDialogs.showTemplatePreview(activity, preview, mapFile) {
                     if (!viewModel.addPlannedPoints(preview.points)) {
                         Toast.makeText(activity, R.string.template_nothing_added, Toast.LENGTH_SHORT).show()
                     }

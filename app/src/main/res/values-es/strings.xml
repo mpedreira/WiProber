@@ -263,6 +263,11 @@
     <string name="template_preview_title">Importar plantilla de puntos</string>
     <string name="template_preview_message">%1$d puntos a añadir.\nPlano de la plantilla: %2$d×%3$d px, escalado ×%4$s a este plano.\nFuera del plano (ignorados): %5$d. Ya en esta planta (ignorados): %6$d.\n\n%7$s</string>
     <string name="template_add">Añadir puntos</string>
+    <string name="template_add_confirm">Es este plano: añadir</string>
+    <string name="template_repeated_ids">IDs repetidos en la plantilla (solo se añade el primero de cada uno): %1$s</string>
+    <string name="template_outside_points">Fuera del plano: %1$s</string>
+    <string name="template_plan_matched">La plantilla identifica este plano (ID de plano o hash de la imagen).</string>
+    <string name="template_plan_unverified">La plantilla no identifica su plano: solo se han comprobado el tamaño y la proporción. Comprueba en la vista previa que los puntos caen donde deben antes de añadirlos.</string>
     <string name="template_nothing_added">No hay puntos nuevos que añadir</string>
     <string name="template_import_failed">No se puede importar la plantilla de puntos</string>
     <string name="last_run_undone">Eliminada la última ejecución de pruebas (el punto se conserva)</string>

@@ -62,8 +62,12 @@ object PointActionsDialogs {
             .show()
     }
 
-    fun showTemplatePreview(context: Context, preview: PointTemplateParser.Preview, onAccept: () -> Unit) {
-        val message = context.getString(
+    /**
+     * Mejora 20: counts, repeated ids and points outside the plan, and a thumbnail of the plan
+     * with the points to add. Without plan identity the user confirms that it is the right plan.
+     */
+    fun showTemplatePreview(context: Context, preview: PointTemplateParser.Preview, mapFile: java.io.File?, onAccept: () -> Unit) {
+        val message = StringBuilder(context.getString(
             R.string.template_preview_message,
             preview.points.size,
             preview.sourceWidth,
@@ -72,13 +76,49 @@ object PointActionsDialogs {
             preview.outside,
             preview.duplicates,
             preview.points.take(8).joinToString(", ") { it.label }
-        )
-        MaterialAlertDialogBuilder(context)
+        ))
+        if (preview.repeatedIds.isNotEmpty()) {
+            message.append("\n\n").append(context.getString(R.string.template_repeated_ids, preview.repeatedIds.take(10).joinToString(", ")))
+        }
+        if (preview.outsideLabels.isNotEmpty()) {
+            message.append("\n\n").append(context.getString(R.string.template_outside_points, preview.outsideLabels.take(10).joinToString(", ")))
+        }
+        message.append("\n\n").append(context.getString(
+            if (preview.needsConfirmation) R.string.template_plan_unverified else R.string.template_plan_matched
+        ))
+        val builder = MaterialAlertDialogBuilder(context)
             .setTitle(R.string.template_preview_title)
-            .setMessage(message)
-            .setPositiveButton(R.string.template_add) { _, _ -> onAccept() }
+            .setMessage(message.toString())
+            .setPositiveButton(if (preview.needsConfirmation) R.string.template_add_confirm else R.string.template_add) { _, _ -> onAccept() }
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        templateThumbnail(context, mapFile, preview)?.let(builder::setView)
+        builder.show()
+    }
+
+    /** The plan, downscaled, with the points to add drawn on it; null when the plan cannot be read. */
+    private fun templateThumbnail(context: Context, mapFile: java.io.File?, preview: PointTemplateParser.Preview): android.view.View? {
+        if (mapFile == null || !mapFile.isFile) return null
+        return runCatching {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(mapFile.path, bounds)
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 800) sample *= 2
+            val decoded = android.graphics.BitmapFactory.decodeFile(mapFile.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                ?: return null
+            val bitmap = decoded.copy(android.graphics.Bitmap.Config.ARGB_8888, true).also { if (it !== decoded) decoded.recycle() }
+            val canvas = android.graphics.Canvas(bitmap)
+            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(21, 101, 192) }
+            val s = bitmap.width.toFloat() / bounds.outWidth
+            val radius = maxOf(3f, bitmap.width / 120f)
+            preview.points.forEach { canvas.drawCircle(it.x * s, it.y * s, radius, paint) }
+            android.widget.ImageView(context).apply {
+                setImageBitmap(bitmap)
+                adjustViewBounds = true
+                val pad = (16 * context.resources.displayMetrics.density).toInt()
+                setPadding(pad, pad / 2, pad, 0)
+                contentDescription = context.getString(R.string.template_preview_title)
+            }
+        }.getOrNull()
     }
 
     /** Single choice among the SSIDs scanned on the floor; "automatic" = the most widely detected. */

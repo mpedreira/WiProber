@@ -238,20 +238,9 @@ object ProjectBackup {
         path.isNotEmpty() && !path.startsWith("/") && '\\' !in path && ':' !in path &&
             path.split('/').all { it.isNotEmpty() && it != "." && it != ".." && !it.startsWith(".") }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(BUFFER)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        return hex(digest.digest())
-    }
+    private fun sha256(file: File): String = Hashes.sha256(file)
 
-    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+    private fun hex(bytes: ByteArray) = Hashes.hex(bytes)
 
     private val DEFAULT_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,100}")
 }

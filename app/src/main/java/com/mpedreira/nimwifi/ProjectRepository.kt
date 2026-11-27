@@ -51,7 +51,9 @@ data class LocalSurveyFloor(
     val activeRuns: List<ActiveRun> = emptyList(),
     val plannedPoints: List<PlannedPoint> = emptyList(),
     /** Routes left open (process death or reboot), recovered from their drafts. */
-    val routeDrafts: List<RouteDraft> = emptyList()
+    val routeDrafts: List<RouteDraft> = emptyList(),
+    /** ESX floor-plan ID of this floor (plan identity for point templates). */
+    val esxFloorPlanId: String? = null
 )
 
 data class LocalSurveyProject(
@@ -454,7 +456,8 @@ class ProjectRepository(
             skippedSuggestions = survey.skippedSuggestions.orEmpty(),
             plannedPoints = survey.plannedPoints.orEmpty(),
             routeDrafts = routeDrafts(projectDirectory, floor).list()
-                .filter { draft -> survey.continuousScanSessions.none { it.id == draft.sessionId } }
+                .filter { draft -> survey.continuousScanSessions.none { it.id == draft.sessionId } },
+            esxFloorPlanId = floor.esxFloorPlanId
         )
     }
 

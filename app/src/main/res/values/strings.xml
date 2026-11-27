@@ -261,6 +261,11 @@
     <string name="template_preview_title">Import point template</string>
     <string name="template_preview_message">%1$d points to add.\nTemplate plan: %2$d×%3$d px, scaled ×%4$s to this plan.\nOutside the plan (ignored): %5$d. Already on this floor (ignored): %6$d.\n\n%7$s</string>
     <string name="template_add">Add points</string>
+    <string name="template_add_confirm">It is this plan: add</string>
+    <string name="template_repeated_ids">Repeated ids in the template (only the first of each is added): %1$s</string>
+    <string name="template_outside_points">Outside the plan: %1$s</string>
+    <string name="template_plan_matched">The template names this plan (floor-plan ID or image hash).</string>
+    <string name="template_plan_unverified">The template does not identify its plan: only the size and proportions were checked. Check on the preview that the points fall where they should before adding them.</string>
     <string name="template_nothing_added">No new points to add</string>
     <string name="template_import_failed">Cannot import the point template</string>
     <string name="last_run_undone">Last test run removed (the point is kept)</string>

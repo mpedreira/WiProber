@@ -68,6 +68,7 @@ class SurveyActivity : AppCompatActivity() {
     private var tempPhotoUriForNote: Uri? = null
     private var activeNoteDialogPreview: ImageView? = null
     private var currentMapUri: Uri? = null
+    private var currentFloorPlanId: String? = null
     private var currentProjectId: String? = null
     private var currentProjectTitle: String = ""
     private var currentFloorId: String? = null
@@ -208,7 +209,9 @@ class SurveyActivity : AppCompatActivity() {
 
                 override fun onPointTemplateSelected(uri: Uri?) {
                     val floorKey = currentFloorId
-                    if (uri != null && floorKey != null) activeTests.importPointTemplate(uri, floorKey)
+                    if (uri != null && floorKey != null) {
+                        activeTests.importPointTemplate(uri, floorKey, currentMapUri?.path?.let(::File), currentFloorPlanId)
+                    }
                 }
 
                 override fun onScanAccessReady() = startPendingScanAction()
@@ -1394,6 +1397,7 @@ class SurveyActivity : AppCompatActivity() {
         renderFloorDropdown(project.activeFloorId)
         val floor = project.activeFloor
         currentMapUri = Uri.fromFile(floor.mapFile)
+        currentFloorPlanId = floor.esxFloorPlanId
         isProjectReady = false
         updateButtonStates()
         if (binding.projectOperationOverlay.visibility != View.VISIBLE) {
