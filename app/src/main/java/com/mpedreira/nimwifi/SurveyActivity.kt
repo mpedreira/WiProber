@@ -571,6 +571,8 @@ class SurveyActivity : AppCompatActivity() {
             surveyGuideStore.load().enabled && (state.metersPerUnit ?: 0.0) > 0.0
 
     /** Coverage gradient, next suggested point, Skip button and the "calibrate first" hint. */
+    private val coverageCache = CoverageSampleCache()
+
     private fun renderSurveyGuide(state: SurveyScreenState) {
         val settings = surveyGuideStore.load()
         val map = state.mapInfo
@@ -579,7 +581,8 @@ class SurveyActivity : AppCompatActivity() {
         binding.pointsOverlay.setCoverage(
             samples = if (showGuide) {
                 // One SSID at a time: another SSID's signal never fills this one's gaps.
-                mapSsid(state)?.let { SurveyGuide.coverageSamples(state.scanPoints, state.continuousScanSessions, it) }.orEmpty()
+                // Recomputed only when its inputs change (mejora 18), not on progress-only updates.
+                mapSsid(state)?.let { coverageCache.samples(state.scanPoints, state.continuousScanSessions, it) }.orEmpty()
             } else {
                 emptyList()
             },
@@ -798,9 +801,15 @@ class SurveyActivity : AppCompatActivity() {
 
     private fun showExportFailure(error: Throwable) {
         val detail = error.message?.takeIf(String::isNotBlank) ?: getString(R.string.unknown_error)
+        // A provider without atomic replace may keep a partial file: say so explicitly.
+        val message = if (error is StagedExport.DestinationIncompleteException) {
+            getString(R.string.export_destination_incomplete, error.copiedBytes, error.totalBytes)
+        } else {
+            getString(R.string.export_failed_detail, detail)
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.export_failed_title)
-            .setMessage(getString(R.string.export_failed_detail, detail))
+            .setMessage(message)
             .setPositiveButton(R.string.action_ok, null)
             .show()
     }

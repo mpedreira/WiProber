@@ -28,8 +28,10 @@ class EsxExportService(
         reportSsid: String = "",
         reportProfile: SignalProfile = SignalProfile.DEFAULT
     ) {
-        val exportDirectory = File(appContext.cacheDir, "esx-export-${System.nanoTime()}")
+        StagedExport.removeStale(appContext.cacheDir)
+        val exportDirectory = File(appContext.cacheDir, "${StagedExport.STAGING_PREFIX}${System.nanoTime()}")
         val completeArchive = File(appContext.cacheDir, "${exportDirectory.name}.esx")
+        val bundleArchive = File(appContext.cacheDir, "${exportDirectory.name}.zip")
         require(exportDirectory.mkdirs()) { "Cannot create the ESX export workspace" }
 
         try {
@@ -59,12 +61,11 @@ class EsxExportService(
             require(completeArchive.isFile && completeArchive.length() in 1..DEFAULT_ESX_LIMITS.maxSourceBytes) {
                 "The ESX archive could not be created"
             }
-            requireNotNull(contentResolver.openOutputStream(destinationUri, "wt")) {
-                "Cannot open the selected export destination"
-            }.use { output ->
-                if (bundleEsxName != null) {
-                    val now = System.currentTimeMillis()
-                    val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot)
+            // Mejora 18: the whole artifact is staged and verified before the destination is opened.
+            val artifact = if (bundleEsxName != null) {
+                val now = System.currentTimeMillis()
+                val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot)
+                bundleArchive.outputStream().buffered().use { output ->
                     PerformanceExport.writeBundle(
                         output,
                         bundleEsxName,
@@ -73,20 +74,18 @@ class EsxExportService(
                         SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
                             planImages = planImages(snapshot))).toByteArray(Charsets.UTF_8)
                     )
-                    return@use
                 }
-                completeArchive.inputStream().use {
-                    BoundedIo.copy(
-                        it,
-                        output,
-                        DEFAULT_ESX_LIMITS.maxSourceBytes,
-                        "The ESX project is too large"
-                    )
-                }
+                StagedExport.verifyZip(bundleArchive, setOf(bundleEsxName, PerformanceExport.FILE_NAME, SurveyReport.FILE_NAME), nestedEsx = bundleEsxName)
+                bundleArchive
+            } else {
+                StagedExport.verifyZip(completeArchive, setOf(StagedExport.ESX_PROJECT_ENTRY))
+                completeArchive
             }
+            StagedExport.deliver(artifact) { contentResolver.openOutputStream(destinationUri, "wt") }
         } finally {
             exportDirectory.deleteRecursively()
             completeArchive.delete()
+            bundleArchive.delete()
         }
     }
 

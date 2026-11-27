@@ -16,6 +16,12 @@ internal data class ImageCoordinateMapper(
         y * drawableHeight / sourceHeight
     )
 
+    /** Allocation-free variant for the draw loop. */
+    fun sourceToDrawableInto(x: Float, y: Float, out: FloatArray) {
+        out[0] = x * drawableWidth / sourceWidth
+        out[1] = y * drawableHeight / sourceHeight
+    }
+
     fun drawableToSource(x: Float, y: Float): FloatArray = floatArrayOf(
         x * sourceWidth / drawableWidth,
         y * sourceHeight / drawableHeight

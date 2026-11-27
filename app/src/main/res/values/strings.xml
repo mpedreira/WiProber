@@ -123,6 +123,7 @@
     <string name="export_complete_summary">Exported %1$s · %2$s · %3$s · %4$s</string>
     <string name="export_failed_title">Export failed</string>
     <string name="export_failed_detail">The complete project was not written: %1$s</string>
+    <string name="export_destination_incomplete">The copy to the chosen destination failed after %1$d of %2$d bytes. The provider does not replace files atomically, so the destination may now hold an incomplete file: delete it and export again.</string>
     <string name="action_ok">OK</string>
     <string name="action_save">Save</string>
     <string name="action_got_it">Got it</string>

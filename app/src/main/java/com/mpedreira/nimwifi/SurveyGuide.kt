@@ -54,6 +54,36 @@ data class GuideGrid(val cellPx: Float, val mapWidth: Int, val mapHeight: Int)
 data class CoverageSample(val x: Float, val y: Float, val bestRssi: Int?)
 
 /**
+ * Mejora 18: the RF layer's samples, recomputed only when its inputs change. State lists are
+ * immutable and replaced on change, so an identity check skips progress-only updates cheaply.
+ */
+class CoverageSampleCache(
+    private val compute: (List<ScanPoint>, List<ContinuousScanSession>, String) -> List<CoverageSample> = SurveyGuide::coverageSamples
+) {
+    private var points: List<ScanPoint>? = null
+    private var sessions: List<ContinuousScanSession>? = null
+    private var ssid: String? = null
+    private var cached: List<CoverageSample> = emptyList()
+
+    var computations = 0
+        private set
+
+    fun samples(scanPoints: List<ScanPoint>, continuous: List<ContinuousScanSession>, ssidFilter: String): List<CoverageSample> {
+        val same = ssid == ssidFilter &&
+            (points === scanPoints || points == scanPoints) &&
+            (sessions === continuous || sessions == continuous)
+        if (!same) {
+            cached = compute(scanPoints, continuous, ssidFilter)
+            computations++
+            points = scanPoints
+            sessions = continuous
+            ssid = ssidFilter
+        }
+        return cached
+    }
+}
+
+/**
  * Survey guide (NetSpot-like): which parts of the floor are already measured and where to measure
  * next. Everything is in original floor-plan pixels and needs a calibrated scale, because the
  * grid spacing and the coverage radius are in metres.

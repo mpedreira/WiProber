@@ -127,7 +127,7 @@ object PerformanceExport {
     fun writeBundle(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray, reportHtml: ByteArray? = null) {
         ZipOutputStream(output).use { zip ->
             zip.putNextEntry(ZipEntry(esxFileName))
-            esxArchive.inputStream().use { it.copyTo(zip) }
+            esxArchive.inputStream().use { it.copyTo(zip, 64 * 1024) }
             zip.closeEntry()
             zip.putNextEntry(ZipEntry(FILE_NAME))
             zip.write(performanceJson)

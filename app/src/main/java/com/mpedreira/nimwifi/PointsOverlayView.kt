@@ -225,6 +225,9 @@ class PointsOverlayView @JvmOverloads constructor(
 
     // НОВОЕ: Установка завершенных треков
     fun setCompletedTracks(sessions: List<ContinuousScanSession>) {
+        // Same sessions (a progress-only update): nothing to rebuild or repaint.
+        if (sessions === completedSource) return
+        completedSource = sessions
         completedTracks.clear()
         sessions.forEach { session ->
             val track = session.waypoints.map { wp -> PointF(wp.x, wp.y) }
@@ -255,8 +258,11 @@ class PointsOverlayView @JvmOverloads constructor(
         calibrationLinePoints.clear()
         activeTrackPoints.clear()
         completedTracks.clear()
+        completedSource = null
         invalidate()
     }
+
+    private var completedSource: List<ContinuousScanSession>? = null
 
     // ================== DRAWING ==================
 
@@ -365,7 +371,7 @@ class PointsOverlayView @JvmOverloads constructor(
      */
     private fun drawGuideGrid(canvas: Canvas, grid: GuideGrid, matrix: Matrix) {
         val origin = transformPoint(0f, 0f, matrix)
-        val step = transformPoint(grid.cellPx, 0f, matrix)
+        val step = transformPoint(grid.cellPx, 0f, matrix, reusableSecond)
         val onScreen = kotlin.math.hypot(step[0] - origin[0], step[1] - origin[1])
         if (!(onScreen > 0f)) return
         val stride = kotlin.math.ceil(MIN_GRID_SPACING_DP * density / onScreen).toInt().coerceAtLeast(1)
@@ -389,7 +395,7 @@ class PointsOverlayView @JvmOverloads constructor(
 
     private fun drawSourceLine(canvas: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, matrix: Matrix) {
         val a = transformPoint(x0, y0, matrix)
-        val b = transformPoint(x1, y1, matrix)
+        val b = transformPoint(x1, y1, matrix, reusableSecond)
         canvas.drawLine(a[0], a[1], b[0], b[1], gridPaint)
     }
 
@@ -397,7 +403,8 @@ class PointsOverlayView @JvmOverloads constructor(
     private fun drawPath(canvas: Canvas, points: List<PointF>, paint: Paint, matrix: Matrix) {
         if (points.size < 2) return
 
-        val path = Path()
+        // Reused across frames (mejora 18): no Path or array allocated per point while drawing.
+        val path = reusablePath.apply { rewind() }
         val start = transformPoint(points[0].x, points[0].y, matrix)
         path.moveTo(start[0], start[1])
 
@@ -416,10 +423,16 @@ class PointsOverlayView @JvmOverloads constructor(
         }
     }
 
-    private fun transformPoint(x: Float, y: Float, matrix: Matrix): FloatArray {
-        val arr = coordinateMapper?.sourceToDrawable(x, y) ?: floatArrayOf(x, y)
-        matrix.mapPoints(arr)
-        return arr
+    private val reusablePath = Path()
+    private val reusablePoint = FloatArray(2)
+    private val reusableSecond = FloatArray(2)
+
+    /** Writes into [out] (reused): read it before the next call with the same array. */
+    private fun transformPoint(x: Float, y: Float, matrix: Matrix, out: FloatArray = reusablePoint): FloatArray {
+        val mapper = coordinateMapper
+        if (mapper != null) mapper.sourceToDrawableInto(x, y, out) else { out[0] = x; out[1] = y }
+        matrix.mapPoints(out)
+        return out
     }
 
     private companion object {

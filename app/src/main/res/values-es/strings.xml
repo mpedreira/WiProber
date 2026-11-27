@@ -124,6 +124,7 @@
     <string name="export_complete_summary">Exportado %1$s · %2$s · %3$s · %4$s</string>
     <string name="export_failed_title">Exportación fallida</string>
     <string name="export_failed_detail">No se ha escrito el proyecto completo: %1$s</string>
+    <string name="export_destination_incomplete">La copia al destino elegido falló tras %1$d de %2$d bytes. El proveedor no reemplaza archivos de forma atómica, así que el destino puede contener un archivo incompleto: bórralo y exporta de nuevo.</string>
     <string name="action_ok">Aceptar</string>
     <string name="action_save">Guardar</string>
     <string name="action_got_it">Entendido</string>
