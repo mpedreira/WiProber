@@ -39,6 +39,7 @@ class MainViewModel @JvmOverloads constructor(
     /** Alias and trace option of the roaming probe (set by the capture before it starts). */
     var roamingAlias: String? = null
     var roamingTrace: Boolean = false
+    var roamingMethod: String = RoamingTracker.METHOD
     private var roamingInterval: Int? = null
     /** UTC start of the route (of its first stretch when it was resumed). */
     private var activeRouteStartUtc: Long = 0L
@@ -85,9 +86,10 @@ class MainViewModel @JvmOverloads constructor(
             routeChanged()
         }
 
-        override fun roamingSession(target: String, intervalMillis: Int, alias: String?, trace: Boolean): String? {
+        override fun roamingSession(target: String, intervalMillis: Int, alias: String?, trace: Boolean, method: String): String? {
             roamingAlias = alias
             roamingTrace = trace
+            roamingMethod = method
             return startRoamingLog(target, intervalMillis)
         }
 
@@ -186,7 +188,7 @@ class MainViewModel @JvmOverloads constructor(
     fun startRoamingLog(target: String, intervalMillis: Int): String? {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
         if (roamingTracker == null) {
-            roamingTracker = RoamingTracker(target, intervalMillis, roamingAlias, if (roamingTrace) RoamingTracker.MAX_TRACE else 0)
+            roamingTracker = RoamingTracker(target, intervalMillis, roamingAlias, if (roamingTrace) RoamingTracker.MAX_TRACE else 0, roamingMethod)
             roamingTarget = target
             roamingInterval = intervalMillis
         }

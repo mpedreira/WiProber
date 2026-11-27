@@ -76,16 +76,28 @@ data class RoamingSettings(
     /** Mejora 12: name of the target in reports. */
     val alias: String? = null,
     /** Keep a bounded diagnostic trace of every attempt (off by default). */
-    val trace: Boolean = false
+    val trace: Boolean = false,
+    /**
+     * `tcp` (default): a TCP connect to host:port per attempt. `icmp`: one ICMP echo from the Wi-Fi
+     * address per attempt (the port is not used), to watch a service host continuously without
+     * loading it; at least [MIN_ICMP_INTERVAL_MILLIS] between attempts.
+     */
+    val method: String = METHOD_TCP
 ) {
+    val isIcmp: Boolean get() = method == METHOD_ICMP
+
     fun sanitized(): RoamingSettings = copy(
         host = host.trim(),
         port = port.coerceIn(1, 65_535),
-        intervalMillis = intervalMillis.coerceIn(100, 5_000)
+        method = if (method.trim().lowercase() == METHOD_ICMP) METHOD_ICMP else METHOD_TCP,
+        intervalMillis = intervalMillis.coerceIn(if (method.trim().lowercase() == METHOD_ICMP) MIN_ICMP_INTERVAL_MILLIS else 100, 5_000)
     )
 
     companion object {
         const val DEFAULT_INTERVAL_MILLIS = 200
+        const val METHOD_TCP = "tcp"
+        const val METHOD_ICMP = "icmp"
+        const val MIN_ICMP_INTERVAL_MILLIS = 500
     }
 }
 
@@ -276,7 +288,8 @@ object WiproberConfigParser {
             port = json.int("port") ?: d.port,
             intervalMillis = json.int("intervalMs") ?: d.intervalMillis,
             alias = json.string("alias")?.trim()?.take(60),
-            trace = json.bool("trace") ?: false
+            trace = json.bool("trace") ?: false,
+            method = json.string("method") ?: d.method
         ).sanitized()
     }
 

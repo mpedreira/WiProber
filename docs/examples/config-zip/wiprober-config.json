@@ -22,8 +22,8 @@
   "_guide": "Survey guide: grid spacing and coverage circle in metres, the SSID shown on the map and the signal profile (pda -67/-72, voz -67/-67, datos -70/-75 dBm).",
   "guide": { "enabled": true, "spacingMeters": 10, "coverageRadiusMeters": 5, "ssid": "CORP-WIFI", "profile": "pda" },
 
-  "_roaming": "Continuous mode: a TCP connect to host:port every intervalMs over the Wi-Fi network. ${gateway} = the Wi-Fi default gateway, ${dns} = its first DNS server.",
-  "roaming": { "enabled": true, "host": "${gateway}", "port": 443, "intervalMs": 200 },
+  "_roaming": "Continuous mode: the service is watched during the whole route. method tcp = a TCP connect to host:port every intervalMs; method icmp = one ping to host every intervalMs (at least 500 ms; port not used). ${gateway} = the Wi-Fi default gateway, ${dns} = its first DNS server. alias names the target in reports; trace keeps a bounded log of every attempt.",
+  "roaming": { "enabled": true, "host": "${gateway}", "port": 443, "intervalMs": 200, "method": "tcp", "alias": "Gateway", "trace": false },
 
   "_tests": "Network tests at every point: dns (UDP query to the network's DNS server), ping (ICMP, TCP fallback), tcp (connect time) and http (timed GET). alias is the name shown in reports.",
   "tests": [

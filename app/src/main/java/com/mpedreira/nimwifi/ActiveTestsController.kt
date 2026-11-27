@@ -103,7 +103,9 @@ class ActiveTestsController(
             rf = AndroidRfScanSource(activity),
             foreground = AndroidCaptureForeground(activity, projectId),
             roaming = roaming?.let { config -> RoamingProbeSource { scope, onAttempt -> probe.launchRoamingProbe(scope, config, onAttempt) } },
-            roamingTarget = roaming?.let { "${it.host}:${it.port}" },
+            // ICMP watches a host (no port); TCP a host:port.
+            roamingTarget = roaming?.let { if (it.isIcmp) it.host else "${it.host}:${it.port}" },
+            roamingMethod = if (roaming?.isIcmp == true) RoamingTracker.METHOD_ICMP else RoamingTracker.METHOD,
             roamingIntervalMillis = roaming?.intervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS,
             roamingAlias = roaming?.alias,
             roamingTrace = roaming?.trace == true

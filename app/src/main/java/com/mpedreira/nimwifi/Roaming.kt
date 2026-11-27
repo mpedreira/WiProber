@@ -7,6 +7,8 @@ import kotlin.math.roundToLong
 object ProbeResult {
     /** TCP handshake completed: the target port is accessible. */
     const val CONNECTED = "connected"
+    /** ICMP echo answered (method `icmp`): the target is reachable. */
+    const val REPLIED = "replied"
     /** The target answered with a refusal: reachable, but the port is not accessible. */
     const val REFUSED = "refused"
     const val TIMEOUT = "timeout"
@@ -19,7 +21,7 @@ object ProbeResult {
     /** No Wi-Fi network: association lost. */
     const val NO_WIFI = "no_wifi"
 
-    fun reachable(result: String) = result == CONNECTED || result == REFUSED
+    fun reachable(result: String) = result == CONNECTED || result == REFUSED || result == REPLIED
     /** Only these count as observed loss of connectivity towards the target. */
     fun connectivityFailure(result: String) = result == TIMEOUT || result == UNREACHABLE
 }
@@ -164,7 +166,9 @@ class RoamingTracker(
     private val target: String,
     private val intervalMillis: Int,
     private val targetAlias: String? = null,
-    private val traceLimit: Int = 0
+    private val traceLimit: Int = 0,
+    /** [METHOD] (TCP connect) or [METHOD_ICMP] (one echo per attempt). */
+    private val method: String = METHOD
 ) {
     private val attempts = mutableListOf<ProbeAttempt>()
 
@@ -238,7 +242,7 @@ class RoamingTracker(
 
         val withIncidents = incidents(events.sortedWith(compareBy({ it.atMillis }, { it.type })))
         val intervals = attempts.zipWithNext { a, b -> b.startMs - a.startMs }.sorted()
-        val connectedTimes = attempts.filter { it.result == ProbeResult.CONNECTED }.map { it.endMs - it.startMs }
+        val connectedTimes = attempts.filter { it.result == ProbeResult.CONNECTED || it.result == ProbeResult.REPLIED }.map { it.endMs - it.startMs }
         val tcp = attempts.count { it.result in TCP_RESULTS }
         val tcpLost = attempts.count { ProbeResult.connectivityFailure(it.result) }
         return RoamingLog(
@@ -261,7 +265,7 @@ class RoamingTracker(
             noWifi = attempts.count { it.result == ProbeResult.NO_WIFI },
             samplingGaps = intervals.count { it > gapThreshold() },
             targetAlias = targetAlias,
-            method = METHOD,
+            method = method,
             tcpAttempts = tcp,
             tcpLossPct = if (tcp > 0) (tcpLost * 1000.0 / tcp).roundToLong() / 10.0 else null,
             unobserved = attempts.zipWithNext().filter { (a, b) -> b.startMs - a.startMs > gapThreshold() }
@@ -426,12 +430,14 @@ class RoamingTracker(
         const val GAP_FACTOR = 3L
         private const val MAX_ATTEMPTS = 100_000
         const val METHOD = "tcp-connect"
+        const val METHOD_ICMP = "icmp-echo"
         /** Upper bound of the optional trace. */
         const val MAX_TRACE = 3_000
         const val BOUNDED = "bounded"
         const val LOWER_BOUND_ONLY = "lower_bound_only"
         const val UPPER_BOUND_ONLY = "upper_bound_only"
         const val UNKNOWN_DURATION = "unknown"
-        private val TCP_RESULTS = setOf(ProbeResult.CONNECTED, ProbeResult.REFUSED, ProbeResult.TIMEOUT, ProbeResult.UNREACHABLE)
+        /** Attempts made against a valid target, whatever the method: the probe denominator. */
+        private val TCP_RESULTS = setOf(ProbeResult.CONNECTED, ProbeResult.REFUSED, ProbeResult.REPLIED, ProbeResult.TIMEOUT, ProbeResult.UNREACHABLE)
     }
 }

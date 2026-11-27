@@ -78,6 +78,7 @@ class ConfigurationActivity : AppCompatActivity() {
         })
         content.addView(row(
             if (roaming.host.isEmpty()) getString(R.string.config_roaming_no_target)
+            else if (roaming.isIcmp) getString(R.string.config_roaming_target_icmp, roaming.host, roaming.intervalMillis)
             else getString(R.string.config_roaming_target, roaming.host, roaming.port, roaming.intervalMillis),
             getString(R.string.config_edit) to ::editRoaming
         ))
@@ -132,12 +133,13 @@ class ConfigurationActivity : AppCompatActivity() {
         val host = form.text(getString(R.string.config_field_host), current.host)
         val port = form.number(getString(R.string.config_field_port), current.port.toString())
         val interval = form.number(getString(R.string.config_field_interval), current.intervalMillis.toString())
+        val method = form.choice(getString(R.string.config_field_roaming_method), listOf(RoamingSettings.METHOD_TCP, RoamingSettings.METHOD_ICMP), current.method)
         form.show(getString(R.string.config_roaming)) {
-            val settings = RoamingSettings(
-                enabled = current.enabled,
+            val settings = current.copy(
                 host = host.value(),
                 port = port.value().toIntOrNull() ?: current.port,
-                intervalMillis = interval.value().toIntOrNull() ?: current.intervalMillis
+                intervalMillis = interval.value().toIntOrNull() ?: current.intervalMillis,
+                method = method.selectedItem as String
             ).sanitized()
             store.update { it.copy(roaming = settings) }
         }

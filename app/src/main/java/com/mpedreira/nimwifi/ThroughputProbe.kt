@@ -156,7 +156,11 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                             resolvedKey = key.takeIf { address != null }
                         }
                         val target = address
-                        if (target == null) ProbeResult.RESOLUTION_FAILED else connectOnce(net, target, config.port)
+                        when {
+                            target == null -> ProbeResult.RESOLUTION_FAILED
+                            config.isIcmp -> pingOnce(net, target)
+                            else -> connectOnce(net, target, config.port)
+                        }
                     }
                 }
                 val end = MonotonicMillisClock.now()
@@ -166,6 +170,29 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         } finally {
             resolver.close()
             network?.close()
+        }
+    }
+
+    /**
+     * One ICMP echo from the measured network's address of the same family (binding to that
+     * address needs no privilege). No reply in [ICMP_TIMEOUT_SECONDS] is a timeout; a ping that
+     * cannot run is reported as unreachable (see the log's method).
+     */
+    private fun pingOnce(network: MeasurementNetwork, target: InetAddress): String {
+        val source = network.link().localAddresses.firstOrNull { it.javaClass == target.javaClass }?.hostAddress
+            ?: return ProbeResult.UNREACHABLE
+        return try {
+            val output = NetworkTestRunner.runSystemPing(target.hostAddress!!, 1, source, MeasurementControl())
+            val stats = PingOutputParser.parse(output)
+            when {
+                stats == null || stats.sent == 0 -> ProbeResult.UNREACHABLE
+                stats.received > 0 -> ProbeResult.REPLIED
+                else -> ProbeResult.TIMEOUT
+            }
+        } catch (e: MeasurementException) {
+            if (e.code == ErrorCodes.TIMEOUT) ProbeResult.TIMEOUT else ProbeResult.UNREACHABLE
+        } catch (e: Exception) {
+            ProbeResult.UNREACHABLE
         }
     }
 

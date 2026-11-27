@@ -50,6 +50,9 @@ object ConfigExport {
                     addProperty("host", roaming.host)
                     addProperty("port", roaming.port)
                     addProperty("intervalMs", roaming.intervalMillis)
+                    addProperty("method", roaming.method)
+                    roaming.alias?.let { addProperty("alias", it) }
+                    addProperty("trace", roaming.trace)
                 })
             }
             add("tests", gson.toJsonTree(imported.tests.orEmpty()))

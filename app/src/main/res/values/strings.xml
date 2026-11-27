@@ -374,4 +374,6 @@
     <string name="network_check_unknown">Expected SSID: %1$s\nAndroid does not say which SSID the network has (%2$s).\nEligible Wi-Fi networks: %3$s\n\nTest anyway (recorded as confirmed with an unknown association) or skip the tests of this point.</string>
     <string name="network_check_test_anyway">Test anyway</string>
     <string name="network_check_skip">Skip tests</string>
+    <string name="config_field_roaming_method">Method (tcp: connect to host:port · icmp: ping the host)</string>
+    <string name="config_roaming_target_icmp">ping %1$s every %2$d ms</string>
 </resources>

@@ -68,6 +68,15 @@ Only GET/HEAD requests of documents, XHR and fetch are kept (at most 50); reques
 
 The preview lists what was stripped and which credentials must be provided for those steps to run.
 
+## Watching a service during Continuous routes
+
+`roaming` probes a target during the whole route, independently of the per-point iPerf3 and speed tests (which stay as they are):
+
+- `"method": "tcp"` (default): a TCP connect to `host:port` every `intervalMs` (from 100 ms).
+- `"method": "icmp"`: one ping (ICMP echo from the Wi-Fi address) to `host` every `intervalMs` (from 500 ms); the port is not used. Useful to watch an internal server or the gateway without opening connections to it.
+
+`alias` names the target in the report, `trace: true` keeps a bounded log of every attempt. Results are `replied` (ICMP) or `connected`/`refused` (TCP), `timeout`, `unreachable`, `resolution_failed`, `invalid_target` or `no_wifi`; the export says which `method` was used.
+
 ## Redirects
 
 HTTP tests and script steps succeed on 2xx. A 3xx is reported as `redirect` (with where it went) unless the test or step sets `"allowRedirect": true` or `expectStatus` to that code — so a redirect to a login page is never counted as a working service by accident.
