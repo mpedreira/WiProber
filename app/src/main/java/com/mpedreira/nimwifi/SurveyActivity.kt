@@ -52,7 +52,6 @@ class SurveyActivity : AppCompatActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val projectRepository by lazy { ProjectRepository(applicationContext) }
     private val throughputSettingsStore by lazy { ThroughputSettingsStore(applicationContext) }
-    private val throughputProbe by lazy { ThroughputProbe(applicationContext) }
     private val surveyGuideStore by lazy { SurveyGuideSettingsStore(applicationContext) }
     private val configStore by lazy { WiproberConfigStore(applicationContext) }
     /** Suggestion currently drawn on the map (floor-plan pixels), if any. */
@@ -86,8 +85,7 @@ class SurveyActivity : AppCompatActivity() {
     private var trackingStatusJob: Job? = null
     private var stopAndGoScanJob: Job? = null
     private var continuousScanLoopJob: Job? = null
-    private var roamingJob: Job? = null
-    private var progressDialog: ThroughputProgressDialog? = null
+    private val activeTests by lazy { ActiveTestsController(this, viewModel) { binding.surveyStatusText } }
 
     //<editor-fold desc="Lifecycle & Setup">
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -162,11 +160,9 @@ class SurveyActivity : AppCompatActivity() {
         trackingStatusJob?.cancel()
         stopAndGoScanJob?.cancel()
         continuousScanLoopJob?.cancel()
-        roamingJob?.cancel()
+        activeTests.close()
         // Leaving the survey ends its tracks and runs (the ViewModel is cleared): stop the service.
         if (isFinishing) SurveyForegroundService.update(applicationContext, null)
-        progressDialog?.dismiss()
-        progressDialog = null
         wifiScanner.close()
         androidCoordinator.close()
         super.onDestroy()
@@ -216,7 +212,8 @@ class SurveyActivity : AppCompatActivity() {
                 }
 
                 override fun onPointTemplateSelected(uri: Uri?) {
-                    if (uri != null) importPointTemplate(uri)
+                    val floorKey = currentFloorId
+                    if (uri != null && floorKey != null) activeTests.importPointTemplate(uri, floorKey)
                 }
 
                 override fun onScanAccessReady() = startPendingScanAction()
@@ -256,7 +253,7 @@ class SurveyActivity : AppCompatActivity() {
                     renderPointMarkers(state)
                     binding.pointsOverlay.setCompletedTracks(state.continuousScanSessions)
                     renderSurveyGuide(state)
-                    renderActiveRun(state, previous)
+                    activeTests.render(state, previous)
                     binding.pointsOverlay.setActiveTrack(
                         state.activeTrackPoints.map { android.graphics.PointF(it.x, it.y) }
                     )
@@ -440,7 +437,7 @@ class SurveyActivity : AppCompatActivity() {
             if (state.isTracking) {
                 continuousScanLoopJob?.cancel()
                 continuousScanLoopJob = null
-                stopRoamingProbe()
+                activeTests.stopRoamingProbe()
                 viewModel.stopContinuousTrack(lastTouchX, lastTouchY)
             } else if (state.interaction is SurveyInteraction.AwaitingContinuousStart) {
                 viewModel.cancelContinuousStart()
@@ -525,38 +522,6 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Runs the configured active tests on a saved point. The run lives in the ViewModel, so a
-     * rotation neither stops nor restarts it; the executor only captures application-level objects.
-     */
-    private fun startActiveTests(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>) {
-        val settings = throughputSettingsStore.load()
-        val imported = configStore.load()
-        val credentials = configStore.loadCredentials()
-        val phases = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts)
-        if (phases.isEmpty()) return
-        val probe = throughputProbe
-        viewModel.startActiveRun(pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS) { control, listener ->
-            probe.measure(settings, imported, credentials, scanResults, control, listener)
-        }
-    }
-
-    /** Shows the progress dialog while a run is active (also after recreation) and its summary when it ends. */
-    private fun renderActiveRun(state: SurveyScreenState, previous: SurveyScreenState) {
-        val testing = state.interaction as? SurveyInteraction.ActiveTesting
-        if (testing == null) {
-            progressDialog?.dismiss()
-            progressDialog = null
-            val finished = (previous.interaction as? SurveyInteraction.ActiveTesting)?.runId
-                ?.let { id -> state.activeRuns.firstOrNull { it.runId == id } }
-            if (finished != null) binding.surveyStatusText.text = ActiveRunSummary.format(this, finished)
-            return
-        }
-        val dialog = progressDialog ?: ThroughputProgressDialog(this, onCancel = { viewModel.cancelActiveRun() }, onSkip = { viewModel.skipActiveRun() })
-            .also { it.show(); progressDialog = it }
-        state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
-    }
-
     /** SSID the map shows: the chosen one, else the most widely detected on this floor. */
     private fun mapSsid(state: SurveyScreenState): String? =
         SsidCoverage.selected(surveyGuideStore.load().ssidFilter, state.scanPoints, state.continuousScanSessions)
@@ -585,11 +550,9 @@ class SurveyActivity : AppCompatActivity() {
 
     private fun showPointActions(state: SurveyScreenState, pointId: String, tapX: Float, tapY: Float) {
         val label = SsidCoverage.labels(state.scanPoints, state.plannedPoints)[pointId] ?: pointId
-        val settings = throughputSettingsStore.load()
-        val imported = configStore.load()
         PointActionsDialogs.showPointActions(
             this, label,
-            canRunActiveTests = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isNotEmpty(),
+            canRunActiveTests = activeTests.hasTests(),
             onDetails = {
                 val current = viewModel.screenState.value
                 val ssid = mapSsid(current)
@@ -598,7 +561,7 @@ class SurveyActivity : AppCompatActivity() {
             onMeasure = {
                 if (prepareForScan() && viewModel.requestMeasureAtPoint(pointId)) androidCoordinator.ensureWifiScanAccess()
             },
-            onActiveOnly = { startActiveTests(pointId, scanId = null, scanResults = emptyList()) },
+            onActiveOnly = { activeTests.start(pointId, scanId = null, scanResults = emptyList()) },
             onNewPoint = {
                 if (prepareForScan()) {
                     lastTouchX = tapX
@@ -607,38 +570,6 @@ class SurveyActivity : AppCompatActivity() {
                 }
             }
         )
-    }
-
-    private fun importPointTemplate(uri: Uri) {
-        val state = viewModel.screenState.value
-        val map = state.mapInfo ?: return
-        val floorKey = currentFloorId ?: return
-        lifecycleScope.launch {
-            val parsed = withContext(Dispatchers.IO) {
-                runCatching {
-                    val text = requireNotNull(contentResolver.openInputStream(uri)) { "Cannot open the file" }.use { input ->
-                        String(BoundedIo.readBytes(input, 0L, WiproberConfigStore.MAX_FILE_BYTES, "File larger than 2 MB"), Charsets.UTF_8)
-                    }
-                    PointTemplateParser.parse(
-                        text, map.width, map.height, floorKey, java.util.UUID.randomUUID().toString(),
-                        existing = state.plannedPoints.map(PlannedPoint::pointId).toSet()
-                    )
-                }
-            }
-            parsed.onSuccess { preview ->
-                PointActionsDialogs.showTemplatePreview(this@SurveyActivity, preview) {
-                    if (!viewModel.addPlannedPoints(preview.points)) {
-                        Toast.makeText(this@SurveyActivity, R.string.template_nothing_added, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }.onFailure { error ->
-                MaterialAlertDialogBuilder(this@SurveyActivity)
-                    .setTitle(R.string.template_import_failed)
-                    .setMessage(error.message ?: error.javaClass.simpleName)
-                    .setPositiveButton(R.string.action_ok, null)
-                    .show()
-            }
-        }
     }
 
     /** Stop-and-Go on a calibrated floor with the guide enabled. */
@@ -1038,7 +969,7 @@ class SurveyActivity : AppCompatActivity() {
             return
         }
 
-        startRoamingProbe()
+        activeTests.startRoamingProbe()
         val scanLoopJob = lifecycleScope.launch {
             while (isActive && viewModel.screenState.value.isTracking) {
                 if (!wifiScanner.isWifiEnabled()) {
@@ -1099,24 +1030,8 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
-    /** Roaming probe of the active track, if enabled in the imported configuration. */
-    private fun startRoamingProbe() {
-        val settings = configStore.load().roamingSettings.sanitized()
-        if (!settings.enabled || settings.host.isEmpty() || roamingJob?.isActive == true) return
-        // The log lives in the ViewModel: after a recreation the probe resumes into the same session.
-        val sessionId = viewModel.startRoamingLog("${settings.host}:${settings.port}", settings.intervalMillis) ?: return
-        roamingJob = throughputProbe.launchRoamingProbe(lifecycleScope, settings) { start, end, result, association ->
-            viewModel.recordRoamingAttempt(sessionId, start, end, result, association)
-        }
-    }
-
-    private fun stopRoamingProbe() {
-        roamingJob?.cancel()
-        roamingJob = null
-    }
-
     private fun stopContinuousTrackAfterFailure(messageRes: Int) {
-        stopRoamingProbe()
+        activeTests.stopRoamingProbe()
         if (viewModel.screenState.value.isTracking) {
             viewModel.stopContinuousTrack(lastTouchX, lastTouchY)
         }
@@ -1156,7 +1071,7 @@ class SurveyActivity : AppCompatActivity() {
                         R.string.scan_completed,
                         quantityString(R.plurals.network_count, outcome.results.size)
                     )
-                    if (point != null) startActiveTests(point.pointId!!, point.scanId, outcome.results)
+                    if (point != null) activeTests.start(point.pointId!!, point.scanId, outcome.results)
                 }
 
                 is WifiScanOutcome.Failure -> {
@@ -1734,7 +1649,6 @@ class SurveyActivity : AppCompatActivity() {
         const val EXTRA_PROJECT_ID = "project_id"
         private const val SAVE_DEBOUNCE_MILLIS = 750L
         private const val SUGGESTION_TOUCH_RADIUS_DP = 32f
-        private const val PROFILE_DEVICE_SETTINGS = "device-settings"
         private const val SCAN_RETRY_DELAY_MILLIS = 1_000L
         private const val STATE_LAST_TOUCH_X = "last_touch_x"
         private const val STATE_LAST_TOUCH_Y = "last_touch_y"
