@@ -32,7 +32,9 @@ A configuration ZIP holds `wiprober-config.json` and, optionally, `.har` recordi
 2. A **preview** lists every destination (scheme, host, port and methods), the number of tests and scripts, the requests that may write, what was stripped from the file, and the credential names provided or still missing. Cleartext `http://` destinations are flagged.
 3. **Activate** saves it. A profile with write requests (`allowWrite`) needs a second, explicit confirmation that lists those steps.
 
-A file that fails to parse or validate is rejected with its reason and **the previous configuration is kept**; every stored file is replaced atomically.
+A file that fails to parse or validate is rejected with its reason and **the previous configuration is kept**.
+
+Activation is transactional (mejora 16): the resulting profile — after merging, e.g. a HAR added to the existing scripts — is validated as a whole (number of scripts and tests, unique names, steps, headers, write permissions, credentials, size) and written as a complete revision (`private-config/revisions/<id>/` with definitions and credentials) before one atomic switch of `private-config/active` makes it the profile in use. A failure at any point keeps the previous revision, never a mix of new definitions and old credentials. A missing profile and an unreadable one are told apart: an unreadable profile is not used, the configuration screen says so, and it must be removed before importing. Profiles stored by earlier versions are read and move to revisions on the first change. All profile I/O runs off the main thread and the screen shows the real error of a failed change.
 
 ## Credentials
 

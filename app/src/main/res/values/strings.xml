@@ -379,4 +379,6 @@
     <string name="export_format_title">Export</string>
     <string name="export_format_bundle">ESX + report and results (ZIP)</string>
     <string name="export_format_esx">ESX only</string>
+    <string name="config_change_failed">The configuration was not changed: %1$s</string>
+    <string name="config_corrupt">The stored configuration cannot be read (%1$s). It is not used; remove it and import it again.</string>
 </resources>

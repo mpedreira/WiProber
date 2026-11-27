@@ -57,13 +57,37 @@ class ConfigurationActivity : AppCompatActivity() {
         render()
     }
 
+    /** Mejora 16: every read and write of the profile runs off the main thread. */
     private fun render() {
+        lifecycleScope.launch {
+            val (imported, credentials, status) = withContext(Dispatchers.IO) {
+                Triple(store.load(), store.credentialNames(), store.status())
+            }
+            show(imported, credentials, status)
+        }
+    }
+
+    /** Runs a change of the profile off the main thread, shows its real error and redraws. */
+    private fun mutate(change: () -> Unit) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching(change) }
+            result.onFailure { error ->
+                Toast.makeText(this@ConfigurationActivity,
+                    getString(R.string.config_change_failed, (error as? ConfigException)?.message ?: error.message ?: error.javaClass.simpleName),
+                    Toast.LENGTH_LONG).show()
+            }
+            render()
+        }
+    }
+
+    private fun show(imported: WiproberConfigStore.Imported, credentials: Set<String>, status: WiproberConfigStore.Status) {
         val content = binding.configurationContent
         content.removeAllViews()
-        val imported = store.load()
-        val credentials = store.credentialNames()
 
         content.addView(note(getString(R.string.config_screen_hint)))
+        if (status.state == WiproberConfigStore.Status.CORRUPT) {
+            content.addView(note(getString(R.string.config_corrupt, status.error.orEmpty())))
+        }
         content.addView(buttons(
             getString(R.string.config_import) to { openFile.launch(arrayOf("application/json", "application/zip", "application/octet-stream", "*/*")) },
             getString(R.string.config_export) to { exportFile.launch("wiprober-config.json") },
@@ -74,7 +98,7 @@ class ConfigurationActivity : AppCompatActivity() {
         content.addView(header(getString(R.string.config_roaming)))
         val roaming = imported.roamingSettings
         content.addView(switchRow(getString(R.string.config_roaming_enabled), roaming.enabled) { on ->
-            store.update { it.copy(roaming = it.roamingSettings.copy(enabled = on)) }
+            mutate { store.update { it.copy(roaming = it.roamingSettings.copy(enabled = on)) } }
         })
         content.addView(row(
             if (roaming.host.isEmpty()) getString(R.string.config_roaming_no_target)
@@ -88,11 +112,11 @@ class ConfigurationActivity : AppCompatActivity() {
         imported.tests.orEmpty().forEach { test ->
             val target = test.url ?: listOfNotNull(test.host, test.port?.toString()).joinToString(":")
             content.addView(switchRow("${test.displayAlias} · ${test.type} · $target", test.enabled) { on ->
-                store.update { it.copy(tests = it.tests.orEmpty().map { t -> if (t.name == test.name) t.copy(enabled = on) else t }) }
+                mutate { store.update { it.copy(tests = it.tests.orEmpty().map { t -> if (t.name == test.name) t.copy(enabled = on) else t }) } }
             })
             content.addView(row(null,
                 getString(R.string.config_edit) to { editTest(test) },
-                getString(R.string.config_delete) to { confirmDelete(test.displayAlias) { store.update { it.copy(tests = it.tests.orEmpty().filterNot { t -> t.name == test.name }) } } }
+                getString(R.string.config_delete) to { confirmDelete(test.displayAlias) { mutate { store.update { it.copy(tests = it.tests.orEmpty().filterNot { t -> t.name == test.name }) } } } }
             ))
         }
         content.addView(buttons(getString(R.string.config_add_test) to { editTest(null) }))
@@ -104,11 +128,11 @@ class ConfigurationActivity : AppCompatActivity() {
             content.addView(switchRow(
                 getString(R.string.config_script_line, script.displayAlias, script.steps.size, writes), script.enabled
             ) { on ->
-                store.update { it.copy(scripts = it.scripts.orEmpty().map { s -> if (s.name == script.name) s.copy(enabled = on) else s }) }
+                mutate { store.update { it.copy(scripts = it.scripts.orEmpty().map { s -> if (s.name == script.name) s.copy(enabled = on) else s }) } }
             })
             content.addView(row(null,
                 getString(R.string.config_view_steps) to { showSteps(script) },
-                getString(R.string.config_delete) to { confirmDelete(script.displayAlias) { store.update { it.copy(scripts = it.scripts.orEmpty().filterNot { s -> s.name == script.name }) } } }
+                getString(R.string.config_delete) to { confirmDelete(script.displayAlias) { mutate { store.update { it.copy(scripts = it.scripts.orEmpty().filterNot { s -> s.name == script.name }) } } } }
             ))
         }
         if (imported.scripts.isNullOrEmpty()) content.addView(note(getString(R.string.config_scripts_empty)))
@@ -121,14 +145,20 @@ class ConfigurationActivity : AppCompatActivity() {
             val state = getString(if (name in credentials) R.string.config_credential_set else R.string.config_credential_missing)
             content.addView(row("$name · $state",
                 getString(R.string.config_set_value) to { editCredential(name) },
-                *(if (name in credentials) arrayOf(getString(R.string.config_delete) to { confirmDelete(name) { store.removeCredential(name) } }) else emptyArray())
+                *(if (name in credentials) arrayOf(getString(R.string.config_delete) to { confirmDelete(name) { mutate { store.removeCredential(name) } } }) else emptyArray())
             ))
         }
         content.addView(buttons(getString(R.string.config_add_credential) to { editCredential(null) }))
     }
 
     private fun editRoaming() {
-        val current = store.load().roamingSettings
+        lifecycleScope.launch {
+            val current = withContext(Dispatchers.IO) { store.load().roamingSettings }
+            editRoaming(current)
+        }
+    }
+
+    private fun editRoaming(current: RoamingSettings) {
         val form = Form()
         val host = form.text(getString(R.string.config_field_host), current.host)
         val port = form.number(getString(R.string.config_field_port), current.port.toString())
@@ -141,7 +171,7 @@ class ConfigurationActivity : AppCompatActivity() {
                 intervalMillis = interval.value().toIntOrNull() ?: current.intervalMillis,
                 method = method.selectedItem as String
             ).sanitized()
-            store.update { it.copy(roaming = settings) }
+            mutate { store.update { it.copy(roaming = settings) } }
         }
     }
 
@@ -173,14 +203,14 @@ class ConfigurationActivity : AppCompatActivity() {
             }
             // Same validation as an imported file.
             val test = WiproberConfigParser.parse(json.toString(), "test").tests!!.single()
-            store.update { imported ->
+            mutate { store.update { imported ->
                 val others = imported.tests.orEmpty().filterNot { it.name == test.name }
                 if (existing == null && others.size != imported.tests.orEmpty().size) throw ConfigException("Test names must be unique")
                 if (others.size + 1 > WiproberConfigParser.MAX_TESTS) throw ConfigException("At most ${WiproberConfigParser.MAX_TESTS} tests")
                 imported.copy(tests = imported.tests.orEmpty().map { if (it.name == test.name) test else it }.let { list ->
                     if (list.any { it.name == test.name }) list else list + test
                 })
-            }
+            } }
         }
     }
 
@@ -197,14 +227,16 @@ class ConfigurationActivity : AppCompatActivity() {
         val name = form.text(getString(R.string.config_field_name), existing.orEmpty(), enabled = existing == null)
         val value = form.text(getString(R.string.config_field_value), "", secret = true)
         form.show(existing ?: getString(R.string.config_add_credential)) {
-            store.setCredential(name.value(), value.field.text?.toString().orEmpty())
+            val credentialName = name.value()
+            val credentialValue = value.field.text?.toString().orEmpty()
+            mutate { store.setCredential(credentialName, credentialValue) }
         }
     }
 
     private fun confirmDelete(what: String, action: () -> Unit) {
         MaterialAlertDialogBuilder(this)
             .setMessage(getString(R.string.config_delete_confirm, what))
-            .setPositiveButton(R.string.config_delete) { _, _ -> action(); render() }
+            .setPositiveButton(R.string.config_delete) { _, _ -> action() }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
@@ -213,9 +245,8 @@ class ConfigurationActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this)
             .setMessage(R.string.config_remove_confirm)
             .setPositiveButton(R.string.config_remove) { _, _ ->
-                store.clear()
+                mutate { store.clear() }
                 Toast.makeText(this, R.string.config_removed, Toast.LENGTH_SHORT).show()
-                render()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

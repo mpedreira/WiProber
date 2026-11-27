@@ -91,7 +91,8 @@ class ConfigSecurityTest {
         assertNoSecret(preview.toString())
 
         store.applyImported(config)
-        val definitions = File(temp.root, "store/imported.json").readText()
+        // The active revision's definitions (mejora 16 keeps credentials in their own file).
+        val definitions = File(temp.root, "store").walk().first { it.name == "imported.json" }.readText()
         assertNoSecret(definitions)
         assertEquals(bearer, store.loadCredentials()["Portal_Authorization"])
         store.clear()
