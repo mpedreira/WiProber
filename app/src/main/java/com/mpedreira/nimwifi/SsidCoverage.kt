@@ -42,8 +42,17 @@ data class PointCoverage(
     val associatedBssid: String? = null,
     val associatedRssi: Int? = null,
     /** AP changes observed during active tests at this point (evidence to read with the second AP). */
-    val apChanges: Int = 0
-)
+    val apChanges: Int = 0,
+    /** Frequency of [strongestBssid] (MHz). */
+    val strongestFrequency: Int? = null,
+    /** Strongest AP of the SSID per band ([WifiBands]) in the latest valid scan; a band not heard is absent. */
+    val bands: List<BandSignal> = emptyList()
+) {
+    fun band(band: String): BandSignal? = bands.firstOrNull { it.band == band }
+}
+
+/** The strongest AP of one SSID in one band at a point. */
+data class BandSignal(val band: String, val bssid: String, val rssi: Int, val frequency: Int)
 
 /**
  * Per-SSID point classification. Each SSID is evaluated on its own: a strong guest network
@@ -92,6 +101,9 @@ object SsidCoverage {
                 .sortedByDescending(WifiNetworkInfo::level)
             val strongest = ranked.firstOrNull()
             val second = ranked.getOrNull(1)
+            val bands = ranked.groupBy { WifiBands.of(it.frequency) }.filterKeys { it != null }
+                .map { (band, list) -> list.maxBy(WifiNetworkInfo::level).let { BandSignal(band!!, it.bssid, it.level, it.frequency) } }
+                .sortedBy { WifiBands.ORDER.indexOf(it.band) }
             val tests = runs.filter { it.pointId == pointId }.sortedBy { it.startedAt }
                 .flatMap { run -> run.results?.tests.orEmpty().filter { it.ssid == ssid } }
             val associated = tests.lastOrNull { it.bssidStart != null }
@@ -116,7 +128,9 @@ object SsidCoverage {
                 secondaryOk = strongest != null && strongest.level >= weakDbm && second != null && second.level >= secondaryDbm,
                 associatedBssid = associated?.bssidStart,
                 associatedRssi = associated?.rssi,
-                apChanges = tests.count { it.associationChange == AssociationChange.BSSID_CHANGED || it.associationChange == AssociationChange.SSID_CHANGED }
+                apChanges = tests.count { it.associationChange == AssociationChange.BSSID_CHANGED || it.associationChange == AssociationChange.SSID_CHANGED },
+                strongestFrequency = strongest?.frequency,
+                bands = bands
             )
         }
         val pending = planned.filter { it.pointId !in byPoint }.map {

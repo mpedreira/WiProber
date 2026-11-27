@@ -52,3 +52,33 @@ data class BssLoad(val stationCount: Int, val channelUtilizationPct: Int) {
         }
     }
 }
+
+/** Wi-Fi bands from centre frequencies; the report tells 2.4, 5 and 6 GHz apart. */
+object WifiBands {
+    const val B24 = "2.4"
+    const val B5 = "5"
+    const val B6 = "6"
+    val ORDER = listOf(B24, B5, B6)
+
+    fun of(frequencyMhz: Int?): String? = when (frequencyMhz) {
+        null -> null
+        in 2400..2500 -> B24
+        in 5150..5924 -> B5
+        in 5925..7125 -> B6
+        else -> null
+    }
+
+    /** `2,4 GHz`, `5 GHz`, `6 GHz` (Spanish report). */
+    fun label(band: String?): String = when (band) {
+        B24 -> "2,4 GHz"
+        B5 -> "5 GHz"
+        B6 -> "6 GHz"
+        else -> "banda desconocida"
+    }
+
+    /** `5 GHz c36` from a frequency; null when unknown. */
+    fun radio(frequencyMhz: Int?): String? {
+        val band = of(frequencyMhz) ?: return null
+        return label(band) + (WifiChannels.channel(frequencyMhz!!)?.let { " c$it" } ?: "")
+    }
+}

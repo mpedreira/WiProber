@@ -125,7 +125,7 @@ object VerdictEvaluator {
         runs: List<ActiveRun>,
         events: List<SurveyReport.FloorEvent>,
         weakDbm: Int,
-        apNames: ApDirectory = ApDirectory.EMPTY
+        apNames: ApLabels = ApLabels.EMPTY
     ): SsidVerdict {
         val ssidEvents = events.filter { it.belongsTo(ssid) }
         val points = coverage.map { point -> pointVerdict(requirements, ssid, point, runs.filter { it.pointId == point.pointId }, ssidEvents, weakDbm, apNames) }
@@ -141,7 +141,7 @@ object VerdictEvaluator {
         runs: List<ActiveRun>,
         events: List<SurveyReport.FloorEvent>,
         weakDbm: Int,
-        apNames: ApDirectory
+        apNames: ApLabels
     ): PointVerdict {
         val checks = mutableListOf<Check>()
         checks += signal(point, weakDbm, apNames)
@@ -184,7 +184,7 @@ object VerdictEvaluator {
     }
 
     /** The profile's RSSI threshold, on the latest valid local scan of the point. */
-    private fun signal(point: PointCoverage, weakDbm: Int, apNames: ApDirectory): Check {
+    private fun signal(point: PointCoverage, weakDbm: Int, apNames: ApLabels): Check {
         val ap = point.strongestBssid?.let { ": ${apNames.label(it)}" }.orEmpty()
         return when (point.state) {
             PointState.OK -> Check("rssi", "Señal", VerdictState.PASS, point.strongestRssi?.toDouble(), weakDbm.toDouble(), "dBm", reason = "AP más fuerte$ap")
@@ -201,7 +201,7 @@ object VerdictEvaluator {
 
     /** p95 of the series' point values, roaming outages and their count, per SSID and floor. */
     private fun floorChecks(requirements: Requirements, ssid: String, coverage: List<PointCoverage>, runs: List<ActiveRun>, events: List<SurveyReport.FloorEvent>,
-                            apNames: ApDirectory): List<Check> {
+                            apNames: ApLabels): List<Check> {
         val checks = mutableListOf<Check>()
         val pointIds = coverage.map { it.pointId }.toSet()
         fun lastPerPoint(values: List<Pair<ActiveRun, Double?>>) = values.filter { it.second != null && it.first.pointId in pointIds }

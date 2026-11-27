@@ -126,6 +126,8 @@ object SurveyReport {
         val unknownAssociation: SsidSection? = null,
         val image: PlanImage? = null,
         val floorPlanId: String? = null,
+        /** How this floor's radios are named: user's table, band and channel. */
+        val apLabels: ApLabels = ApLabels.EMPTY,
         /** rc.2 · 5: floor totals, each event counted once although it is shown in two sections. */
         val totals: FloorTotals = FloorTotals(0, 0)
     )
@@ -192,12 +194,14 @@ object SurveyReport {
                     (fromMs == null || run.startedAt >= fromMs) && (toMs == null || run.startedAt <= toMs)
             }
             val events = floorEvents(survey, runs)
+            val apLabels = ApLabels(apNames, ApLabels.radios(survey))
             FloorSection(
+                apLabels = apLabels,
                 floorName = floor.name,
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
-                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events, requirements, floor.name, apNames) },
+                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events, requirements, floor.name, apLabels) },
                 // Also without active tests: roaming events without any SSID are shown there once.
                 unknownAssociation = section(null, survey, runs, weakDbm, selection, events = events)
                     .takeIf { it.runs.isNotEmpty() || it.apChanges.isNotEmpty() || it.outages.isNotEmpty() },
@@ -283,7 +287,7 @@ object SurveyReport {
     }
 
     private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection, secondaryDbm: Int = SignalProfile.of(null).secondaryDbm,
-                        events: List<FloorEvent> = floorEvents(survey, runs), requirements: Requirements? = null, floorName: String = "", apNames: ApDirectory = ApDirectory.EMPTY): SsidSection {
+                        events: List<FloorEvent> = floorEvents(survey, runs), requirements: Requirements? = null, floorName: String = "", apLabels: ApLabels = ApLabels.EMPTY): SsidSection {
         val labels = SsidCoverage.labels(survey.scanPoints, survey.plannedPoints)
         // Runs of this SSID: by the SSID of their results, else by the network observed before the run.
         val ssidRuns = runs.filter { run ->
@@ -400,7 +404,7 @@ object SurveyReport {
         val (marks, sources) = if (ssid != null) marks(ssid, survey, coverage, weakDbm) else emptyList<MapMark>() to null
         // The verdict judges this SSID alone, with the same points, runs and events as the section.
         val verdict = if (ssid != null && requirements != null && !requirements.isEmpty) {
-            VerdictEvaluator.evaluate(requirements, ssid, floorName, coverage, runs, events, weakDbm, apNames)
+            VerdictEvaluator.evaluate(requirements, ssid, floorName, coverage, runs, events, weakDbm, apLabels)
         } else {
             null
         }
@@ -503,6 +507,23 @@ object SurveyReport {
             (floor.ssids + listOfNotNull(floor.unknownAssociation)).forEach { section -> appendSection(this, model, floor, section, ::e) }
         }
         append("</body></html>")
+    }
+
+    /** `2,4 GHz −58 · 5 GHz −71` for one point; `—` when no band was heard. */
+    private fun bandCell(p: PointCoverage): String =
+        p.bands.joinToString(" · ") { "${WifiBands.label(it.band)} ${it.rssi}" }.ifEmpty { "—" }
+
+    /** Per band: points with good signal, weak, and measured points where the band was not heard. */
+    internal fun bandSummary(points: List<PointCoverage>, weakDbm: Int): String? {
+        val measured = points.filter { it.state != PointState.NOT_MEASURED }
+        val bands = WifiBands.ORDER.filter { b -> measured.any { it.band(b) != null } }
+        if (bands.isEmpty()) return null
+        return bands.joinToString(" · ") { b ->
+            val good = measured.count { (it.band(b)?.rssi ?: Int.MIN_VALUE) >= weakDbm }
+            val weak = measured.count { it.band(b)?.let { s -> s.rssi < weakDbm } == true }
+            val missing = measured.count { it.band(b) == null }
+            "${WifiBands.label(b)}: buena $good, débil $weak, sin oír $missing de ${measured.size}"
+        }
     }
 
     private fun stateClass(state: String) = when (state) {
@@ -616,6 +637,7 @@ object SurveyReport {
             append("<li>Sin medición local: ").append(section.count(PointState.NOT_MEASURED)).append(" puntos</li>")
             append("<li>Segundo AP del mismo SSID por encima del umbral secundario (indicio de redundancia): ").append(section.redundant).append(" puntos</li>")
             append("<li>Cambios de AP: ").append(section.apChanges.size).append(" · pérdidas de alcance: ").append(section.outages.size).append("</li></ul>")
+            bandSummary(section.points, model.weakDbm)?.let { append("<p>Por banda (último escaneo válido de cada punto): ").append(e(it)).append("</p>") }
             section.sources?.let { src ->
                 append("<p class=\"muted\">Fuentes: ").append(src.stopPoints).append(" puntos Stop-and-Go con RF local; ")
                     .append(src.continuousPlaced).append(" escaneos continuos en el plano (posición aproximada)")
@@ -634,13 +656,14 @@ object SurveyReport {
             val attention = section.points.filter { it.state != PointState.OK }
                 .sortedWith(compareBy({ stateRank(it.state) }, { it.strongestRssi ?: Int.MIN_VALUE }))
             if (attention.isNotEmpty()) {
-                append("<h4>Peores puntos</h4><table><tr><th>Punto</th><th>Estado</th><th>AP más fuerte (escaneo)</th><th>dBm</th><th>Segundo AP</th><th>AP asociado (pruebas)</th><th>x, y (px)</th></tr>")
+                append("<h4>Peores puntos</h4><table><tr><th>Punto</th><th>Estado</th><th>AP más fuerte (escaneo)</th><th>dBm</th><th>Por banda</th><th>Segundo AP</th><th>AP asociado (pruebas)</th><th>x, y (px)</th></tr>")
                 attention.forEach { p ->
                     append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(stateLabel(p.state)))
                         .append(if (p.state == PointState.WEAK) " (umbral ${model.weakDbm} dBm)" else "").append("</td><td>")
-                        .append(e(model.apNames.label(p.strongestBssid) ?: "—")).append("</td><td>").append(e(p.strongestRssi ?: "—")).append("</td><td>")
-                        .append(e(p.secondBssid?.let { "${model.apNames.label(it)} ${p.secondRssi} dBm" } ?: "ninguno")).append("</td><td>")
-                        .append(e(p.associatedBssid?.let { "${model.apNames.label(it)} ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} cambios de AP" else "" } ?: "—"))
+                        .append(e(floor.apLabels.label(p.strongestBssid) ?: "—")).append("</td><td>").append(e(p.strongestRssi ?: "—")).append("</td><td>")
+                        .append(e(bandCell(p))).append("</td><td>")
+                        .append(e(p.secondBssid?.let { "${floor.apLabels.label(it)} ${p.secondRssi} dBm" } ?: "ninguno")).append("</td><td>")
+                        .append(e(p.associatedBssid?.let { "${floor.apLabels.label(it)} ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} cambios de AP" else "" } ?: "—"))
                         .append("</td><td>").append(e("%.0f, %.0f".format(java.util.Locale.ROOT, p.x, p.y))).append("</td></tr>")
                 }
                 append("</table>")
@@ -680,11 +703,12 @@ object SurveyReport {
         if (events.isNotEmpty()) {
             append("<h4>Roaming y cortes</h4><table><tr><th>Evento</th><th>Hora (UTC, ms)</th><th>Ventana observada</th><th>De</th><th>A</th><th>Detalle</th><th>Posición</th></tr>")
             events.forEach { (title, ev) ->
-                append("<tr><td>").append(title).append("<div class=\"muted\">").append(e(ev.kind)).append(ev.incidentId?.let { " · incidente $it" } ?: "").append("</div></td><td>")
+                append("<tr><td>").append(title).append("<div class=\"muted\">").append(e(ev.kind)).append(ev.incidentId?.let { " · incidente $it" } ?: "")
+                    .append(e(floor.apLabels.bandChange(ev.from, ev.to)?.let { " · $it" } ?: "")).append("</div></td><td>")
                     .append(e(time(ev.at))).append("</td><td>")
                     .append(if (ev.windowFrom != null || ev.windowTo != null) e("${time(ev.windowFrom).ifEmpty { "?" }} → ${time(ev.windowTo).ifEmpty { "sin recuperar" }}") else "—")
-                    .append("</td><td>").append(e(listOfNotNull(ev.fromSsid, model.apNames.label(ev.from)).joinToString(" · ").ifEmpty { "—" }))
-                    .append("</td><td>").append(e(listOfNotNull(ev.toSsid, model.apNames.label(ev.to)).joinToString(" · ").ifEmpty { "—" }))
+                    .append("</td><td>").append(e(listOfNotNull(ev.fromSsid, floor.apLabels.label(ev.from)).joinToString(" · ").ifEmpty { "—" }))
+                    .append("</td><td>").append(e(listOfNotNull(ev.toSsid, floor.apLabels.label(ev.to)).joinToString(" · ").ifEmpty { "—" }))
                     .append("</td><td>").append(e(ev.detail ?: "—")).append("</td><td>")
                     .append(if (ev.x != null && ev.y != null) e("%.0f, %.0f px (aprox.)".format(java.util.Locale.ROOT, ev.x, ev.y)) else "—").append("</td></tr>")
             }

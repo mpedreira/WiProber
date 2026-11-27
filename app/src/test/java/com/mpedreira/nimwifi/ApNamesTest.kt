@@ -90,8 +90,9 @@ class ApNamesTest {
         val model = SurveyReport.build(snapshot(), t0, "Ops", weakDbm = -67, apNames = directory,
             requirements = Requirements(roaming = RoamingRequirement(maxOutageMs = 500)))
         val html = SurveyReport.html(model)
-        assertTrue("worst points", "AP-P3-04 ($ap4)" in html)
-        assertTrue("unmapped stays a BSSID", ">$unmapped -80 dBm<" in html)
+        // Name, BSSID, band and channel (the scan saw both radios on 5 GHz channel 36).
+        assertTrue("worst points", "AP-P3-04 ($ap4 · 5 GHz c36)" in html)
+        assertTrue("unmapped stays a BSSID", ">$unmapped (5 GHz c36) -80 dBm<" in html)
         assertTrue("roaming", "Ops · AP-P3-05 ($ap5)" in html)
         assertTrue("verdict", "entre AP-P3-04 y AP-P3-05" in html)
         // Without a table the report is as before.

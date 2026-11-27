@@ -90,3 +90,56 @@ class ApDirectory(entries: List<ApName>) {
         }
     }
 }
+
+/**
+ * How the report names one radio of a floor: the user's table name (if any), the BSSID, and its
+ * band and channel when the floor's local scans or tests saw it. [radios]: normalized BSSID →
+ * frequency (MHz). Display only.
+ */
+class ApLabels(val directory: ApDirectory = ApDirectory.EMPTY, private val radios: Map<String, Int> = emptyMap()) {
+    fun frequency(bssid: String?): Int? = Bssids.normalize(bssid)?.let(radios::get)
+
+    fun band(bssid: String?): String? = WifiBands.of(frequency(bssid))
+
+    /** `AP-P3-04 (aa:bb:… · 5 GHz c36)`, `aa:bb:… (2,4 GHz c6)` or the BSSID alone. */
+    fun label(bssid: String?): String? {
+        bssid ?: return null
+        val details = listOfNotNull(WifiBands.radio(frequency(bssid)))
+        val name = directory.name(bssid)
+        return when {
+            name != null -> "$name (" + (listOf(bssid) + details).joinToString(" · ") + ")"
+            details.isNotEmpty() -> "$bssid (" + details.joinToString(" · ") + ")"
+            else -> bssid
+        }
+    }
+
+    /** `entre AP-P3-04 y AP-P3-05`, plus `· cambio de banda 5 GHz → 2,4 GHz` when the bands differ. */
+    fun between(from: String?, to: String?): String {
+        val base = directory.between(from, to)
+        return bandChange(from, to)?.let { if (base.isEmpty()) it else "$base · $it" } ?: base
+    }
+
+    /** `cambio de banda 5 GHz → 2,4 GHz` when both bands are known and differ, else null. */
+    fun bandChange(from: String?, to: String?): String? {
+        val a = band(from) ?: return null
+        val b = band(to) ?: return null
+        return if (a == b) null else "cambio de banda ${WifiBands.label(a)} → ${WifiBands.label(b)}"
+    }
+
+    companion object {
+        val EMPTY = ApLabels()
+
+        /** Frequencies of the radios a floor's local scans and active tests saw (latest wins). */
+        fun radios(survey: ProjectSnapshot): Map<String, Int> {
+            val result = linkedMapOf<String, Int>()
+            fun put(bssid: String?, frequency: Int?) {
+                val key = Bssids.normalize(bssid) ?: return
+                if (frequency != null && WifiBands.of(frequency) != null) result[key] = frequency
+            }
+            survey.scanPoints.filterNot { it.importedFromEsx }.sortedBy { it.timestamp }.forEach { p -> p.wifiNetworks.forEach { put(it.bssid, it.frequency) } }
+            survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { s -> s.scanResults.forEach { r -> r.wifiNetworks.forEach { put(it.bssid, it.frequency) } } }
+            survey.activeRuns.sortedBy { it.startedAt }.forEach { run -> run.results?.tests.orEmpty().forEach { put(it.bssidStart, it.frequencyMhz) } }
+            return result
+        }
+    }
+}
