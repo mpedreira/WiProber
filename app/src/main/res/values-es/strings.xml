@@ -357,4 +357,5 @@
     <string name="config_field_url">URL (http)</string>
     <string name="config_field_count">Sondas (ping, tcp)</string>
     <string name="config_field_value">Valor</string>
+    <string name="save_failed_floors">No se ha podido guardar %1$s: %2$s</string>
 </resources>

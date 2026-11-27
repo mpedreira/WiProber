@@ -73,7 +73,6 @@ class SurveyActivity : AppCompatActivity() {
     private var currentFloorId: String? = null
     private var availableFloors: List<FloorOption> = emptyList()
     private var isProjectReady = false
-    private var projectSaveJob: Job? = null
     private var saveFailureSnackbar: com.google.android.material.snackbar.Snackbar? = null
     /** The configuration screen may change the guide (SSID, profile): redraw on return. */
     private val configurationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -131,7 +130,6 @@ class SurveyActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        projectSaveJob?.cancel()
         if (isProjectReady) persistCurrentProject()
         super.onStop()
     }
@@ -680,10 +678,11 @@ class SurveyActivity : AppCompatActivity() {
         if (!viewModel.beginProjectOperation(ProjectOperation.EXPORT_PREFLIGHT)) return
         lifecycleScope.launch {
             showProjectOperationProgress(R.string.checking_export)
-            projectSaveJob?.cancelAndJoin()
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    projectRepository.saveProject(projectId, floorId, activeSnapshot)
+                    // The newest revision of this floor; other floors' pending saves finish first.
+                    ProjectAutosave.saveNow(SaveKey(projectId, floorId)) { projectRepository.saveProject(projectId, floorId, activeSnapshot) }
+                    ProjectAutosave.saver.cancelPending(projectId)
                     val projectSnapshot = projectRepository.snapshotProject(projectId)
                     FloorScalePolicy.uncalibratedFloors(projectSnapshot) to
                         PerformanceExport.hasMeasurements(projectSnapshot)
@@ -744,10 +743,11 @@ class SurveyActivity : AppCompatActivity() {
         lifecycleScope.launch {
             updateButtonStates()
             showProjectOperationProgress(R.string.exporting_project)
-            projectSaveJob?.cancelAndJoin()
             val exportResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    projectRepository.saveProject(projectId, floorId, activeSnapshot)
+                    // Export from this exact revision: saved now, after any pending save of the project.
+                    ProjectAutosave.saveNow(SaveKey(projectId, floorId)) { projectRepository.saveProject(projectId, floorId, activeSnapshot) }
+                    ProjectAutosave.saver.cancelPending(projectId)
                     val projectSnapshot = projectRepository.snapshotProject(projectId)
                     EsxExportService(applicationContext).export(
                         destination,
@@ -1379,11 +1379,12 @@ class SurveyActivity : AppCompatActivity() {
             isProjectReady = false
             updateButtonStates()
             showProjectOperationProgress(R.string.switching_floor)
-            projectSaveJob?.cancelAndJoin()
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     if (previousFloorId != null && snapshot != null) {
-                        projectRepository.saveProject(projectId, previousFloorId, snapshot)
+                        ProjectAutosave.saveNow(SaveKey(projectId, previousFloorId)) {
+                            projectRepository.saveProject(projectId, previousFloorId, snapshot)
+                        }
                     }
                     projectRepository.openProject(projectId, floorId)
                 }
@@ -1415,11 +1416,12 @@ class SurveyActivity : AppCompatActivity() {
             isProjectReady = false
             updateButtonStates()
             showProjectOperationProgress(R.string.adding_floor)
-            projectSaveJob?.cancelAndJoin()
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     if (previousFloorId != null && snapshot != null) {
-                        projectRepository.saveProject(projectId, previousFloorId, snapshot)
+                        ProjectAutosave.saveNow(SaveKey(projectId, previousFloorId)) {
+                            projectRepository.saveProject(projectId, previousFloorId, snapshot)
+                        }
                     }
                     val input = requireNotNull(contentResolver.openInputStream(mapUri)) {
                         getString(R.string.floor_plan_read_failed)
@@ -1572,7 +1574,6 @@ class SurveyActivity : AppCompatActivity() {
 
     private fun scheduleProjectSave() {
         if (!isProjectReady) return
-        projectSaveJob?.cancel()
         persistCurrentProject(SAVE_DEBOUNCE_MILLIS)
     }
 
@@ -1582,7 +1583,8 @@ class SurveyActivity : AppCompatActivity() {
         val floorId = currentFloorId ?: return
         val snapshot = createProjectSnapshot() ?: return
         val repository = projectRepository
-        projectSaveJob = ProjectAutosave.schedule(delayMillis) { repository.saveProject(projectId, floorId, snapshot) }
+        // Keyed by project and floor: it only replaces this floor's pending save.
+        ProjectAutosave.schedule(SaveKey(projectId, floorId), delayMillis) { repository.saveProject(projectId, floorId, snapshot) }
     }
 
     /**
@@ -1614,11 +1616,15 @@ class SurveyActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                ProjectAutosave.failure.collect { failure ->
+                ProjectAutosave.failures.collect { failures ->
                     saveFailureSnackbar?.dismiss()
-                    saveFailureSnackbar = failure?.let { reason ->
+                    // Only this project's floors; each floor keeps its own error until it saves.
+                    val mine = failures.filterKeys { it.projectId == currentProjectId }
+                    saveFailureSnackbar = mine.takeIf { it.isNotEmpty() }?.let { failing ->
+                        val names = failing.keys.map { key -> availableFloors.firstOrNull { it.id == key.floorId }?.name ?: key.floorId }
                         com.google.android.material.snackbar.Snackbar
-                            .make(binding.root, getString(R.string.save_failed, reason), com.google.android.material.snackbar.Snackbar.LENGTH_INDEFINITE)
+                            .make(binding.root, getString(R.string.save_failed_floors, names.joinToString(", "), failing.values.first()),
+                                com.google.android.material.snackbar.Snackbar.LENGTH_INDEFINITE)
                             .setAction(R.string.save_retry) { persistCurrentProject() }
                             .also { it.show() }
                     }

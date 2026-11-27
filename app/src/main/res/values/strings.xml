@@ -357,4 +357,5 @@
     <string name="config_field_url">URL (http)</string>
     <string name="config_field_count">Probes (ping, tcp)</string>
     <string name="config_field_value">Value</string>
+    <string name="save_failed_floors">Could not save %1$s: %2$s</string>
 </resources>
