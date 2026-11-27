@@ -139,6 +139,11 @@ class ProjectHubActivity : AppCompatActivity() {
             setBusy(false)
             result.onSuccess { openSurvey(it.id) }
                 .onFailure { error ->
+                    if (error is ConfigurationFileException) {
+                        // A configuration (JSON, HAR or configuration ZIP) opened from another app.
+                        ConfigurationImport(this@ProjectHubActivity).import(uri)
+                        return@onFailure
+                    }
                     Log.e(TAG, "Cannot import ESX project", error)
                     showError(R.string.project_import_failed, error)
                 }

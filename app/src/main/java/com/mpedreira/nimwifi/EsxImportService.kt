@@ -16,6 +16,9 @@ class PreparedEsxImport internal constructor(
     }
 }
 
+/** The opened file is a nimWifi configuration, not a project: import it as configuration. */
+class ConfigurationFileException : Exception("The file is a nimWifi configuration")
+
 class EsxImportService(
     private val context: Context,
     private val projectRepository: ProjectRepository
@@ -37,10 +40,20 @@ class EsxImportService(
                     "The ESX project is too large"
                 )
             }
+            // An ESX, or a nimWifi export ZIP whose ESX is imported (its results JSON is not);
+            // a configuration file is handed back to the caller.
+            val esx = when (ImportedFiles.detect(sourceFile)) {
+                ImportedFiles.Kind.EXPORT_BUNDLE -> File(workspace, BUNDLE_ESX_FILE).also {
+                    ImportedFiles.extractBundleEsx(sourceFile, it, DEFAULT_ESX_LIMITS.maxSourceBytes)
+                    sourceFile.delete()
+                }
+                ImportedFiles.Kind.CONFIG_ZIP, ImportedFiles.Kind.CONFIG_JSON -> throw ConfigurationFileException()
+                else -> sourceFile
+            }
             val extractedDirectory = File(workspace, EXTRACTED_DIRECTORY)
-            val floors = EsxProjectImporter().import(sourceFile, extractedDirectory)
+            val floors = EsxProjectImporter().import(esx, extractedDirectory)
             require(floors.isNotEmpty()) { "The ESX project does not contain usable floor plans" }
-            return PreparedEsxImport(workspace, sourceFile, floors)
+            return PreparedEsxImport(workspace, esx, floors)
         } catch (error: Throwable) {
             workspace.deleteRecursively()
             throw error
@@ -54,5 +67,6 @@ class EsxImportService(
         private const val IMPORT_CACHE_DIRECTORY = "esx-import-jobs"
         private const val EXTRACTED_DIRECTORY = "extracted"
         private const val SOURCE_FILE = "source.esx"
+        private const val BUNDLE_ESX_FILE = "bundle.esx"
     }
 }
