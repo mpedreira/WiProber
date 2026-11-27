@@ -109,6 +109,8 @@ object ErrorCodes {
     const val PARTIAL_LOSS = "partial_loss"
     const val NO_REPLY = "no_reply"
     const val CANCELLED = "cancelled"
+    /** The user skipped the tests of this point ("Skip point"). */
+    const val SKIPPED_BY_USER = "skipped_by_user"
     const val INTERRUPTED = "interrupted"
     const val SKIPPED_UNREACHABLE = "skipped_unreachable"
     const val CLEARTEXT_NOT_PERMITTED = "cleartext_not_permitted"

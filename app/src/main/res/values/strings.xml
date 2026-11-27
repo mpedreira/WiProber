@@ -305,4 +305,7 @@
     <string name="survey_service_channel">Survey in progress</string>
     <string name="survey_service_track">Continuous track in progress</string>
     <string name="survey_service_tests">Active tests in progress</string>
+    <string name="throughput_skip_point">Skip point</string>
+    <string name="throughput_skipping">Skipping this point…</string>
+    <string name="run_summary_skipped">Tests skipped at this point (the scan is kept)</string>
 </resources>

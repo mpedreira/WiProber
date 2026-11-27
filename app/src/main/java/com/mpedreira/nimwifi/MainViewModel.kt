@@ -24,6 +24,7 @@ class MainViewModel @JvmOverloads constructor(
     private val monotonic: MillisClock = monotonicClock ?: if (clock === SystemMillisClock) MonotonicMillisClock else clock
     private var activeSessionStartMono: Long = 0L
     private var activeRunJob: Job? = null
+    private var skipRequested: Job? = null
 
     private val _screenState = MutableStateFlow(SurveyScreenState())
     val screenState: StateFlow<SurveyScreenState> = _screenState.asStateFlow()
@@ -537,7 +538,12 @@ class MainViewModel @JvmOverloads constructor(
                 // Raised inside the run: its deadline expired (or it was cancelled from within).
                 finishRun(runId, if (e.reason == ErrorCodes.TIMEOUT) RunStatus.FAILED else RunStatus.CANCELLED, e.reason)
             } catch (e: CancellationException) {
-                finishRun(runId, RunStatus.CANCELLED, ErrorCodes.CANCELLED)
+                if (skipRequested != null && skipRequested === activeRunJob) {
+                    finishRun(runId, RunStatus.SKIPPED, ErrorCodes.SKIPPED_BY_USER)
+                } else {
+                    finishRun(runId, RunStatus.CANCELLED, ErrorCodes.CANCELLED)
+                }
+                skipRequested = null
                 throw e
             } catch (e: Exception) {
                 finishRun(runId, RunStatus.FAILED, ErrorClassifier.code(e))
@@ -549,6 +555,13 @@ class MainViewModel @JvmOverloads constructor(
     /** "Cancel tests": stops the active run; the point and the finished phases are kept. */
     fun cancelActiveRun() {
         activeRunJob?.cancel()
+    }
+
+    /** "Skip point": stops the run like a cancel but records it as skipped by the user. */
+    fun skipActiveRun() {
+        val job = activeRunJob ?: return
+        skipRequested = job
+        job.cancel()
     }
 
     /** Callbacks of [runId] only: late callbacks of another run, point or floor are ignored. */

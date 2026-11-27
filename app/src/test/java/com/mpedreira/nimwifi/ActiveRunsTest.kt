@@ -171,4 +171,18 @@ class ActiveRunsTest {
         // Another floor never shares ids.
         assertTrue(SurveyIds.pointId("floor-b", old) != point.pointId)
     }
+
+    @Test
+    fun skippingAPointRecordsItAsSkippedByTheUserAndKeepsTheScan() {
+        val vm = viewModel()
+        val point = vm.scanPoint()
+        val gate = CompletableDeferred<Unit>()
+        val runId = vm.startActiveRun(point.pointId!!, point.scanId, phases, null) { _, _ -> gate.await(); error("never") }!!
+        vm.skipActiveRun()
+        val run = vm.screenState.value.activeRuns.single { it.runId == runId }
+        assertEquals(RunStatus.SKIPPED, run.status)
+        assertEquals(ErrorCodes.SKIPPED_BY_USER, run.statusReason)
+        assertEquals(listOf(point), vm.screenState.value.scanPoints)
+        assertTrue(vm.screenState.value.interaction is SurveyInteraction.Idle)
+    }
 }

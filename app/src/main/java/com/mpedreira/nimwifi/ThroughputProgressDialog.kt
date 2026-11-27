@@ -17,7 +17,8 @@ import java.util.Locale
  */
 class ThroughputProgressDialog(
     private val activity: AppCompatActivity,
-    private val onCancel: () -> Unit
+    private val onCancel: () -> Unit,
+    private val onSkip: () -> Unit = {}
 ) {
     @SuppressLint("InflateParams") // dialog content has no parent until the dialog attaches it
     private val view = activity.layoutInflater.inflate(R.layout.dialog_throughput_progress, null)
@@ -50,11 +51,22 @@ class ThroughputProgressDialog(
             .setCancelable(false)
             // The point and the finished phases are kept; the dialog closes when the run ends.
             .setNegativeButton(R.string.throughput_cancel_tests, null)
+            // Skip: this point keeps its scan and is recorded as "skipped by the user".
+            .setNeutralButton(R.string.throughput_skip_point, null)
             .show()
-        dialog?.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE)?.setOnClickListener { button ->
-            button.isEnabled = false
+        val negative = dialog?.getButton(AlertDialog.BUTTON_NEGATIVE)
+        val neutral = dialog?.getButton(AlertDialog.BUTTON_NEUTRAL)
+        negative?.setOnClickListener {
+            negative.isEnabled = false
+            neutral?.isEnabled = false
             stepText.setText(R.string.throughput_cancelling)
             onCancel()
+        }
+        neutral?.setOnClickListener {
+            negative?.isEnabled = false
+            neutral.isEnabled = false
+            stepText.setText(R.string.throughput_skipping)
+            onSkip()
         }
         view.post(ticker)
     }
@@ -129,6 +141,7 @@ object ActiveRunSummary {
             RunStatus.COMPLETED -> context.getString(R.string.run_summary_completed)
             RunStatus.CANCELLED -> context.getString(R.string.run_summary_cancelled)
             RunStatus.INTERRUPTED -> context.getString(R.string.run_summary_interrupted)
+            RunStatus.SKIPPED -> context.getString(R.string.run_summary_skipped)
             else -> context.getString(R.string.run_summary_failed, run.statusReason ?: run.status)
         }
         val results = run.results?.takeIf { it.tests.isNotEmpty() }?.let(ThroughputSummary::format)

@@ -549,7 +549,7 @@ class SurveyActivity : AppCompatActivity() {
             if (finished != null) binding.surveyStatusText.text = ActiveRunSummary.format(this, finished)
             return
         }
-        val dialog = progressDialog ?: ThroughputProgressDialog(this) { viewModel.cancelActiveRun() }
+        val dialog = progressDialog ?: ThroughputProgressDialog(this, onCancel = { viewModel.cancelActiveRun() }, onSkip = { viewModel.skipActiveRun() })
             .also { it.show(); progressDialog = it }
         state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
     }
