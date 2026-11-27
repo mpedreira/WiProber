@@ -63,7 +63,9 @@ object SurveyReport {
         val windowFrom: Long? = null, val windowTo: Long? = null,
         val fromSsid: String? = null, val toSsid: String? = null,
         val x: Float? = null, val y: Float? = null,
-        val incidentId: String? = null, val seq: Int = 0, val source: String = "run"
+        val incidentId: String? = null, val seq: Int = 0, val source: String = "run",
+        /** rc.3 · 4: stable identity in the floor: session/run and position there. */
+        val key: String = ""
     )
 
     data class SsidSection(
@@ -122,13 +124,10 @@ object SurveyReport {
 
     data class FloorTotals(val apChanges: Int, val outages: Int) {
         companion object {
-            /** An SSID change shown under both SSIDs is the same event: counted once. */
-            fun of(sections: List<SsidSection>): FloorTotals {
-                fun key(ev: Event) = listOf(ev.source, ev.kind, ev.at, ev.from, ev.to, ev.fromSsid, ev.toSsid, ev.detail)
-                return FloorTotals(
-                    sections.flatMap { it.apChanges }.distinctBy(::key).size,
-                    sections.flatMap { it.outages }.distinctBy(::key).size
-                )
+            /** Each event once, by its identity, although it may be shown in two sections. */
+            fun of(events: List<FloorEvent>): FloorTotals {
+                val distinct = events.distinctBy { it.event.key }
+                return FloorTotals(distinct.count { !it.outage }, distinct.count { it.outage })
             }
         }
     }
@@ -172,17 +171,20 @@ object SurveyReport {
                 (runId == null || run.runId == runId) &&
                     (fromMs == null || run.startedAt >= fromMs) && (toMs == null || run.startedAt <= toMs)
             }
+            val events = floorEvents(survey, runs)
             FloorSection(
                 floorName = floor.name,
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
-                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm) },
+                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events) },
                 // Also without active tests: roaming events without any SSID are shown there once.
-                unknownAssociation = section(null, survey, runs, weakDbm, selection)
+                unknownAssociation = section(null, survey, runs, weakDbm, selection, events = events)
                     .takeIf { it.runs.isNotEmpty() || it.apChanges.isNotEmpty() || it.outages.isNotEmpty() },
-                image = planImages[floor.esxFloorPlanId]
-            ).let { it.copy(totals = FloorTotals.of(it.ssids + listOfNotNull(it.unknownAssociation))) }
+                image = planImages[floor.esxFloorPlanId],
+                // rc.3 · 4: from the floor's events, not from the (limited) sections shown.
+                totals = FloorTotals.of(events)
+            )
         }
     )
 
@@ -212,7 +214,54 @@ object SurveyReport {
         else -> Outcome.FAILED
     }
 
-    private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection, secondaryDbm: Int = SignalProfile.of(null).secondaryDbm): SsidSection {
+    /**
+     * rc.3 · 4: one event of the floor, inside the report's scope, with an identity tied to its
+     * session or run and its position there ([Event.key]). Sections show the events that belong
+     * to their SSID; floor totals count this list, whatever sections are shown.
+     */
+    class FloorEvent(val event: Event, val outage: Boolean, private val memberSsids: Set<String?>, private val unknownSsid: Boolean) {
+        fun belongsTo(ssid: String?): Boolean = if (ssid == null) unknownSsid else ssid in memberSsids
+    }
+
+    /** Every AP change and reachability loss of the floor in scope ([runs]: the report's runs). */
+    fun floorEvents(survey: ProjectSnapshot, runs: List<ActiveRun>): List<FloorEvent> = buildList {
+        runs.forEach { run ->
+            run.results?.tests.orEmpty().forEachIndexed { index, test ->
+                if (test.associationChange !in setOf(AssociationChange.BSSID_CHANGED, AssociationChange.SSID_CHANGED)) return@forEachIndexed
+                val event = Event(test.associationChange!!, test.measuredAt, test.bssidStart, test.bssidEnd, test.target,
+                    fromSsid = test.ssid, toSsid = test.ssidEnd, seq = index, source = "run", key = "run:${run.runId}:$index")
+                // A run's AP change is reported under the SSID the test ran on.
+                add(FloorEvent(event, outage = false, memberSsids = setOf(test.ssid), unknownSsid = test.ssid == null))
+            }
+        }
+        survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { session ->
+            val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
+            session.roamingLogs.forEachIndexed { logIndex, log ->
+                log.events.forEachIndexed { index, event ->
+                    val at = session.startTime + event.atMillis
+                    val position = if (route.size >= 2 && event.atMillis in route.first().timestamp..route.last().timestamp) SurveyGuide.positionAt(route, event.atMillis) else null
+                    val detail = when {
+                        event.open == true -> "sin recuperar al terminar"
+                        event.outageObserved == false -> "sin fallos observados" + (event.outageUpperBoundMs?.let { " (resolución ≤ $it ms)" } ?: "")
+                        event.outageLowerBoundMs != null -> "corte de ${event.outageLowerBoundMs} a ${event.outageUpperBoundMs ?: "?"} ms"
+                        else -> "duración no estimable (hueco sin muestras)"
+                    } + " · sonda " + probeLabel(log)
+                    val built = Event(event.type, at, event.fromBssid, event.toBssid, detail,
+                        windowFrom = event.lastReachableAtMillis?.let { session.startTime + it },
+                        windowTo = event.firstReachableAtMillis?.let { session.startTime + it },
+                        fromSsid = event.fromSsid, toSsid = event.toSsid, x = position?.first, y = position?.second,
+                        incidentId = event.incidentId, seq = index, source = "roaming", key = "roaming:${session.id}:$logIndex:$index")
+                    val outage = event.type !in setOf(RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ROAM)
+                    // rc.2 · 5: without SSID on either side only «SSID desconocido»; a change between
+                    // two known SSIDs belongs to both (shown twice, counted once).
+                    add(FloorEvent(built, outage, setOfNotNull(event.fromSsid, event.toSsid), event.fromSsid == null && event.toSsid == null))
+                }
+            }
+        }
+    }
+
+    private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection, secondaryDbm: Int = SignalProfile.of(null).secondaryDbm,
+                        events: List<FloorEvent> = floorEvents(survey, runs)): SsidSection {
         val labels = SsidCoverage.labels(survey.scanPoints, survey.plannedPoints)
         // Runs of this SSID: by the SSID of their results, else by the network observed before the run.
         val ssidRuns = runs.filter { run ->
@@ -321,37 +370,10 @@ object SurveyReport {
         }
         val results = ssidRuns.mapNotNull { it.results }
 
-        val apChanges = mutableListOf<Event>()
-        val outages = mutableListOf<Event>()
-        results.flatMap { it.tests }.filter { it.ssid == ssid && it.associationChange in setOf(AssociationChange.BSSID_CHANGED, AssociationChange.SSID_CHANGED) }
-            .forEach { apChanges += Event(it.associationChange!!, it.measuredAt, it.bssidStart, it.bssidEnd, it.target,
-                fromSsid = it.ssid, toSsid = it.ssidEnd, seq = apChanges.size, source = "run") }
-        survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { session ->
-            val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
-            session.roamingLogs.flatMap { log -> log.events.map { log to it } }
-                // rc.2 · 5: an event without SSID on either side belongs only to «SSID desconocido»
-                // (ssid == null), never to every SSID; a change between two known SSIDs stays in both.
-                .filter { (_, it) -> if (ssid == null) it.fromSsid == null && it.toSsid == null else it.fromSsid == ssid || it.toSsid == ssid }
-                .forEachIndexed { index, (log, event) ->
-                    val at = session.startTime + event.atMillis
-                    val position = if (route.size >= 2 && event.atMillis in route.first().timestamp..route.last().timestamp) SurveyGuide.positionAt(route, event.atMillis) else null
-                    val detail = when {
-                        event.open == true -> "sin recuperar al terminar"
-                        event.outageObserved == false -> "sin fallos observados" + (event.outageUpperBoundMs?.let { " (resolución ≤ $it ms)" } ?: "")
-                        event.outageLowerBoundMs != null -> "corte de ${event.outageLowerBoundMs} a ${event.outageUpperBoundMs ?: "?"} ms"
-                        else -> "duración no estimable (hueco sin muestras)"
-                    } + " · sonda " + probeLabel(log)
-                    val built = Event(event.type, at, event.fromBssid, event.toBssid, detail,
-                        windowFrom = event.lastReachableAtMillis?.let { session.startTime + it },
-                        windowTo = event.firstReachableAtMillis?.let { session.startTime + it },
-                        fromSsid = event.fromSsid, toSsid = event.toSsid, x = position?.first, y = position?.second,
-                        incidentId = event.incidentId, seq = index, source = "roaming")
-                    when (event.type) {
-                        RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ROAM -> apChanges += built
-                        else -> outages += built
-                    }
-                }
-        }
+        // rc.3 · 4: this section's share of the floor's events (each with its stable identity).
+        val mine = events.filter { it.belongsTo(ssid) }
+        val apChanges = mine.filterNot { it.outage }.map { it.event }
+        val outages = mine.filter { it.outage }.map { it.event }
         val coverage = ssid?.let { SsidCoverage.points(survey.scanPoints, survey.plannedPoints, it, weakDbm, secondaryDbm, survey.activeRuns) }.orEmpty()
         val (marks, sources) = if (ssid != null) marks(ssid, survey, coverage, weakDbm) else emptyList<MapMark>() to null
         return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources)
