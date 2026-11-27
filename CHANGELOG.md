@@ -2,6 +2,16 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
+## 4.0.0-rc.3
+
+Fixes over `v4.0.0-rc.2` (not tagged yet).
+
+### Fixed
+- **Field build**: the APK identity check read the package from the wrong `name=` field and failed with `Package 16`. It now lives in `scripts/verify-apk.sh` (anchored parsing, any `aapt`/`apksigner` failure fails the step) with regression tests in `scripts/test-verify-apk.sh`.
+- **Active tests never start on an unchecked Wi-Fi**: without a network from the check (no Wi-Fi, or the check could not run) no other network is chosen silently; a Wi-Fi that appears meanwhile goes through the check and decision first (`network_changed`, `unchecked`), and without Wi-Fi nothing is sent and the reason is recorded.
+- **Drafts from rc.1 resumed with another probe** keep the original target and interval of their old probes (method `unknown`); stretches without probes stay without one.
+- **Report floor totals** count every event of the floor in scope once, by its identity, also events of SSIDs without a section; two independent identical events count as two.
+
 ## 4.0.0-rc.2
 
 Fixes over `v4.0.0-rc.1`.
