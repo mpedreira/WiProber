@@ -15,6 +15,7 @@ data class RouteSegment(
     val waypoints: List<RoutePointWrapper> = emptyList(),
     val scanResults: List<ScanResultWrapper> = emptyList(),
     val probeAttempts: List<ProbeAttempt> = emptyList(),
+    val scanWindows: List<ScanWindow> = emptyList(),
     /** Last observation (waypoint, scan or probe) relative to [startUtc]'s stretch start. */
     val lastObservedMs: Long = 0L
 )
@@ -60,6 +61,7 @@ object RouteDrafts {
         val scans = mutableListOf<ScanResultWrapper>()
         val attempts = mutableListOf<ProbeAttempt>()
         val interruptions = mutableListOf<RouteInterruption>()
+        val windows = mutableListOf<ScanWindow>()
         var previousEnd = -1L
         draft.segments.forEach { segment ->
             val anchored = segment.startUtc - draft.startTime
@@ -68,6 +70,7 @@ object RouteDrafts {
             segment.waypoints.forEach { waypoints += it.copy(timestamp = it.timestamp + offset) }
             segment.scanResults.forEach { scans += it.copy(timestamp = it.timestamp + offset) }
             segment.probeAttempts.forEach { attempts += it.copy(startMs = it.startMs + offset, endMs = it.endMs + offset) }
+            segment.scanWindows.orEmpty().forEach { windows += it.copy(startMs = it.startMs + offset, endMs = it.endMs + offset) }
             val last = maxOf(segment.lastObservedMs, segment.waypoints.maxOfOrNull { it.timestamp } ?: 0L,
                 segment.scanResults.maxOfOrNull { it.timestamp } ?: 0L, segment.probeAttempts.maxOfOrNull { it.endMs } ?: 0L)
             previousEnd = offset + last
@@ -79,6 +82,7 @@ object RouteDrafts {
                 attempts.sortedBy(ProbeAttempt::startMs).forEach(::add)
             }.finish(scans.map { (it.timestamp - it.duration)..it.timestamp })
         }
+        val allWindows = windows.ifEmpty { scans.map { ScanWindow(it.timestamp - it.duration, it.timestamp, ScanWindow.SUCCESS) } }
         return ContinuousScanSession(
             id = draft.sessionId,
             startTime = draft.startTime,
@@ -89,7 +93,9 @@ object RouteDrafts {
             timeBase = RoamingTracker.TIME_BASE,
             segments = draft.segments.size,
             interruptions = interruptions,
-            recoveredAfterInterruption = recovered
+            recoveredAfterInterruption = recovered,
+            scanWindows = allWindows,
+            rfGaps = RfGaps.compute(allWindows, elapsed, interruptions)
         )
     }
 }
@@ -135,5 +141,37 @@ class RouteDraftStore(private val directory: File, private val gson: Gson = Gson
     /** Drafts whose route is already in the saved survey are done: removes them. */
     fun deleteFinalized(sessionIds: Set<String>) {
         list().filter { it.sessionId in sessionIds }.forEach { delete(it.sessionId) }
+    }
+}
+
+
+/**
+ * Spans of a capture without a successful RF scan: the start before the first one, pauses
+ * (screen off without the service, throttling, failures) and the end after the last one. A span
+ * counts when it is longer than [factor] times the median interval between successful scans, and
+ * at least [minMillis] (the median only counts with 4 or more intervals). Interruptions between
+ * stretches are always gaps.
+ */
+object RfGaps {
+    fun compute(
+        windows: List<ScanWindow>,
+        sessionEndMs: Long,
+        interruptions: List<RouteInterruption> = emptyList(),
+        factor: Double = 3.0,
+        minMillis: Long = 5_000L
+    ): List<RouteInterruption> {
+        val ends = windows.filter { it.outcome == ScanWindow.SUCCESS }.map { it.endMs }.sorted()
+        val intervals = ends.zipWithNext { a, b -> b - a }.sorted()
+        // With few scans the median would be the gap itself: then only the fixed minimum applies.
+        val median = if (intervals.size >= 4) intervals[intervals.size / 2] else 0L
+        val threshold = maxOf(minMillis, (median * factor).toLong())
+        val marks = listOf(0L) + ends + sessionEndMs
+        val gaps = marks.zipWithNext().filter { (a, b) -> b - a > threshold }.map { (a, b) -> RouteInterruption(a, b) }
+        return (gaps + interruptions).sortedBy { it.fromMs }.fold(mutableListOf<RouteInterruption>()) { merged, gap ->
+            val last = merged.lastOrNull()
+            if (last != null && gap.fromMs <= last.toMs) merged[merged.lastIndex] = RouteInterruption(last.fromMs, maxOf(last.toMs, gap.toMs))
+            else merged += gap
+            merged
+        }
     }
 }

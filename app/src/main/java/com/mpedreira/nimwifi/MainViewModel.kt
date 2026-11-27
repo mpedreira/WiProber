@@ -41,7 +41,64 @@ class MainViewModel @JvmOverloads constructor(
     private var activeRouteStartUtc: Long = 0L
     /** Stretches recorded before an interruption, when the route was resumed. */
     private var previousSegments: List<RouteSegment> = emptyList()
+    private val activeScanWindows = mutableListOf<ScanWindow>()
     private val _routeDraftRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /** Mejora 2: the Continuous capture of this screen (scanner, roaming probe, foreground service). */
+    private val capture: ContinuousCaptureController by lazy {
+        ContinuousCaptureController(runScope ?: viewModelScope, captureSink)
+    }
+
+    /** What the capture is really doing (RF, roaming, service), also after a recreation. */
+    val captureStatus: kotlinx.coroutines.flow.StateFlow<CaptureStatus> get() = capture.status
+
+    /**
+     * Captures the open track with [sources]. Idempotent: when the screen is recreated and asks
+     * again, the running capture is kept and the new sources are closed.
+     */
+    fun startCapture(sources: CaptureSources) {
+        val sessionId = activeSessionId
+        if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking || sessionId == null) {
+            sources.rf.close()
+            return
+        }
+        capture.start(sessionId, sources)
+    }
+
+    val isCapturing: Boolean get() = capture.isRunning
+
+    private val captureSink = object : ContinuousCaptureController.Sink {
+        private fun current(sessionId: String) =
+            sessionId == activeSessionId && _screenState.value.interaction is SurveyInteraction.ContinuousTracking
+
+        override fun beginScan(sessionId: String): Long? = if (current(sessionId)) beginContinuousScanAttempt() else null
+
+        override fun scanSucceeded(sessionId: String, startedAt: Long, networks: List<WifiNetworkInfo>): Boolean =
+            current(sessionId) && completeContinuousScanAttempt(startedAt, networks)
+
+        override fun scanFailed(sessionId: String, startedAt: Long, outcome: String, reason: String) {
+            if (!current(sessionId)) return
+            activeScanWindows += ScanWindow(startedAt - activeSessionStartMono, monotonic.now() - activeSessionStartMono, outcome, reason)
+            routeChanged()
+        }
+
+        override fun roamingSession(target: String, intervalMillis: Int): String? = startRoamingLog(target, intervalMillis)
+
+        override fun roamingAttempt(sessionId: String, startMono: Long, endMono: Long, result: String, association: Association?) =
+            recordRoamingAttempt(sessionId, startMono, endMono, result, association)
+
+        override fun stopBecause(sessionId: String, reason: String) {
+            if (!current(sessionId)) return
+            val last = activeWaypoints.lastOrNull() ?: return
+            stopContinuousTrack(last.x, last.y)
+        }
+    }
+
+    override fun onCleared() {
+        // The survey screen is gone for good: end the capture and release its resources.
+        capture.stop()
+        super.onCleared()
+    }
 
     /** Changes whenever the open route gains data: the screen saves its draft when it changes. */
     val routeDraftRevision: kotlinx.coroutines.flow.StateFlow<Long> = _routeDraftRevision
@@ -70,6 +127,7 @@ class MainViewModel @JvmOverloads constructor(
         waypoints = activeWaypoints.toList(),
         scanResults = activeScanResults.toList(),
         probeAttempts = roamingTracker?.attempts().orEmpty(),
+        scanWindows = activeScanWindows.toList(),
         lastObservedMs = (monotonic.now() - activeSessionStartMono).coerceAtLeast(0L)
     )
 
@@ -411,6 +469,7 @@ class MainViewModel @JvmOverloads constructor(
             duration = (now - startedAt).coerceAtLeast(0L),
             wifiNetworks = wifiNetworks.toList()
         )
+        activeScanWindows += ScanWindow(startedAt - activeSessionStartMono, now - activeSessionStartMono, ScanWindow.SUCCESS)
         publishTrackingState()
         routeChanged()
         return true
@@ -418,6 +477,7 @@ class MainViewModel @JvmOverloads constructor(
 
     fun stopContinuousTrack(x: Float, y: Float): ContinuousScanSession? {
         if (_screenState.value.interaction !is SurveyInteraction.ContinuousTracking) return null
+        capture.stop()
         val elapsed = monotonic.now() - activeSessionStartMono
         activeWaypoints += RoutePointWrapper(elapsed, x, y)
         val scanWindows = activeScanResults.map { (it.timestamp - it.duration)..it.timestamp }
@@ -437,7 +497,9 @@ class MainViewModel @JvmOverloads constructor(
                 scanResults = activeScanResults.toList(),
                 roaming = roamingTracker?.finish(scanWindows),
                 timeBase = RoamingTracker.TIME_BASE,
-                segments = 1
+                segments = 1,
+                scanWindows = activeScanWindows.toList(),
+                rfGaps = RfGaps.compute(activeScanWindows, elapsed)
             )
         }
         _screenState.update {
@@ -750,6 +812,7 @@ class MainViewModel @JvmOverloads constructor(
         }
         activeWaypoints.clear()
         activeScanResults.clear()
+        activeScanWindows.clear()
         activeWaypoints += RoutePointWrapper(0L, coordinate.x, coordinate.y)
         if (resumed != null) {
             _screenState.update { it.copy(interruptedRoutes = it.interruptedRoutes - resumed) }
@@ -776,6 +839,7 @@ class MainViewModel @JvmOverloads constructor(
         roamingInterval = null
         previousSegments = emptyList()
         activeRouteStartUtc = 0L
+        activeScanWindows.clear()
         activeSessionId = null
         activeSessionStartTime = 0L
         activeSessionStartMono = 0L

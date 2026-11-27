@@ -364,4 +364,6 @@
     <string name="route_recovery_continue">Continuar</string>
     <string name="route_recovery_discard">Descartar</string>
     <string name="route_recovery_discard_confirm">¿Descartar esta ruta y los datos grabados en ella?</string>
+    <string name="capture_service_failed">No se ha podido iniciar el servicio en segundo plano (%1$s): con la pantalla apagada la captura puede pausarse.</string>
+    <string name="capture_status_detail">RF %1$d escaneos · roaming %2$s</string>
 </resources>

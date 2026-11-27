@@ -82,7 +82,6 @@ class SurveyActivity : AppCompatActivity() {
     }
     private var trackingStatusJob: Job? = null
     private var stopAndGoScanJob: Job? = null
-    private var continuousScanLoopJob: Job? = null
     private val activeTests by lazy { ActiveTestsController(this, viewModel) { binding.surveyStatusText } }
 
     //<editor-fold desc="Lifecycle & Setup">
@@ -156,10 +155,9 @@ class SurveyActivity : AppCompatActivity() {
     override fun onDestroy() {
         trackingStatusJob?.cancel()
         stopAndGoScanJob?.cancel()
-        continuousScanLoopJob?.cancel()
         activeTests.close()
-        // Leaving the survey ends its tracks and runs (the ViewModel is cleared): stop the service.
-        if (isFinishing) SurveyForegroundService.update(applicationContext, null)
+        // Leaving the survey ends its runs (the ViewModel is cleared; it ends its own capture).
+        if (isFinishing) SurveyForegroundService.release(applicationContext, SurveyForegroundService.REASON_TESTS)
         wifiScanner.close()
         androidCoordinator.close()
         super.onDestroy()
@@ -432,9 +430,6 @@ class SurveyActivity : AppCompatActivity() {
         binding.continuousActionButton.setOnClickListener {
             val state = viewModel.screenState.value
             if (state.isTracking) {
-                continuousScanLoopJob?.cancel()
-                continuousScanLoopJob = null
-                activeTests.stopRoamingProbe()
                 viewModel.stopContinuousTrack(lastTouchX, lastTouchY)
             } else if (state.interaction is SurveyInteraction.AwaitingContinuousStart) {
                 viewModel.cancelContinuousStart()
@@ -833,10 +828,19 @@ class SurveyActivity : AppCompatActivity() {
             elapsedLabel = elapsedLabel,
             scanCountLabel = quantityString(R.plurals.scan_count, state.activeContinuousScanCount)
         )
+        val capture = viewModel.captureStatus.value
         binding.surveyStatusText.text = getString(
             presentation.statusTextRes,
             *presentation.statusArguments.toTypedArray()
-        )
+        ) + if (state.isTracking && capture.running) {
+            // The real state of the capture: RF scans and roaming probe, and a service that did not start.
+            "\n" + getString(R.string.capture_status_detail, capture.rfScans,
+                if (capture.roamingEnabled) "${capture.roamingAttempts} · ${capture.lastRoamingResult ?: "—"}" else "—") +
+                (capture.serviceProblem?.let { " · ⚠ $it" } ?: "") +
+                (capture.lastRfOutcome?.takeIf { it != ScanWindow.SUCCESS }?.let { " · RF $it" } ?: "")
+        } else {
+            ""
+        }
         binding.continuousActionButton.visibility = if (presentation.actionVisible) View.VISIBLE else View.GONE
         presentation.actionTextRes?.let(binding.continuousActionButton::setText)
         presentation.actionIconRes?.let(binding.continuousActionButton::setIconResource)
@@ -965,78 +969,14 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Mejora 2: the capture (scanner, roaming probe, foreground service) is owned by the
+     * ViewModel, not this Activity: a rotation or the screen going off neither stops nor
+     * duplicates it. Asking again after a recreation keeps the running capture.
+     */
     private fun startContinuousScanningLoop() {
-        if (!viewModel.screenState.value.isTracking || continuousScanLoopJob?.isActive == true) {
-            return
-        }
-
-        activeTests.startRoamingProbe()
-        val scanLoopJob = lifecycleScope.launch {
-            while (isActive && viewModel.screenState.value.isTracking) {
-                if (!wifiScanner.isWifiEnabled()) {
-                    stopContinuousTrackAfterFailure(R.string.continuous_stopped_wifi_disabled)
-                    break
-                }
-
-                val attemptStartedAt = viewModel.beginContinuousScanAttempt() ?: break
-                val outcome = wifiScanner.scan()
-                when (outcome) {
-                    is WifiScanOutcome.Success -> {
-                        val wifiInfoList = mapScanResults(outcome.results)
-                        if (!viewModel.completeContinuousScanAttempt(
-                                attemptStartedAt,
-                                wifiInfoList
-                            )
-                        ) {
-                            break
-                        }
-                    }
-
-                    is WifiScanOutcome.Cancelled -> break
-                    is WifiScanOutcome.Failure -> when (outcome.reason) {
-                        WifiScanFailureReason.WIFI_DISABLED -> {
-                            stopContinuousTrackAfterFailure(
-                                R.string.continuous_stopped_wifi_disabled
-                            )
-                            break
-                        }
-
-                        WifiScanFailureReason.PERMISSION_DENIED -> {
-                            stopContinuousTrackAfterFailure(R.string.permissions_required)
-                            break
-                        }
-
-                        WifiScanFailureReason.SCAN_UNAVAILABLE -> {
-                            stopContinuousTrackAfterFailure(
-                                R.string.continuous_stopped_scan_unavailable
-                            )
-                            break
-                        }
-
-                        WifiScanFailureReason.SCANNER_NOT_STARTED,
-                        WifiScanFailureReason.SCANNER_CLOSED -> break
-
-                        WifiScanFailureReason.ALREADY_IN_PROGRESS,
-                        WifiScanFailureReason.START_REJECTED,
-                        WifiScanFailureReason.RESULTS_NOT_UPDATED,
-                        WifiScanFailureReason.TIMEOUT,
-                        WifiScanFailureReason.INTERNAL_ERROR -> delay(SCAN_RETRY_DELAY_MILLIS)
-                    }
-                }
-            }
-        }
-        continuousScanLoopJob = scanLoopJob
-        scanLoopJob.invokeOnCompletion {
-            if (continuousScanLoopJob === scanLoopJob) continuousScanLoopJob = null
-        }
-    }
-
-    private fun stopContinuousTrackAfterFailure(messageRes: Int) {
-        activeTests.stopRoamingProbe()
-        if (viewModel.screenState.value.isTracking) {
-            viewModel.stopContinuousTrack(lastTouchX, lastTouchY)
-        }
-        Toast.makeText(this, messageRes, Toast.LENGTH_LONG).show()
+        if (!viewModel.screenState.value.isTracking || viewModel.isCapturing) return
+        viewModel.startCapture(activeTests.captureSources(currentProjectId))
     }
     //</editor-fold>
 
@@ -1111,25 +1051,7 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
-    private fun mapScanResults(results: List<android.net.wifi.ScanResult>): List<WifiNetworkInfo> {
-        return results.map { scanResult ->
-            val ssid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                scanResult.wifiSsid?.toString()?.removeSurrounding("\"") ?: "<unknown ssid>"
-            } else {
-                @Suppress("DEPRECATION")
-                scanResult.SSID
-            }
-            WifiNetworkInfo(
-                ssid = ssid,
-                bssid = scanResult.BSSID,
-                level = scanResult.level,
-                frequency = scanResult.frequency,
-                security = parseSecurity(scanResult.capabilities),
-                technologies = getWifiTechnologies(scanResult),
-                informationElements = getInformationElementsAsBase64(scanResult)
-            )
-        }
-    }
+    private fun mapScanResults(results: List<android.net.wifi.ScanResult>): List<WifiNetworkInfo> = ScanResultMapper.map(results)
     //</editor-fold>
 
     //<editor-fold desc="Note & Calibration Logic">
@@ -1295,41 +1217,6 @@ class SurveyActivity : AppCompatActivity() {
     private fun syncOverlayTransform() {
         val mapper = currentCoordinateMapper() ?: return
         binding.pointsOverlay.updateTransform(binding.mapImageView.imageMatrix, mapper)
-    }
-
-    private fun parseSecurity(capabilities: String): String {
-        return when {
-            capabilities.contains("WPA3") -> "WPA3"
-            capabilities.contains("WPA2") -> "WPA2"
-            capabilities.contains("WPA") -> "WPA"
-            capabilities.contains("WEP") -> "WEP"
-            capabilities.contains("ESS") -> "Open"
-            else -> "Unknown"
-        }
-    }
-
-    private fun getWifiTechnologies(scanResult: android.net.wifi.ScanResult): List<String> {
-        return WifiTechnologyMapper.map(scanResult.wifiStandard, scanResult.frequency)
-    }
-
-    private fun getInformationElementsAsBase64(scanResult: android.net.wifi.ScanResult): String {
-        val informationElements = scanResult.informationElements ?: return ""
-        val fullIEsBuffer = java.nio.ByteBuffer.allocate(512)
-        informationElements.forEach { ie ->
-            val valueByteArray = ByteArray(ie.bytes.remaining()).also { ie.bytes.get(it) }
-            if (fullIEsBuffer.remaining() >= 2 + valueByteArray.size) {
-                fullIEsBuffer.put(ie.id.toByte())
-                fullIEsBuffer.put(valueByteArray.size.toByte())
-                fullIEsBuffer.put(valueByteArray)
-            } else {
-                Log.w("IE_Builder", "Full IE buffer")
-                return@forEach
-            }
-        }
-        val finalByteArray = ByteArray(fullIEsBuffer.position()).also {
-            fullIEsBuffer.rewind(); fullIEsBuffer.get(it)
-        }
-        return java.util.Base64.getEncoder().encodeToString(finalByteArray)
     }
 
     private fun readNoteImageMetadata(uri: Uri): NoteImageMetadata {
@@ -1619,20 +1506,28 @@ class SurveyActivity : AppCompatActivity() {
             viewModel.screenState.collect { state ->
                 val last = previous
                 if (last != null && surveyChanged(last, state)) scheduleProjectSave()
-                val reason = when {
-                    state.interaction is SurveyInteraction.ActiveTesting -> SurveyForegroundService.REASON_TESTS
-                    state.isTracking -> SurveyForegroundService.REASON_TRACK
-                    else -> null
-                }
-                val lastReason = last?.let {
-                    when {
-                        it.interaction is SurveyInteraction.ActiveTesting -> SurveyForegroundService.REASON_TESTS
-                        it.isTracking -> SurveyForegroundService.REASON_TRACK
-                        else -> null
-                    }
-                }
-                if (last == null || reason != lastReason) SurveyForegroundService.update(applicationContext, reason)
+                // Active tests hold the service themselves; the Continuous capture holds its own.
+                val testing = state.interaction is SurveyInteraction.ActiveTesting
+                val wasTesting = last?.interaction is SurveyInteraction.ActiveTesting
+                if (testing && !wasTesting) SurveyForegroundService.acquire(applicationContext, SurveyForegroundService.REASON_TESTS, currentProjectId)
+                if (!testing && wasTesting) SurveyForegroundService.release(applicationContext, SurveyForegroundService.REASON_TESTS)
                 previous = state
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                var shown: CaptureStatus? = null
+                viewModel.captureStatus.collect { status ->
+                    val before = shown
+                    shown = status
+                    if (status.stoppedBecause != null && status.stoppedBecause != before?.stoppedBecause) {
+                        Toast.makeText(this@SurveyActivity, captureStopMessage(status.stoppedBecause), Toast.LENGTH_LONG).show()
+                    }
+                    if (status.running && status.serviceProblem != null && status.serviceProblem != before?.serviceProblem) {
+                        Toast.makeText(this@SurveyActivity, getString(R.string.capture_service_failed, status.serviceProblem), Toast.LENGTH_LONG).show()
+                    }
+                    if (status.running) updateSurveyModeUi()
+                }
             }
         }
         lifecycleScope.launch {
@@ -1652,6 +1547,12 @@ class SurveyActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun captureStopMessage(reason: String): Int = when (reason) {
+        ErrorCodes.NOT_ON_WIFI, "wifi_disabled" -> R.string.continuous_stopped_wifi_disabled
+        "permission_denied" -> R.string.permissions_required
+        else -> R.string.continuous_stopped_scan_unavailable
     }
 
     private val offeredRouteDrafts = mutableSetOf<String>()

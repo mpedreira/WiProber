@@ -129,6 +129,22 @@ object PerformanceExport {
             }
         })
         addProperty("roamingProbe", session.roaming != null)
+        session.scanWindows?.let { windows ->
+            addProperty("rfScanAttempts", windows.size)
+            addProperty("rfScansSucceeded", windows.count { it.outcome == ScanWindow.SUCCESS })
+            addProperty("rfScansFailed", windows.count { it.outcome == ScanWindow.FAILED })
+            addProperty("rfScansCancelled", windows.count { it.outcome == ScanWindow.CANCELLED })
+        }
+        // Spans without RF observation (pauses, throttling, failures): never read as "no signal".
+        add("rfGaps", JsonArray().apply {
+            session.rfGaps.orEmpty().forEach { gap ->
+                add(JsonObject().apply {
+                    addProperty("from", isoUtc(session.startTime + gap.fromMs))
+                    addProperty("to", isoUtc(session.startTime + gap.toMs))
+                    addProperty("durationMs", gap.toMs - gap.fromMs)
+                })
+            }
+        })
     }
 
     private fun roamingSessionRow(ref: ContinuousSurveyRef, log: RoamingLog) = JsonObject().apply {

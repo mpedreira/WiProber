@@ -364,4 +364,6 @@
     <string name="route_recovery_continue">Continue</string>
     <string name="route_recovery_discard">Discard</string>
     <string name="route_recovery_discard_confirm">Discard this route and the data recorded in it?</string>
+    <string name="capture_service_failed">The background service did not start (%1$s): with the screen off the capture may pause.</string>
+    <string name="capture_status_detail">RF %1$d scans · roaming %2$s</string>
 </resources>

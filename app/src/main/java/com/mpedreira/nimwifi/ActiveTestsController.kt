@@ -25,7 +25,6 @@ class ActiveTestsController(
     private val configStore = WiproberConfigStore(activity)
     private val probe = ThroughputProbe(activity)
     private var progressDialog: ThroughputProgressDialog? = null
-    private var roamingJob: Job? = null
 
     /** True when the configuration has at least one active test to run. */
     fun hasTests(): Boolean {
@@ -66,24 +65,20 @@ class ActiveTestsController(
         state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
     }
 
-    /** Roaming probe of the active track, if enabled in the imported configuration. */
-    fun startRoamingProbe() {
+    /** Android sources of a Continuous capture: scanner, foreground service and, if enabled, the roaming probe. */
+    fun captureSources(projectId: String?): CaptureSources {
         val settings = configStore.load().roamingSettings.sanitized()
-        if (!settings.enabled || settings.host.isEmpty() || roamingJob?.isActive == true) return
-        // The log lives in the ViewModel: after a recreation the probe resumes into the same session.
-        val sessionId = viewModel.startRoamingLog("${settings.host}:${settings.port}", settings.intervalMillis) ?: return
-        roamingJob = probe.launchRoamingProbe(activity.lifecycleScope, settings) { start, end, result, association ->
-            viewModel.recordRoamingAttempt(sessionId, start, end, result, association)
-        }
-    }
-
-    fun stopRoamingProbe() {
-        roamingJob?.cancel()
-        roamingJob = null
+        val roaming = settings.takeIf { it.enabled && it.host.isNotEmpty() }
+        return CaptureSources(
+            rf = AndroidRfScanSource(activity),
+            foreground = AndroidCaptureForeground(activity, projectId),
+            roaming = roaming?.let { config -> RoamingProbeSource { scope, onAttempt -> probe.launchRoamingProbe(scope, config, onAttempt) } },
+            roamingTarget = roaming?.let { "${it.host}:${it.port}" },
+            roamingIntervalMillis = roaming?.intervalMillis ?: RoamingSettings.DEFAULT_INTERVAL_MILLIS
+        )
     }
 
     fun close() {
-        stopRoamingProbe()
         progressDialog?.dismiss()
         progressDialog = null
     }

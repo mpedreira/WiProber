@@ -86,8 +86,22 @@ data class ContinuousScanSession(
     /** Gaps between stretches, relative to [startTime]: nothing was observed in them. */
     val interruptions: List<RouteInterruption>? = null,
     /** The route was recovered from a draft after the app was closed or killed. */
-    val recoveredAfterInterruption: Boolean? = null
+    val recoveredAfterInterruption: Boolean? = null,
+    /** Every RF scan attempt (successful, failed, cancelled), relative to [startTime]. */
+    val scanWindows: List<ScanWindow>? = null,
+    /** Spans without a successful RF scan (pauses, throttling, failures), relative to [startTime]. */
+    val rfGaps: List<RouteInterruption>? = null
 )
+
+/** One RF scan attempt of a Continuous capture (times relative to the session start). */
+@JsonModel
+data class ScanWindow(val startMs: Long, val endMs: Long, val outcome: String, val reason: String? = null) {
+    companion object {
+        const val SUCCESS = "success"
+        const val FAILED = "failed"
+        const val CANCELLED = "cancelled"
+    }
+}
 
 @JsonModel
 data class RoutePointWrapper(

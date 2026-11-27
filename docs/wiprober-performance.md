@@ -243,6 +243,10 @@ A phase that was not reached is `null`. Redirects are not followed: a 3xx is the
 
 One row per local Continuous route (with or without roaming probe): `surveyId`, `floorPlanId`, `floorName`, `startedAt`, `endedAt`, `timeBase`, `waypoints`, `scans`, `segments`, `recoveredAfterInterruption`, `interruptions` (`from`/`to` UTC and `fromMs`/`toMs` relative to `startedAt`), `roamingProbe`.
 
+RF capture fields: `rfScanAttempts`, `rfScansSucceeded`, `rfScansFailed`, `rfScansCancelled` and `rfGaps` (`from`, `to`, `durationMs`): spans without a successful scan (longer than 3 × the median interval with ≥ 4 intervals, and at least 5 s), including interruptions. A gap means *not observed*, never *no signal*.
+
+The capture (scanner, roaming probe, foreground service with wake and Wi-Fi locks) belongs to the survey session, not to the screen: rotating, locking the screen or switching apps neither stops nor duplicates it, and the notification returns to the open project. If the service cannot start (permission, background start) the survey shows it.
+
 An open route is checkpointed every ~1.5 s in `drafts/<sessionId>.json` next to the floor survey. If the app is killed or the phone restarts, reopening the project offers it as an **interrupted route**: *Save* (as it is), *Continue* (a new stretch from its last turn, with its own monotonic clock anchored in UTC) or *Discard*. Stretches are joined in order, never overlapping even if the clock restarted; the gap between them is an `interruptions` entry: nothing was observed in it. Saving is idempotent (a retry never adds the route twice) and the draft is removed only once the survey holding the route is on disk.
 
 ## 3d. Continuous-mode roaming (`roamingSessions`, `roamingEvents`)
