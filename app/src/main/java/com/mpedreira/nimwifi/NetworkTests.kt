@@ -191,7 +191,11 @@ class NetworkTestRunner(
                 NetworkTest.HTTP -> http(test, base)
                 else -> base.copy(error = "unknown test type ${test.type}", errorCode = ErrorCodes.INVALID_TARGET)
             }
+        } catch (e: MeasurementCancelled) {
+            throw e
         } catch (e: Exception) {
+            // A cancel closes the test's sockets: that is a cancellation, not a network failure.
+            control.checkActive()
             val code = if (!net.isAvailable()) ErrorCodes.WIFI_LOST else ErrorClassifier.code(e)
             base.copy(error = "$code: ${ErrorClassifier.detail(e)}", errorCode = code)
         }
@@ -295,6 +299,7 @@ class NetworkTestRunner(
         } catch (e: MeasurementCancelled) {
             throw e
         } catch (e: Exception) {
+            control.checkActive()
             val code = ErrorClassifier.code(e)
             withTiming(base).copy(error = "$code: ${ErrorClassifier.detail(e)}", errorCode = code)
         }

@@ -53,9 +53,10 @@ class PhaseResultsTest {
         MiniHttpServer { MiniHttpServer.Response(200, "x".repeat(200_000)) }.use { downloads ->
             silentServer().use { uploads ->
                 val network = FakeMeasurementNetwork()
-                val runner = ThroughputRunner(
-                    iperf = Iperf3Client(), http = HttpSpeedTest(), network = network, beacons = emptyMap(),
-                    device = DeviceInfo("m", "13"), networkTests = null, scriptRunner = null, clock = { 1_000L }
+                // Wired like production (ThroughputProbe): the run's control reaches every client.
+                fun runner(control: MeasurementControl) = ThroughputRunner(
+                    iperf = Iperf3Client(control = control), http = HttpSpeedTest(control = control), network = network, beacons = emptyMap(),
+                    device = DeviceInfo("m", "13"), networkTests = null, scriptRunner = null, clock = { 1_000L }, control = control
                 )
                 val settings = ThroughputSettings(
                     iperfEnabled = false, internetEnabled = true, internetDurationSeconds = 1,
@@ -67,7 +68,7 @@ class PhaseResultsTest {
                 val uploading = CountDownLatch(1)
                 val runId = vm.startActiveRun(point.pointId!!, point.scanId, ThroughputRunner.plan(settings, emptyList(), emptyList()), null) { control, listener ->
                     runCancellable(control, "test") {
-                        runner.measure(settings, listener = object : RunListener by listener {
+                        runner(control).measure(settings, listener = object : RunListener by listener {
                             override fun onProgress(progress: ThroughputProgress) {
                                 listener.onProgress(progress)
                                 if (progress.phase == ThroughputPhase.UPLOAD) uploading.countDown()
@@ -103,11 +104,13 @@ class PhaseResultsTest {
         MiniHttpServer { MiniHttpServer.Response(200, "ok") }.use { ok ->
             silentServer().use { silent ->
                 val network = FakeMeasurementNetwork()
-                val http = TimedHttpClient(resolve = { host -> network.resolve(host).toTypedArray() }, readTimeoutMillis = 30_000)
-                val runner = ThroughputRunner(
-                    iperf = Iperf3Client(), http = HttpSpeedTest(), network = network, beacons = emptyMap(),
-                    device = DeviceInfo("m", "13"), networkTests = null, scriptRunner = ScriptRunner(http), clock = { 1_000L }
-                )
+                fun runner(control: MeasurementControl): ThroughputRunner {
+                    val http = TimedHttpClient(resolve = { host -> network.resolve(host).toTypedArray() }, readTimeoutMillis = 30_000, control = control)
+                    return ThroughputRunner(
+                        iperf = Iperf3Client(control = control), http = HttpSpeedTest(control = control), network = network, beacons = emptyMap(),
+                        device = DeviceInfo("m", "13"), networkTests = null, scriptRunner = ScriptRunner(http), clock = { 1_000L }, control = control
+                    )
+                }
                 val script = HttpScript("portal", steps = listOf(
                     HttpScriptStep("home", url = "${ok.base}/"),
                     HttpScriptStep("items", url = "http://127.0.0.1:${silent.localPort}/items")
@@ -118,7 +121,7 @@ class PhaseResultsTest {
                 val second = CountDownLatch(1)
                 val runId = vm.startActiveRun(point.pointId!!, point.scanId, ThroughputRunner.plan(settings, emptyList(), listOf(script)), null) { control, listener ->
                     runCancellable(control, "test") {
-                        runner.measure(settings, scripts = listOf(script), listener = object : RunListener by listener {
+                        runner(control).measure(settings, scripts = listOf(script), listener = object : RunListener by listener {
                             override fun onProgress(progress: ThroughputProgress) {
                                 listener.onProgress(progress)
                                 if (progress.detail == "items") second.countDown()

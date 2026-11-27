@@ -87,6 +87,9 @@ class TimedHttpClient(
 ) {
     class Response(val status: Int, val headers: List<Pair<String, String>>, val body: ByteArray, val bytes: Long)
 
+    /** Throws [MeasurementCancelled] when the run this client belongs to was cancelled. */
+    fun checkActive() = control.checkActive()
+
     /** Filled in as phases complete, so a failure still reports how far it got. */
     class Timing {
         var dnsMs: Double? = null
@@ -330,6 +333,8 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
         } catch (e: MeasurementCancelled) {
             throw e
         } catch (e: Exception) {
+            // Cancelling closes the step's socket: the step was interrupted, not failed.
+            http.checkActive()
             return withTiming(result).copy(
                 ok = false, totalMs = total(),
                 error = redactor().redact(ErrorClassifier.detail(e)), errorCode = ErrorClassifier.code(e)
