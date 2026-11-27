@@ -115,8 +115,23 @@ object SurveyReport {
         val ssids: List<SsidSection>,
         /** Mejora 10: results without an identified association, with their reasons. */
         val unknownAssociation: SsidSection? = null,
-        val image: PlanImage? = null
+        val image: PlanImage? = null,
+        /** rc.2 · 5: floor totals, each event counted once although it is shown in two sections. */
+        val totals: FloorTotals = FloorTotals(0, 0)
     )
+
+    data class FloorTotals(val apChanges: Int, val outages: Int) {
+        companion object {
+            /** An SSID change shown under both SSIDs is the same event: counted once. */
+            fun of(sections: List<SsidSection>): FloorTotals {
+                fun key(ev: Event) = listOf(ev.source, ev.kind, ev.at, ev.from, ev.to, ev.fromSsid, ev.toSsid, ev.detail)
+                return FloorTotals(
+                    sections.flatMap { it.apChanges }.distinctBy(::key).size,
+                    sections.flatMap { it.outages }.distinctBy(::key).size
+                )
+            }
+        }
+    }
 
     data class Model(
         val title: String,
@@ -163,9 +178,11 @@ object SurveyReport {
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
                 ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm) },
-                unknownAssociation = section(null, survey, runs, weakDbm, selection).takeIf { it.runs.isNotEmpty() },
+                // Also without active tests: roaming events without any SSID are shown there once.
+                unknownAssociation = section(null, survey, runs, weakDbm, selection)
+                    .takeIf { it.runs.isNotEmpty() || it.apChanges.isNotEmpty() || it.outages.isNotEmpty() },
                 image = planImages[floor.esxFloorPlanId]
-            )
+            ).let { it.copy(totals = FloorTotals.of(it.ssids + listOfNotNull(it.unknownAssociation))) }
         }
     )
 
@@ -312,7 +329,9 @@ object SurveyReport {
         survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { session ->
             val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
             session.roamingLogs.flatMap { log -> log.events.map { log to it } }
-                .filter { (_, it) -> it.fromSsid == ssid || it.toSsid == ssid || (it.fromSsid == null && it.toSsid == null) }
+                // rc.2 · 5: an event without SSID on either side belongs only to «SSID desconocido»
+                // (ssid == null), never to every SSID; a change between two known SSIDs stays in both.
+                .filter { (_, it) -> if (ssid == null) it.fromSsid == null && it.toSsid == null else it.fromSsid == ssid || it.toSsid == ssid }
                 .forEachIndexed { index, (log, event) ->
                     val at = session.startTime + event.atMillis
                     val position = if (route.size >= 2 && event.atMillis in route.first().timestamp..route.last().timestamp) SurveyGuide.positionAt(route, event.atMillis) else null
@@ -427,6 +446,8 @@ object SurveyReport {
         model.floors.forEach { floor ->
             append("<h2>Planta: ").append(e(floor.floorName)).append("</h2>")
             append("<p class=\"muted\">").append(floor.runs).append(" ejecuciones de pruebas; ").append(floor.remeasuredPoints).append(" puntos medidos más de una vez.</p>")
+            append("<p>Total de la planta: ").append(floor.totals.apChanges).append(" cambios de AP · ").append(floor.totals.outages)
+                .append(" pérdidas de alcance (cada evento una vez, aunque aparezca en dos SSID).</p>")
             if (floor.ssids.isEmpty()) append("<p>Sin escaneos Wi-Fi locales en esta planta.</p>")
             (floor.ssids + listOfNotNull(floor.unknownAssociation)).forEach { section -> appendSection(this, model, floor, section, ::e) }
         }
@@ -440,8 +461,9 @@ object SurveyReport {
 
     private fun appendSection(out: StringBuilder, model: Model, floor: FloorSection, section: SsidSection, e: (Any?) -> String) = with(out) {
         if (section.ssid == null) {
-            append("<h3>Asociación desconocida · ").append(e(floor.floorName)).append("</h3>")
-            append("<p class=\"muted\">Resultados registrados antes de identificar el SSID (p. ej. se perdió el Wi-Fi). No cuentan en ningún SSID; los motivos van por ejecución.</p>")
+            append("<h3>SSID desconocido · ").append(e(floor.floorName)).append("</h3>")
+            append("<p class=\"muted\">Asociación desconocida: resultados registrados antes de identificar el SSID (p. ej. se perdió el Wi-Fi) y eventos de roaming sin SSID de origen ni de destino. No cuentan en ningún SSID; los motivos van por ejecución.</p>")
+            append("<ul><li>Cambios de AP: ").append(section.apChanges.size).append(" · pérdidas de alcance: ").append(section.outages.size).append("</li></ul>")
         } else {
             append("<h3>SSID «").append(e(section.ssid)).append("» · ").append(e(floor.floorName)).append("</h3>")
             // Summary
