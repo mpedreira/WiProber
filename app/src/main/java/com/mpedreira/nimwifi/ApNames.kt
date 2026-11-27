@@ -79,7 +79,7 @@ class ApDirectory(entries: List<ApName>) {
 
         /** `bssid,name,location,floor` (header required; location and floor optional), RFC 4180. */
         fun parseCsv(text: String): List<ApName> {
-            val body = text.trimStart('﻿')
+            val body = text.trimStart('\uFEFF')
             val records = Csv.parse(body, Csv.detectSeparator(body)).filter { r -> r.any { it.isNotBlank() } }
             if (records.isEmpty()) return emptyList()
             val header = records.first().map { it.trim().lowercase() }
