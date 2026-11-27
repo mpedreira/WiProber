@@ -101,7 +101,9 @@ data class ImportPreview(
     val scripts: List<String>?,
     val throughput: Boolean,
     val guide: Boolean,
-    val roaming: Boolean
+    val roaming: Boolean,
+    /** Number of requirements in the file (report verdict); null without the section. */
+    val requirements: Int? = null
 ) {
     data class Destination(val scheme: String, val host: String, val port: Int?, val methods: Set<String>, val cleartext: Boolean)
 
@@ -153,7 +155,10 @@ data class ImportPreview(
                 scripts = config.scripts?.map(HttpScript::displayAlias),
                 throughput = config.throughput != null,
                 guide = config.guide != null,
-                roaming = config.roaming != null
+                roaming = config.roaming != null,
+                requirements = config.requirements?.let { r ->
+                    r.throughput.orEmpty().size + r.networkTests.orEmpty().size + (if (r.roaming != null) 1 else 0)
+                }
             )
         }
     }

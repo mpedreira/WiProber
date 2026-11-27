@@ -65,7 +65,12 @@ object SurveyReport {
         val x: Float? = null, val y: Float? = null,
         val incidentId: String? = null, val seq: Int = 0, val source: String = "run",
         /** rc.3 · 4: stable identity in the floor: session/run and position there. */
-        val key: String = ""
+        val key: String = "",
+        /** Bounds of the outage (ms), as the probe observed them; null when not estimable. */
+        val outageLowerMs: Long? = null,
+        val outageUpperMs: Long? = null,
+        /** Not recovered when the route ended. */
+        val open: Boolean = false
     )
 
     data class SsidSection(
@@ -250,7 +255,8 @@ object SurveyReport {
                         windowFrom = event.lastReachableAtMillis?.let { session.startTime + it },
                         windowTo = event.firstReachableAtMillis?.let { session.startTime + it },
                         fromSsid = event.fromSsid, toSsid = event.toSsid, x = position?.first, y = position?.second,
-                        incidentId = event.incidentId, seq = index, source = "roaming", key = "roaming:${session.id}:$logIndex:$index")
+                        incidentId = event.incidentId, seq = index, source = "roaming", key = "roaming:${session.id}:$logIndex:$index",
+                        outageLowerMs = event.outageLowerBoundMs, outageUpperMs = event.outageUpperBoundMs, open = event.open == true)
                     val outage = event.type !in setOf(RoamingEvent.BSSID_CHANGE, RoamingEvent.SSID_CHANGE, RoamingEvent.ROAM)
                     // rc.2 · 5: without SSID on either side only «SSID desconocido»; a change between
                     // two known SSIDs belongs to both (shown twice, counted once).

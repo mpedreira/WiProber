@@ -17,6 +17,8 @@ data class WiproberConfig(
     val tests: List<NetworkTest>? = null,
     val scripts: List<HttpScript>? = null,
     val roaming: RoamingSettings? = null,
+    /** Acceptance criteria for the report's verdict; null = the file has no such section. */
+    val requirements: Requirements? = null,
     /** A HAR adds (or replaces by name) one script instead of replacing them all. */
     val mergeScripts: Boolean = false,
     /**
@@ -244,6 +246,7 @@ object WiproberConfigParser {
             tests = safeTests,
             scripts = split?.scripts,
             roaming = root.obj("roaming")?.let(::parseRoaming),
+            requirements = root.obj("requirements")?.let(::parseRequirements),
             credentials = extra.takeIf { it.isNotEmpty() || credentials != null || split != null },
             stripped = moved
         )
@@ -288,6 +291,47 @@ object WiproberConfigParser {
         if (type == NetworkTest.TCP && test.port !in 1..65_535) throw ConfigException("Test \"$name\" needs a valid \"port\"")
         if (test.count != null && test.count !in 1..MAX_PROBES) throw ConfigException("Test \"$name\": count must be 1..$MAX_PROBES")
         return test
+    }
+
+    /**
+     * Optional thresholds of the report's verdict. Every value is the user's; a missing value is
+     * no requirement (never a default). Aliases are unique per kind.
+     */
+    private fun parseRequirements(json: JsonObject): Requirements {
+        fun number(o: JsonObject, name: String, where: String, max: Double = Double.MAX_VALUE): Double? {
+            val value = o.member(name) ?: return null
+            val d = runCatching { value.asDouble }.getOrNull()
+            if (d == null || !d.isFinite() || d < 0 || d > max) throw ConfigException("$where: \"$name\" must be a number between 0 and ${if (max == Double.MAX_VALUE) "∞" else max.toString()}")
+            return d
+        }
+        fun alias(o: JsonObject, where: String): String {
+            val alias = o.string("alias")?.trim().orEmpty()
+            if (alias.isEmpty() || alias.length > 60) throw ConfigException("$where needs an \"alias\" (max 60)")
+            return alias
+        }
+        fun items(name: String) = json.getAsJsonArray(name)?.mapIndexed { i, element ->
+            if (!element.isJsonObject) throw ConfigException("requirements.$name ${i + 1} must be an object")
+            element.asJsonObject to "requirements.$name ${i + 1}"
+        }
+        val throughput = items("throughput")?.map { (o, where) ->
+            ThroughputRequirement(alias(o, where), number(o, "minDownMbps", where), number(o, "minUpMbps", where),
+                number(o, "maxLatencyMedianMs", where), number(o, "maxLatencyP95Ms", where), number(o, "maxLatencyLossPct", where, 100.0))
+        }
+        val tests = items("networkTests")?.map { (o, where) ->
+            ServiceRequirement(alias(o, where), number(o, "maxMedianMs", where), number(o, "maxP95Ms", where), number(o, "maxLossPct", where, 100.0))
+        }
+        listOf("throughput" to throughput?.map { it.alias.lowercase() }, "networkTests" to tests?.map { it.alias.lowercase() }).forEach { (kind, aliases) ->
+            if (aliases != null && aliases.toSet().size != aliases.size) throw ConfigException("requirements.$kind: aliases must be unique")
+        }
+        val roaming = json.obj("roaming")?.let { o ->
+            val outage = number(o, "maxOutageMs", "requirements.roaming")?.let { it.toLong() }
+            val losses = number(o, "maxLossesPerFloor", "requirements.roaming")?.let {
+                if (it % 1.0 != 0.0) throw ConfigException("requirements.roaming: \"maxLossesPerFloor\" must be a whole number")
+                it.toInt()
+            }
+            RoamingRequirement(outage, losses).takeIf { outage != null || losses != null }
+        }
+        return Requirements(throughput?.takeIf { it.isNotEmpty() }, tests?.takeIf { it.isNotEmpty() }, roaming)
     }
 
     private fun parseRoaming(json: JsonObject): RoamingSettings {

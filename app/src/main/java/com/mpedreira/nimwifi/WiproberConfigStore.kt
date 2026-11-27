@@ -32,7 +32,9 @@ class WiproberConfigStore(
     data class Imported(
         val tests: List<NetworkTest>? = emptyList(),
         val scripts: List<HttpScript>? = emptyList(),
-        val roaming: RoamingSettings? = null
+        val roaming: RoamingSettings? = null,
+        /** Report verdict thresholds; null in profiles saved before (no verdict). */
+        val requirements: Requirements? = null
     ) {
         val enabledTests: List<NetworkTest> get() = tests.orEmpty().filter { it.enabled }
         val enabledScripts: List<HttpScript> get() = scripts.orEmpty().filter { it.enabled }
@@ -46,6 +48,7 @@ class WiproberConfigStore(
         val tests: Int?,
         val scripts: List<String>?,
         val roaming: Boolean,
+        val requirements: Boolean = false,
         val credentials: Int = 0,
         val revision: String? = null
     )
@@ -130,7 +133,8 @@ class WiproberConfigStore(
             Imported(
                 tests = config.tests ?: current.imported.tests,
                 scripts = scripts ?: current.imported.scripts,
-                roaming = config.roaming ?: current.imported.roaming
+                roaming = config.roaming ?: current.imported.roaming,
+                requirements = config.requirements ?: current.imported.requirements
             ),
             current.credentials + config.credentials.orEmpty()
         )
@@ -141,6 +145,7 @@ class WiproberConfigStore(
             tests = config.tests?.size,
             scripts = config.scripts?.map { it.displayAlias },
             roaming = config.roaming != null,
+            requirements = config.requirements != null,
             credentials = config.credentials?.size ?: 0,
             revision = revision
         )
