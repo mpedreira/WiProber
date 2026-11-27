@@ -181,7 +181,8 @@
     </plurals>
     <string name="version_unavailable">Unavailable</string>
     <string name="about_build">%1$s (%2$d)\nSource: %3$s · channel: %4$s</string>
-    <string name="about_message">Version: %1$s\n\nnimWifi is an open-source tool for Wi-Fi site surveys.</string>
+    <string name="about_message">Version: %1$s\n\nnimWifi is a personal, open-source Wi-Fi survey tool: Stop-and-Go and Continuous surveys on a floor plan, Ekahau-compatible ESX export, active tests (iPerf3, Internet, DNS, ping, TCP, HTTP scripts) and roaming analysis.\n\nBased on WiProber by htechno, MIT License.</string>
+    <string name="about_original">WiProber</string>
 
     <!-- Note Dialog -->
     <string name="note_label_text">Note Text</string>

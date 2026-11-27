@@ -53,7 +53,6 @@ class SurveyActivity : AppCompatActivity() {
     private val projectRepository by lazy { ProjectRepository(applicationContext) }
     private val throughputSettingsStore by lazy { ThroughputSettingsStore(applicationContext) }
     private val surveyGuideStore by lazy { SurveyGuideSettingsStore(applicationContext) }
-    private val configStore by lazy { WiproberConfigStore(applicationContext) }
     /** Suggestion currently drawn on the map (floor-plan pixels), if any. */
     private var currentSuggestion: SurveyCoordinate? = null
     /** Last finger-down position on the map, for long-press moves of the suggestion. */
@@ -945,11 +944,13 @@ class SurveyActivity : AppCompatActivity() {
             .setIcon(R.mipmap.ic_launcher)
             .setMessage(getString(R.string.about_message, versionName))
             .setPositiveButton(R.string.action_ok, null)
-            .setNeutralButton(R.string.action_github) { _, _ ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/htechno/WiProber"))
-                startActivity(intent)
-            }
+            .setNegativeButton(R.string.about_original) { _, _ -> openLink(ORIGINAL_PROJECT_URL) }
+            .setNeutralButton(R.string.action_github) { _, _ -> openLink(PROJECT_URL) }
             .show()
+    }
+
+    private fun openLink(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
     //</editor-fold>
 
@@ -1645,6 +1646,9 @@ class SurveyActivity : AppCompatActivity() {
 
     companion object {
         private const val POINT_TOUCH_RADIUS_DP = 20f
+        private const val PROJECT_URL = "https://github.com/mpedreira/nimwifi"
+        /** Attribution: nimWifi is based on WiProber (MIT). */
+        private const val ORIGINAL_PROJECT_URL = "https://github.com/htechno/WiProber"
         private const val NOTE_PREVIEW_MAX_SIZE_PX = 1_024
         const val EXTRA_PROJECT_ID = "project_id"
         private const val SAVE_DEBOUNCE_MILLIS = 750L
