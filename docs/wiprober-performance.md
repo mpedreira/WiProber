@@ -66,8 +66,8 @@ A **point** (`pointId`) is a physical position on a floor; each passive Wi-Fi **
 |---|---|---|
 | position fields | | As in section 3 (`surveyId` of the run's scan in this ESX, `floorPlanId`, `floorName`, `pointId`, `scanId`, `runId`, `x`, `y`, `measuredAt`) |
 | `startedAt`, `endedAt` | ISO-8601 UTC string | Run start and end |
-| `status` | string | `completed`, `failed`, `cancelled` (user), `interrupted` (app closed/killed mid-run; never restarted automatically) |
-| `statusReason` | string \| null | Error code of the end, e.g. `cancelled`, `timeout` (whole-point deadline), `interrupted` |
+| `status` | string | `completed`, `failed`, `skipped` (*Skip point*), `cancelled` (user), `interrupted` (app closed/killed mid-run; never restarted automatically) |
+| `statusReason` | string \| null | Error code of the end, e.g. `cancelled`, `skipped_by_user` (*Skip point*: `status` is `skipped`), `timeout` (whole-point deadline), `interrupted` |
 | `profile` | string \| null | Configuration used (`device-settings`, `legacy` for migrated results) |
 | `phases` | array | Every planned phase: `key` (`target:<targetId>:latency\|download\|upload`, `test:<name>`, `script:<name>:<step>`), `label`, `status` (`pending`, `completed`, `failed`, `skipped`, `cancelled`, `interrupted`), `errorCode`, `endedAt` |
 

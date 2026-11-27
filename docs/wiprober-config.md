@@ -1,6 +1,16 @@
-# Imported configuration (`wiprober-config.json`, `.har`)
+# nimWifi configuration (`wiprober-config.json`, `.har`, configuration ZIP)
 
-Servers, credentials, tests and scripts are never in the code. They are imported on the phone (⚙ menu → *Imported configuration* → *Import file…*) from a `wiprober-config.json` ([example](wiprober-config.example.json)) or a browser `.har` recording, and kept in app-private storage (`files/private-config/`) that is excluded from Android backups and device transfers.
+Servers, credentials, tests and scripts are never in the code. They are set on the phone (⋮ → *Imported configuration*: roaming probe, network tests, scripts and credentials can be edited there) or imported from a `wiprober-config.json` ([example](wiprober-config.example.json)), a browser `.har` recording or a **configuration ZIP** ([commented example](examples/nimwifi-config-example.zip), sources in [examples/config-zip](examples/config-zip)), and kept in app-private storage (`files/private-config/`) that is excluded from Android backups and device transfers.
+
+## Survey guide and signal profile
+
+`guide.profile` sets when a point's signal is weak on the map and in the report: `pda` (handheld scanners, −67 dBm, second AP −72 dBm, default), `voz` (voice, −67/−67) or `datos` (data, −70/−75). The same profiles as the wifianalisys report; they can also be chosen in the survey-guide settings.
+
+## Configuration ZIP and comments
+
+A configuration ZIP holds `wiprober-config.json` and, optionally, `.har` recordings: each one becomes one more script (with the HAR rules below). Other files (a README) are ignored. In any imported JSON, keys starting with `_` are comments (`"_comment": "…"`), also inside tests, steps, headers and credentials. Opening a configuration file or ZIP from a file manager imports it with the same preview.
+
+*Export* on the configuration screen writes the current configuration as an importable `wiprober-config.json`: without credential values, listing the credential names the scripts need under `_credentialsNeeded`.
 
 ## Import flow
 

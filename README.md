@@ -2,11 +2,11 @@
 
 **nimWifi** is an open-source Android application for conducting Wi-Fi site surveys. It allows users to load a floor plan, perform Wi-Fi scans using different modes (Stop-and-Go or Continuous), and export the collected data into the `.esx` format, compatible with Ekahau Pro™.
 
-This project was born out of the need for a simple, mobile-first tool for network engineers and enthusiasts to perform quick on-site surveys without expensive, proprietary hardware.
+nimWifi is a **personal project** of [mpedreira](https://github.com/mpedreira), based on [WiProber](https://github.com/htechno/WiProber) by htechno (MIT License). The name is just a name: it started as WiProber's active-survey fork and was renamed for fun. It is shared as-is, without support.
 
-Version **3.0.0** requires **Android 11 (API 30) or newer**. It adds a project hub, recent projects, multi-floor surveying, and ESX import that preserves original archive contents while adding new surveys.
+Version **4.0.0** requires **Android 11 (API 30) or newer**. On top of WiProber (project hub, multi-floor surveys, ESX import that preserves the original archive) it adds **active surveys**: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe, a survey guide, per-SSID maps and a readable report. Results are exported next to the unchanged `.esx` in a ZIP ([docs/wiprober-performance.md](docs/wiprober-performance.md)); [wifianalisys](https://github.com/mpedreira/wifianalisys) turns that ZIP into a full report. APKs are on the [Releases](https://github.com/mpedreira/nimwifi/releases) page; versions, identity and signing are in [docs/release-process.md](docs/release-process.md) and changes in [CHANGELOG.md](CHANGELOG.md).
 
-> **About this fork.** [mpedreira/nimwifi](https://github.com/mpedreira/nimwifi) extends the original [htechno/WiProber](https://github.com/htechno/WiProber) with **active survey** features: per-point throughput tests (iPerf3 and Internet), network service tests (DNS, ping, TCP, HTTP), replayed HTTP scripts, a Continuous-mode roaming probe and a NetSpot-style survey guide. Results are exported next to the unchanged `.esx` in a ZIP, as documented in [docs/wiprober-performance.md](docs/wiprober-performance.md). Prebuilt APKs are on the [Releases](https://github.com/mpedreira/nimwifi/releases) page; how field builds are versioned, identified and signed is in [docs/release-process.md](docs/release-process.md).
+> **About the `wiprober-*` names.** The file formats keep their original names (`wiprober-config.json`, `wiprober-performance.json`, `wiprober-report.html`, `wiprober-points`) so files made with earlier builds and the tools that read them keep working. They are nimWifi formats.
 
 ## Screenshots
 
@@ -42,12 +42,16 @@ Added in this fork:
 *   **Roaming probe (Continuous mode):** every 200 ms the associated AP is read and the target is probed; roams (with time without connectivity) and outages are placed on the route you mark on the map.
 *   **Survey guide:** once the scale is calibrated, a grid suggests the next Stop-and-Go point (tap to measure there, long-press to move, *Skip* unreachable cells) and measured areas are shaded with a signal-coloured gradient.
 *   **Reuse points and plan ahead:** tap an existing (local, imported or planned) point to measure there again or run active tests only; import a point template ([details](docs/point-templates.md)). The map and the readable `wiprober-report.html` show one SSID at a time: good, weak, SSID not detected, or no local measurement.
+*   **Point sheet and skip:** tap a point → *View results* for its scans and every run; *Skip point* in the progress dialog when a point's tests are not needed.
+*   **Signal profiles:** handheld (−67/−72 dBm), voice (−67/−67) and data (−70/−75) decide when a point is weak, the same as wifianalisys.
+*   **Background-safe:** a foreground service keeps Continuous tracks and active tests running with the screen off; autosave retries and warns when it keeps failing.
+*   **Configuration screen:** roaming probe, network tests, HTTP scripts and credentials (names only) on the phone; import a JSON, HAR or configuration ZIP ([commented example](docs/examples/nimwifi-config-example.zip)), export the current configuration.
 *   **Imported configuration:** servers, credentials, tests and scripts are never in the code. They are imported on the phone from a `wiprober-config.json` ([example](docs/wiprober-config.example.json)), kept in app-private storage and excluded from backups. Imports are previewed before activation, credentials are stored apart from definitions and stripped from HAR recordings ([details](docs/wiprober-config.md)).
 *   **Performance export:** projects with results export a ZIP with the untouched `.esx` plus `wiprober-performance.json`, joinable with the ESX by survey ID or by floor-plan position.
 
 ## Limitations & System Requirements
 
-This is a non-commercial, open-source project. Please be aware of the following system limitations:
+This is a personal, non-commercial, open-source project. Please be aware of the following system limitations:
 
 *   **Wi-Fi Scan Throttling:**
     *   **The Issue:** Android limits third-party apps to **4 scans per 2 minutes**.
@@ -71,7 +75,7 @@ This is a non-commercial, open-source project. Please be aware of the following 
 *   An Android device with Android 11 (API 30) or higher.
 
 ### Building and Running
-1.  Clone the repository: `git clone https://github.com/mpedreira/nimwifi.git` (this fork) or `https://github.com/htechno/WiProber.git` (original).
+1.  Clone the repository: `git clone https://github.com/mpedreira/nimwifi.git` (nimWifi) or `https://github.com/htechno/WiProber.git` (the original WiProber).
 2.  Open the project in Android Studio.
 3.  Let Gradle sync and download all dependencies.
 4.  Build and run the application on your device.

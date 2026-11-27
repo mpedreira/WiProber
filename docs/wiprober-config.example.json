@@ -23,7 +23,8 @@
     "enabled": true,
     "spacingMeters": 10,
     "coverageRadiusMeters": 5,
-    "ssid": "CORP-WIFI"
+    "ssid": "CORP-WIFI",
+    "profile": "pda"
   },
   "roaming": {
     "enabled": true,

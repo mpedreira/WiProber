@@ -1,31 +1,24 @@
-# WiProber Privacy Policy
+# nimWifi privacy policy
 
-## Notice for the mpedreira/nimwifi fork
+Revision date: 27 November 2026.
 
-This repository is a fork of [htechno/WiProber](https://github.com/htechno/WiProber). The policy below is an English translation of the original author's policy (the original Russian text is in the upstream repository). The fork changes the following:
+nimWifi is a personal, open-source project by [mpedreira](https://github.com/mpedreira), based on [WiProber](https://github.com/htechno/WiProber) by htechno (MIT License). It has no accounts, advertising, analytics or developer server: nothing is collected by the author.
 
-- **Network access.** The fork requests the `INTERNET` and `ACCESS_NETWORK_STATE` permissions for optional tests. Nothing is sent unless the user enables a test or imports a configuration. Then the app connects, over the Wi-Fi network, only to the servers the user configured (iPerf3 server, HTTP/DNS/TCP test targets, scripted requests, roaming probe target) and, for the default Internet speed test, to `speed.cloudflare.com` (Cloudflare). Those servers receive the device's IP address and the test traffic; their operators' own policies apply.
-- **Imported configuration.** Server names, URLs and credentials in an imported configuration or `.har` file are stored in the app's private storage on the device and are excluded from Android backups and device transfers. Credentials are kept in a separate file, never shown on screen and never written to exports; credentials found in a `.har` recording are removed on import.
-- **Additional data in projects and exports.** Test results stored in projects and exported to `wiprober-performance.json` include the associated access point (SSID, BSSID, signal, link rates, channel), the phone model and Android version, timings and the hosts/paths tested (without query strings).
-- The fork does not add advertising, accounts or analytics, and does not send projects to any developer server.
-- Questions about the fork: open an issue at https://github.com/mpedreira/nimwifi/issues.
+## Data on the device
 
-## Original policy (translated)
+- **Surveys.** The app processes Wi-Fi network names and identifiers (SSID, BSSID), signal level, frequencies, security capabilities and other information Android provides. Projects store measurement times, the points and routes you mark on the floor plan, floor plans, notes, selected photos, imported ESX files and test results. They stay in the app's private storage until you delete them or clear the app's data.
+- **Location permission.** Android requires the location permission to return Wi-Fi scan results. nimWifi never reads GPS coordinates: positions are the ones you set on the plan.
+- **Imported configuration.** Server names, URLs, tests, scripts and credentials are stored in private storage and excluded from Android backups and device transfers. Credentials are kept in a separate file, never shown and never exported; credentials in a `.har` recording are removed on import.
+- **Backups.** Projects (not the configuration) may be included in Android's backup, depending on your device settings.
 
-Revision date: 12 October 2026.
+## Network traffic
 
-The developer and the person responsible for processing data in WiProber: Pavel Semenishchev. Contact: wifi.solution.msk@gmail.com.
+Nothing is sent unless you enable a test or import a configuration. Then the app connects over the Wi-Fi network only to the servers you configured (iPerf3 server, DNS/ping/TCP/HTTP targets, scripted requests, roaming probe target) and, if you enable the Internet speed test with the default URL, to `speed.cloudflare.com`. Those servers receive the phone's IP address and the test traffic; their operators' policies apply.
 
-WiProber is intended for Wi-Fi surveys. The application processes network names and identifiers (SSID and BSSID), signal level, frequencies, security characteristics and other information provided by Android. Projects store measurement times, points and routes marked by the user on the plan, floor plans, text notes, selected photos and imported ESX files. On export, the file also includes information about the device model and Wi-Fi adapter. This data is used to display networks, conduct the survey and export the results.
+## Exports
 
-Precise and approximate location permissions are required to access Wi-Fi scan results under Android rules. WiProber does not request GPS coordinates: the position on the plan is set by the user. Without the permissions, scanning functions are unavailable. Permissions can be revoked in Android settings.
+Exports are written only where you choose. They include the survey data, the associated access point of each test, the phone model and Android version, timings and the tested hosts and paths (without query strings or credential values).
 
-Projects are stored in the application's private storage on the device until the user deletes them or clears the application data. The application contains no advertising, purchases or analytics services and does not send projects to the developer's server.
+## Contact
 
-Export is performed by user action to a location the user chooses. The system file picker may include cloud storage. Android system backup is allowed in the application; depending on the device and settings, data may be included in a backup or transferred to another device. These operations are governed by the settings and terms of the respective provider.
-
-To delete a project, use the project menu on the home screen. Clearing the application data in Android settings deletes WiProber's local data. Exported files, original photos and system backups are deleted separately using the tools of the respective storage. The developer has no remote access to local projects.
-
-If you contact the developer by email, you share the sender's address and the content of the message in order to receive a reply. Do not send plans, photos and survey results that you do not want to share with the developer. For questions about the processing or deletion of data shared with the developer, contact wifi.solution.msk@gmail.com.
-
-The updated revision of the policy is published together with the application and at the link on its store page.
+Questions: open an issue at https://github.com/mpedreira/nimwifi/issues. The original WiProber policy applies to WiProber, not to nimWifi.
