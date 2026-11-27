@@ -41,7 +41,17 @@ class MeasurementControl(private val nanoTime: () -> Long = System::nanoTime) {
             closeQuietly(resource)
             throw MeasurementCancelled(cancelReason!!)
         }
+        // Opened after the phase deadline closed everything (e.g. a transfer worker starting its
+        // next request): it would otherwise block until its own read timeout.
+        if (phaseTimedOut) {
+            closeQuietly(resource)
+            throw MeasurementException(ErrorCodes.TIMEOUT, "phase deadline reached")
+        }
         resources += resource
+        if (phaseTimedOut && resources.remove(resource)) {
+            closeQuietly(resource)
+            throw MeasurementException(ErrorCodes.TIMEOUT, "phase deadline reached")
+        }
         return resource
     }
 
@@ -121,6 +131,7 @@ class MeasurementControl(private val nanoTime: () -> Long = System::nanoTime) {
             phaseTimer?.cancel(false)
             phaseTimer = null
             closeAll()
+            phaseTimedOut = false
         }
     }
 

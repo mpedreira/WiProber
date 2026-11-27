@@ -71,7 +71,9 @@ class DeadlinesTest {
     @Test
     fun anUploadThatStopsProgressingEndsAtItsPhaseDeadline() {
         ServerSocket(0).use { silent ->
-            thread(isDaemon = true) { while (!silent.isClosed) runCatching { silent.accept() } }
+            // Accepted sockets stay referenced: a collected Socket closes and would end the upload early.
+            val accepted = java.util.Collections.synchronizedList(mutableListOf<java.net.Socket>())
+            thread(isDaemon = true) { while (!silent.isClosed) runCatching { accepted += silent.accept() } }
             val control = MeasurementControl()
             val started = System.nanoTime()
             try {
@@ -81,6 +83,32 @@ class DeadlinesTest {
                 assertEquals(ErrorCodes.TIMEOUT, e.code)
             }
             assertTrue((System.nanoTime() - started) / 1_000_000 < 5_000)
+        }
+    }
+
+    /** A connection opened after the phase deadline is closed at once instead of blocking on it. */
+    @Test
+    fun aResourceTrackedAfterThePhaseDeadlineIsClosedImmediately() {
+        ServerSocket(0).use { server ->
+            val accepted = java.util.Collections.synchronizedList(mutableListOf<java.net.Socket>())
+            thread(isDaemon = true) { while (!server.isClosed) runCatching { accepted += server.accept() } }
+            val control = MeasurementControl()
+            val late = java.net.Socket()
+            val started = System.nanoTime()
+            try {
+                control.phase(100) {
+                    Thread.sleep(300) // the deadline passes while "between requests"
+                    control.track(late).connect(java.net.InetSocketAddress("127.0.0.1", server.localPort), 1_000)
+                    late.getInputStream().read() // would block for ever without the fix
+                }
+                throw AssertionError("expected timeout")
+            } catch (e: MeasurementException) {
+                assertEquals(ErrorCodes.TIMEOUT, e.code)
+            }
+            assertTrue(late.isClosed)
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000)
+            // The next phase is not affected.
+            assertEquals(7, control.phase(1_000) { control.track(java.net.Socket()).use { 7 } })
         }
     }
 
