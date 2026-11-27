@@ -367,10 +367,13 @@ object PerformanceExport {
             when {
                 run.steps.isEmpty() && run.errorCode != null -> RunStatus.SKIPPED
                 run.steps.isNotEmpty() && ok == run.steps.size && (run.stepsTotal == null || run.steps.size == run.stepsTotal) -> RunStatus.COMPLETED
+                // Mejora 10: some steps passed, others failed or never ran (cancel, deadline).
+                ok > 0 -> "partial"
                 else -> RunStatus.FAILED
             }
         )
         addProperty("stepsTotal", run.stepsTotal ?: run.steps.size)
+        addProperty("stepsPending", ((run.stepsTotal ?: run.steps.size) - run.steps.size).coerceAtLeast(0))
         addProperty("stepsRun", run.steps.size)
         addProperty("stepsOk", ok)
         addProperty("stepsFailed", run.steps.size - ok)
