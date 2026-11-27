@@ -2,7 +2,7 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
-## Next release candidate (after 4.0.0-rc.4, not tagged)
+## 4.0.0-rc.5
 
 ### Added
 - **Bands in the report**: 2.4, 5 and 6 GHz are told apart inside each SSID (per-band summary, *Por banda* column, band and channel next to every AP, band changes marked). Optional `requirements.bands` asks for a minimum signal in one band.
