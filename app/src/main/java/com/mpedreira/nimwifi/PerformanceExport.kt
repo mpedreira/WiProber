@@ -35,7 +35,27 @@ object PerformanceExport {
     private class Position(val surveyId: String?, val floorPlanId: String, val floorName: String, val x: Float, val y: Float)
 
     /** [verdict]: the report model; with requirements its verdict is exported (additive `requirements`/`verdicts`). */
-    fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot? = null, verdict: SurveyReport.Model? = null): JsonObject {
+    fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot? = null, verdict: SurveyReport.Model? = null,
+              apNames: ApDirectory = ApDirectory.EMPTY): JsonObject =
+        buildRows(report, esxFileName, generatedAt, snapshot, verdict).also { if (!apNames.isEmpty) addApNames(it, apNames) }
+
+    /** Next to every mapped BSSID field, the user's AP name (additive; unmapped BSSIDs get nothing). */
+    private val AP_FIELDS = mapOf("bssid" to "apName", "bssidStart" to "apNameStart", "bssidEnd" to "apNameEnd",
+        "fromBssid" to "fromApName", "toBssid" to "toApName")
+
+    private fun addApNames(root: JsonObject, apNames: ApDirectory) {
+        root.entrySet().map { it.value }.filter { it.isJsonArray }.forEach { array ->
+            array.asJsonArray.filter { it.isJsonObject }.map { it.asJsonObject }.forEach { row ->
+                AP_FIELDS.forEach { (bssidField, nameField) ->
+                    val bssid = row[bssidField]?.takeIf { it.isJsonPrimitive }?.asString
+                    apNames.name(bssid)?.let { row.addProperty(nameField, it) }
+                }
+            }
+        }
+        root.add("apNames", com.google.gson.Gson().toJsonTree(apNames.entries()))
+    }
+
+    private fun buildRows(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot?, verdict: SurveyReport.Model?): JsonObject {
         val rows = JsonArray()
         val networkRows = JsonArray()
         val scriptRows = JsonArray()

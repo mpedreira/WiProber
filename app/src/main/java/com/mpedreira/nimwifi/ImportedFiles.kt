@@ -50,7 +50,7 @@ object ImportedFiles {
         val entries = zip.entries().toList().filter { !it.isDirectory && '/' !in it.name && '\\' !in it.name }
         if (entries.size > MAX_CONFIG_ENTRIES) throw ConfigException("The ZIP has too many files")
         var total = 0L
-        entries.filter { it.name.endsWith(".json", true) || it.name.endsWith(".har", true) }.associate { entry ->
+        entries.filter { it.name.endsWith(".json", true) || it.name.endsWith(".har", true) || it.name.equals(ApDirectory.CSV_FILE_NAME, true) }.associate { entry ->
             val bytes = zip.getInputStream(entry).use { input ->
                 BoundedIo.readBytes(input, 0L, MAX_CONFIG_ENTRY_BYTES, "${entry.name} is larger than 2 MB")
             }

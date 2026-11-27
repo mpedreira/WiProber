@@ -416,6 +416,7 @@ The unchanged source ESX is a separate option in the export menu, and the analys
 SHA-256: %1$s</string>
     <string name="action_continue">Continue</string>
     <string name="config_preview_requirements">Report requirements (verdict): %1$d</string>
+    <string name="config_preview_ap_names">AP names (BSSID → AP): %1$d</string>
     <string name="network_changed_title">The Wi-Fi network changed</string>
     <string name="network_changed_message">The network approved for this test (%1$s) is no longer the one available, so nothing was sent. Check the network again and decide before testing.</string>
     <string name="network_changed_check_again">Check again</string>

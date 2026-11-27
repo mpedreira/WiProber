@@ -19,6 +19,8 @@ data class WiproberConfig(
     val roaming: RoamingSettings? = null,
     /** Acceptance criteria for the report's verdict; null = the file has no such section. */
     val requirements: Requirements? = null,
+    /** BSSID → physical AP names for the report (display only); null = no such table in the file. */
+    val apNames: List<ApName>? = null,
     /** A HAR adds (or replaces by name) one script instead of replacing them all. */
     val mergeScripts: Boolean = false,
     /**
@@ -194,11 +196,20 @@ object WiproberConfigParser {
         val config = parse(configText, CONFIG_FILE_NAME)
         val hars = entries.filterKeys { it.endsWith(".har", ignoreCase = true) }.toSortedMap()
             .map { (name, text) -> HarImporter.import(parseRoot(text), scriptNameFrom(name)) }
-        if (hars.isEmpty()) return config
+        // The AP table may also come as ap-names.csv; with the JSON table too, both are one table
+        // (a BSSID in both is an error, never a silent choice).
+        val csv = entries.entries.firstOrNull { it.key.equals(ApDirectory.CSV_FILE_NAME, ignoreCase = true) }?.value
+        val withAps = if (csv == null) config else {
+            val rows = (config.apNames.orEmpty() + ApDirectory.parseCsv(csv)).mapIndexed { i, ap ->
+                Triple(i + 1, mapOf("bssid" to ap.bssid, "name" to ap.name, "location" to ap.location, "floor" to ap.floor), "AP table row ${i + 1}")
+            }
+            config.copy(apNames = ApDirectory.validated(rows))
+        }
+        if (hars.isEmpty()) return withAps
         val scripts = config.scripts.orEmpty() + hars.map { it.script }
         if (scripts.size > MAX_SCRIPTS) throw ConfigException("At most $MAX_SCRIPTS scripts")
         if (scripts.map { it.name }.toSet().size != scripts.size) throw ConfigException("Script names must be unique (config and HAR files)")
-        return config.copy(
+        return withAps.copy(
             scripts = scripts,
             // Without a scripts section the HARs are added to the device's scripts, as a lone HAR is.
             mergeScripts = config.scripts == null,
@@ -247,6 +258,13 @@ object WiproberConfigParser {
             scripts = split?.scripts,
             roaming = root.obj("roaming")?.let(::parseRoaming),
             requirements = root.obj("requirements")?.let(::parseRequirements),
+            apNames = root.getAsJsonArray("apNames")?.let { array ->
+                ApDirectory.validated(array.mapIndexed { i, element ->
+                    if (!element.isJsonObject) throw ConfigException("apNames ${i + 1} must be an object")
+                    val o = element.asJsonObject
+                    Triple(i + 1, listOf("bssid", "name", "location", "floor").associateWith { o.string(it) }, "apNames ${i + 1}")
+                })
+            },
             credentials = extra.takeIf { it.isNotEmpty() || credentials != null || split != null },
             stripped = moved
         )

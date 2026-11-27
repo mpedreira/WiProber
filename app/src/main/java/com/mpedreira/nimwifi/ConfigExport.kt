@@ -56,6 +56,7 @@ object ConfigExport {
                 })
             }
             imported.requirements?.let { add("requirements", gson.toJsonTree(it)) }
+            imported.apNames?.let { add("apNames", gson.toJsonTree(it)) }
             add("tests", gson.toJsonTree(imported.tests.orEmpty()))
             add("scripts", gson.toJsonTree(imported.scripts.orEmpty()))
             val needed = imported.scripts.orEmpty().flatMap { it.credentialReferences() }.toSortedSet()

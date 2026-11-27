@@ -34,8 +34,11 @@ class WiproberConfigStore(
         val scripts: List<HttpScript>? = emptyList(),
         val roaming: RoamingSettings? = null,
         /** Report verdict thresholds; null in profiles saved before (no verdict). */
-        val requirements: Requirements? = null
+        val requirements: Requirements? = null,
+        /** BSSID → AP names shown in the report; null in profiles saved before. */
+        val apNames: List<ApName>? = null
     ) {
+        val apDirectory: ApDirectory get() = ApDirectory(apNames.orEmpty())
         val enabledTests: List<NetworkTest> get() = tests.orEmpty().filter { it.enabled }
         val enabledScripts: List<HttpScript> get() = scripts.orEmpty().filter { it.enabled }
         val roamingSettings: RoamingSettings get() = roaming ?: RoamingSettings()
@@ -134,7 +137,8 @@ class WiproberConfigStore(
                 tests = config.tests ?: current.imported.tests,
                 scripts = scripts ?: current.imported.scripts,
                 roaming = config.roaming ?: current.imported.roaming,
-                requirements = config.requirements ?: current.imported.requirements
+                requirements = config.requirements ?: current.imported.requirements,
+                apNames = config.apNames ?: current.imported.apNames
             ),
             current.credentials + config.credentials.orEmpty()
         )

@@ -43,6 +43,7 @@ object ConfigImportDialogs {
         )
         preview.tests?.let { add(context.getString(R.string.config_preview_tests, it)) }
         preview.requirements?.let { add(context.getString(R.string.config_preview_requirements, it)) }
+        preview.apNames?.let { add(context.getString(R.string.config_preview_ap_names, it)) }
         preview.scripts?.let { add(context.getString(R.string.config_preview_scripts, it.joinToString(", ").ifEmpty { none })) }
         if (preview.writeSteps.isNotEmpty()) add(context.getString(R.string.config_preview_writes, preview.writeSteps.size))
         if (preview.stripped.isNotEmpty()) {

@@ -124,11 +124,12 @@ object VerdictEvaluator {
         coverage: List<PointCoverage>,
         runs: List<ActiveRun>,
         events: List<SurveyReport.FloorEvent>,
-        weakDbm: Int
+        weakDbm: Int,
+        apNames: ApDirectory = ApDirectory.EMPTY
     ): SsidVerdict {
         val ssidEvents = events.filter { it.belongsTo(ssid) }
-        val points = coverage.map { point -> pointVerdict(requirements, ssid, point, runs.filter { it.pointId == point.pointId }, ssidEvents, weakDbm) }
-        val floorChecks = floorChecks(requirements, ssid, coverage, runs, ssidEvents)
+        val points = coverage.map { point -> pointVerdict(requirements, ssid, point, runs.filter { it.pointId == point.pointId }, ssidEvents, weakDbm, apNames) }
+        val floorChecks = floorChecks(requirements, ssid, coverage, runs, ssidEvents, apNames)
         val state = VerdictState.combine(points.map { it.state } + floorChecks.map { it.state })
         return SsidVerdict(ssid, floorName, state, points, floorChecks, ssidEvents.filter { it.outage }.distinctBy { it.event.key }.size)
     }
@@ -139,10 +140,11 @@ object VerdictEvaluator {
         point: PointCoverage,
         runs: List<ActiveRun>,
         events: List<SurveyReport.FloorEvent>,
-        weakDbm: Int
+        weakDbm: Int,
+        apNames: ApDirectory
     ): PointVerdict {
         val checks = mutableListOf<Check>()
-        checks += signal(point, weakDbm)
+        checks += signal(point, weakDbm, apNames)
         val ordered = runs.sortedBy { it.startedAt }
         requirements.throughput.orEmpty().forEach { req ->
             val attempts = ordered.flatMap { run -> run.results?.tests.orEmpty().filter { it.ssid == ssid && isTarget(it, req.alias) }.map { run to it } }
@@ -169,7 +171,7 @@ object VerdictEvaluator {
             val inside = events.filter { e -> e.outage && e.event.at != null && windows.any { e.event.at in it } }
             inside.forEach { e ->
                 checks += Check("outage-during-measurement", "Corte durante la medición", VerdictState.FAIL, e.event.outageUpperMs?.toDouble() ?: e.event.outageLowerMs?.toDouble(),
-                    requirements.roaming?.maxOutageMs?.toDouble(), "ms", runIdAt(ordered, e.event.at!!), listOfNotNull(e.event.kind, e.event.from, e.event.to).joinToString(" · "))
+                    requirements.roaming?.maxOutageMs?.toDouble(), "ms", runIdAt(ordered, e.event.at!!), listOf(e.event.kind, apNames.between(e.event.from, e.event.to)).filter { it.isNotEmpty() }.joinToString(" "))
             }
             val apChanges = events.count { e -> !e.outage && e.event.at != null && windows.any { e.event.at in it } } +
                 ordered.sumOf { run -> run.results?.tests.orEmpty().count { it.ssid == ssid && it.associationChange == AssociationChange.BSSID_CHANGED } }
@@ -182,8 +184,8 @@ object VerdictEvaluator {
     }
 
     /** The profile's RSSI threshold, on the latest valid local scan of the point. */
-    private fun signal(point: PointCoverage, weakDbm: Int): Check {
-        val ap = point.strongestBssid?.let { " ($it)" }.orEmpty()
+    private fun signal(point: PointCoverage, weakDbm: Int, apNames: ApDirectory): Check {
+        val ap = point.strongestBssid?.let { ": ${apNames.label(it)}" }.orEmpty()
         return when (point.state) {
             PointState.OK -> Check("rssi", "Señal", VerdictState.PASS, point.strongestRssi?.toDouble(), weakDbm.toDouble(), "dBm", reason = "AP más fuerte$ap")
             PointState.WEAK -> Check("rssi", "Señal", VerdictState.FAIL, point.strongestRssi?.toDouble(), weakDbm.toDouble(), "dBm", reason = "AP más fuerte$ap")
@@ -198,7 +200,8 @@ object VerdictEvaluator {
     }
 
     /** p95 of the series' point values, roaming outages and their count, per SSID and floor. */
-    private fun floorChecks(requirements: Requirements, ssid: String, coverage: List<PointCoverage>, runs: List<ActiveRun>, events: List<SurveyReport.FloorEvent>): List<Check> {
+    private fun floorChecks(requirements: Requirements, ssid: String, coverage: List<PointCoverage>, runs: List<ActiveRun>, events: List<SurveyReport.FloorEvent>,
+                            apNames: ApDirectory): List<Check> {
         val checks = mutableListOf<Check>()
         val pointIds = coverage.map { it.pointId }.toSet()
         fun lastPerPoint(values: List<Pair<ActiveRun, Double?>>) = values.filter { it.second != null && it.first.pointId in pointIds }
@@ -226,7 +229,7 @@ object VerdictEvaluator {
                         Check("roaming:outage", "Ventana de pérdida", VerdictState.MISSING, null, max.toDouble(), "ms", reason = "duración no estimable (${e.kind} ${e.detail.orEmpty()})")
                     } else {
                         Check("roaming:outage", "Ventana de pérdida", if (duration <= max && !e.open) VerdictState.PASS else VerdictState.FAIL,
-                            duration.toDouble(), max.toDouble(), "ms", reason = listOfNotNull(e.kind, if (e.open) "sin recuperar" else null).joinToString(" · ") + " · " + (e.key))
+                            duration.toDouble(), max.toDouble(), "ms", reason = listOfNotNull(e.kind, apNames.between(e.from, e.to).ifEmpty { null }, if (e.open) "sin recuperar" else null).joinToString(" · ") + " · " + (e.key))
                     }
                 }
             }

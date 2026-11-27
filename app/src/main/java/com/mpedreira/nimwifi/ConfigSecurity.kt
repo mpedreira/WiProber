@@ -103,7 +103,9 @@ data class ImportPreview(
     val guide: Boolean,
     val roaming: Boolean,
     /** Number of requirements in the file (report verdict); null without the section. */
-    val requirements: Int? = null
+    val requirements: Int? = null,
+    /** Rows of the BSSID → AP table; null without it. */
+    val apNames: Int? = null
 ) {
     data class Destination(val scheme: String, val host: String, val port: Int?, val methods: Set<String>, val cleartext: Boolean)
 
@@ -158,7 +160,8 @@ data class ImportPreview(
                 roaming = config.roaming != null,
                 requirements = config.requirements?.let { r ->
                     r.throughput.orEmpty().size + r.networkTests.orEmpty().size + (if (r.roaming != null) 1 else 0)
-                }
+                },
+                apNames = config.apNames?.size
             )
         }
     }

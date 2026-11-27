@@ -81,11 +81,13 @@ class EsxExportService(
             // Mejora 18: the whole artifact is staged and verified before the destination is opened.
             val artifact = if (bundleEsxName != null) {
                 val now = System.currentTimeMillis()
-                // The verdict's thresholds come from the active configuration profile (none: no verdict).
-                val requirements = runCatching { WiproberConfigStore(appContext).load().requirements }.getOrNull()
+                // The verdict's thresholds and the AP names come from the active configuration
+                // profile (none: no verdict, BSSIDs alone, as before).
+                val imported = runCatching { WiproberConfigStore(appContext).load() }.getOrNull()
+                val apNames = imported?.apDirectory ?: ApDirectory.EMPTY
                 val reportModel = SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
-                    planImages = planImages(snapshot), requirements = requirements)
-                val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot, reportModel)
+                    planImages = planImages(snapshot), requirements = imported?.requirements, apNames = apNames)
+                val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot, reportModel, apNames)
                 bundleArchive.outputStream().buffered().use { output ->
                     PerformanceExport.writeBundle(
                         output,

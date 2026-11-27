@@ -150,7 +150,9 @@ object SurveyReport {
         /** Mejora 1: what the selection covers (all runs, one run, an interval). */
         val selectionDetail: String? = null,
         /** Requirements applied to the verdict; null (or empty): no verdict, the report as before. */
-        val requirements: Requirements? = null
+        val requirements: Requirements? = null,
+        /** BSSID → AP names (display only); empty: BSSIDs as before. */
+        val apNames: ApDirectory = ApDirectory.EMPTY
     ) {
         val hasVerdict: Boolean get() = requirements != null && !requirements.isEmpty
     }
@@ -169,9 +171,12 @@ object SurveyReport {
         /** Floor plans by floorPlanId, to draw the maps. */
         planImages: Map<String, PlanImage> = emptyMap(),
         /** Thresholds of the verdict; without them the report is exactly as before. */
-        requirements: Requirements? = null
+        requirements: Requirements? = null,
+        /** The user's BSSID → AP table; unmapped BSSIDs are shown as they are. */
+        apNames: ApDirectory = ApDirectory.EMPTY
     ): Model = Model(
         requirements = requirements?.takeUnless { it.isEmpty },
+        apNames = apNames,
         profile = profile,
         selectionDetail = listOfNotNull(runId?.let { "run $it" },
             if (fromMs != null || toMs != null) "runs from ${fromMs ?: "start"} to ${toMs ?: "end"}" else null).joinToString("; ").ifEmpty { null },
@@ -192,7 +197,7 @@ object SurveyReport {
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
-                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events, requirements, floor.name) },
+                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events, requirements, floor.name, apNames) },
                 // Also without active tests: roaming events without any SSID are shown there once.
                 unknownAssociation = section(null, survey, runs, weakDbm, selection, events = events)
                     .takeIf { it.runs.isNotEmpty() || it.apChanges.isNotEmpty() || it.outages.isNotEmpty() },
@@ -278,7 +283,7 @@ object SurveyReport {
     }
 
     private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection, secondaryDbm: Int = SignalProfile.of(null).secondaryDbm,
-                        events: List<FloorEvent> = floorEvents(survey, runs), requirements: Requirements? = null, floorName: String = ""): SsidSection {
+                        events: List<FloorEvent> = floorEvents(survey, runs), requirements: Requirements? = null, floorName: String = "", apNames: ApDirectory = ApDirectory.EMPTY): SsidSection {
         val labels = SsidCoverage.labels(survey.scanPoints, survey.plannedPoints)
         // Runs of this SSID: by the SSID of their results, else by the network observed before the run.
         val ssidRuns = runs.filter { run ->
@@ -395,7 +400,7 @@ object SurveyReport {
         val (marks, sources) = if (ssid != null) marks(ssid, survey, coverage, weakDbm) else emptyList<MapMark>() to null
         // The verdict judges this SSID alone, with the same points, runs and events as the section.
         val verdict = if (ssid != null && requirements != null && !requirements.isEmpty) {
-            VerdictEvaluator.evaluate(requirements, ssid, floorName, coverage, runs, events, weakDbm)
+            VerdictEvaluator.evaluate(requirements, ssid, floorName, coverage, runs, events, weakDbm, apNames)
         } else {
             null
         }
@@ -633,9 +638,9 @@ object SurveyReport {
                 attention.forEach { p ->
                     append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(stateLabel(p.state)))
                         .append(if (p.state == PointState.WEAK) " (umbral ${model.weakDbm} dBm)" else "").append("</td><td>")
-                        .append(e(p.strongestBssid ?: "—")).append("</td><td>").append(e(p.strongestRssi ?: "—")).append("</td><td>")
-                        .append(e(p.secondBssid?.let { "$it ${p.secondRssi} dBm" } ?: "ninguno")).append("</td><td>")
-                        .append(e(p.associatedBssid?.let { "$it ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} cambios de AP" else "" } ?: "—"))
+                        .append(e(model.apNames.label(p.strongestBssid) ?: "—")).append("</td><td>").append(e(p.strongestRssi ?: "—")).append("</td><td>")
+                        .append(e(p.secondBssid?.let { "${model.apNames.label(it)} ${p.secondRssi} dBm" } ?: "ninguno")).append("</td><td>")
+                        .append(e(p.associatedBssid?.let { "${model.apNames.label(it)} ${p.associatedRssi ?: "?"} dBm" + if (p.apChanges > 0) " · ${p.apChanges} cambios de AP" else "" } ?: "—"))
                         .append("</td><td>").append(e("%.0f, %.0f".format(java.util.Locale.ROOT, p.x, p.y))).append("</td></tr>")
                 }
                 append("</table>")
@@ -678,8 +683,8 @@ object SurveyReport {
                 append("<tr><td>").append(title).append("<div class=\"muted\">").append(e(ev.kind)).append(ev.incidentId?.let { " · incidente $it" } ?: "").append("</div></td><td>")
                     .append(e(time(ev.at))).append("</td><td>")
                     .append(if (ev.windowFrom != null || ev.windowTo != null) e("${time(ev.windowFrom).ifEmpty { "?" }} → ${time(ev.windowTo).ifEmpty { "sin recuperar" }}") else "—")
-                    .append("</td><td>").append(e(listOfNotNull(ev.fromSsid, ev.from).joinToString(" · ").ifEmpty { "—" }))
-                    .append("</td><td>").append(e(listOfNotNull(ev.toSsid, ev.to).joinToString(" · ").ifEmpty { "—" }))
+                    .append("</td><td>").append(e(listOfNotNull(ev.fromSsid, model.apNames.label(ev.from)).joinToString(" · ").ifEmpty { "—" }))
+                    .append("</td><td>").append(e(listOfNotNull(ev.toSsid, model.apNames.label(ev.to)).joinToString(" · ").ifEmpty { "—" }))
                     .append("</td><td>").append(e(ev.detail ?: "—")).append("</td><td>")
                     .append(if (ev.x != null && ev.y != null) e("%.0f, %.0f px (aprox.)".format(java.util.Locale.ROOT, ev.x, ev.y)) else "—").append("</td></tr>")
             }
