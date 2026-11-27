@@ -350,6 +350,16 @@ Data your app can derive from the `.esx` with no nimWifi change: APs on the same
 
 ## 8. Readable report (`wiprober-report.html`)
 
+The report is a self-contained HTML page **in Spanish** (no scripts) for Operations (mejora 19). For each floor and SSID it shows, in order:
+
+- a short guide that tells three things apart: signal evidence, network degradation, and a drop towards one service;
+- the plan;
+- the **worst points** first: state, strongest and second AP, associated AP, position, value and threshold;
+- private iPerf3, Internet and internal services in **separate tables**, by alias, with measure, unit, method, samples, failures and outcomes;
+- **roaming and outages**: time in UTC with milliseconds, the observed window (last reachable → first reachable), the association before and after, the incident, and the approximate position on the route when there is one. Events in the same second keep their order.
+
+The SSIDs reported are the map SSID, the SSIDs used by the tests and the three most widely detected (at most five).
+
 Each floor shows its **plan per SSID** (mejora 8): Stop-and-Go points at their exact position, Continuous scans as small dots placed on the route by time (approximate; only where two waypoints surround the scan time — the others are counted as *without enough route geometry*, never drawn), planned points and imported points without local RF as dashed rings. Weak points show their value and the threshold. Areas without marks have no sample. A source line counts each kind of evidence, and Continuous scans add their weak and not-detected counts and the worst value to the SSID figures.
 
 A self-contained HTML page (no scripts) for non-specialists, one section per floor and SSID:
