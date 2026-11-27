@@ -376,4 +376,7 @@
     <string name="network_check_skip">Saltar pruebas</string>
     <string name="config_field_roaming_method">Método (tcp: conexión a host:puerto · icmp: ping al host)</string>
     <string name="config_roaming_target_icmp">ping a %1$s cada %2$d ms</string>
+    <string name="export_format_title">Exportar</string>
+    <string name="export_format_bundle">ESX + informe y resultados (ZIP)</string>
+    <string name="export_format_esx">Solo ESX</string>
 </resources>

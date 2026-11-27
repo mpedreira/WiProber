@@ -63,12 +63,40 @@ object SurveyReport {
         val metrics: List<Metric>,
         val apChanges: List<Event>,
         val outages: List<Event>,
-        val runs: List<RunFact> = emptyList()
+        val runs: List<RunFact> = emptyList(),
+        val marks: List<MapMark> = emptyList(),
+        val sources: SourceCounts? = null
     ) {
         fun count(state: String) = points.count { it.state == state }
         /** Mejora 11: good primary signal and a second AP of the same SSID above the secondary threshold. */
         val redundant: Int get() = points.count { it.secondaryOk }
     }
+
+    /** Mejora 8: the floor plan embedded in the report (downscaled; marks use original-image pixels). */
+    data class PlanImage(val dataUri: String, val originalWidth: Int, val originalHeight: Int)
+
+    /** One mark on the plan. [approximate]: a Continuous scan placed on the route by time. */
+    data class MapMark(val x: Float, val y: Float, val source: String, val state: String, val rssi: Int?, val label: String?, val approximate: Boolean) {
+        companion object {
+            const val STOP = "stop"
+            const val CONTINUOUS = "continuous"
+            const val PLANNED = "planned"
+            const val IMPORTED = "imported"
+        }
+    }
+
+    /** Where the SSID's evidence comes from. */
+    data class SourceCounts(
+        val stopPoints: Int,
+        val continuousPlaced: Int,
+        /** Continuous scans that could not be placed (route without enough waypoints there): not drawn. */
+        val continuousWithoutGeometry: Int,
+        val imported: Int,
+        val planned: Int,
+        val continuousWeak: Int,
+        val continuousNotDetected: Int,
+        val continuousWorst: Int?
+    )
 
     data class FloorSection(
         val floorName: String,
@@ -76,7 +104,8 @@ object SurveyReport {
         val remeasuredPoints: Int,
         val ssids: List<SsidSection>,
         /** Mejora 10: results without an identified association, with their reasons. */
-        val unknownAssociation: SsidSection? = null
+        val unknownAssociation: SsidSection? = null,
+        val image: PlanImage? = null
     )
 
     data class Model(
@@ -100,7 +129,9 @@ object SurveyReport {
         /** Only this run (a pass), or only runs started inside [fromMs]..[toMs] (a campaign). */
         runId: String? = null,
         fromMs: Long? = null,
-        toMs: Long? = null
+        toMs: Long? = null,
+        /** Floor plans by floorPlanId, to draw the maps. */
+        planImages: Map<String, PlanImage> = emptyMap()
     ): Model = Model(
         profile = profile,
         selectionDetail = listOfNotNull(runId?.let { "run $it" },
@@ -122,7 +153,8 @@ object SurveyReport {
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
                 ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm) },
-                unknownAssociation = section(null, survey, runs, weakDbm, selection).takeIf { it.runs.isNotEmpty() }
+                unknownAssociation = section(null, survey, runs, weakDbm, selection).takeIf { it.runs.isNotEmpty() },
+                image = planImages[floor.esxFloorPlanId]
             )
         }
     )
@@ -283,7 +315,64 @@ object SurveyReport {
             }
         }
         val coverage = ssid?.let { SsidCoverage.points(survey.scanPoints, survey.plannedPoints, it, weakDbm, secondaryDbm, survey.activeRuns) }.orEmpty()
-        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts)
+        val (marks, sources) = if (ssid != null) marks(ssid, survey, coverage, weakDbm) else emptyList<MapMark>() to null
+        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources)
+    }
+
+    /**
+     * Mejora 8: what the plan shows for one SSID. Stop-and-Go points at their exact position;
+     * Continuous scans only where the route has enough geometry (two waypoints around the scan
+     * time), marked approximate; the others are counted, never drawn.
+     */
+    private fun marks(ssid: String, survey: ProjectSnapshot, coverage: List<PointCoverage>, weakDbm: Int): Pair<List<MapMark>, SourceCounts> {
+        val marks = coverage.map { p ->
+            val source = when {
+                p.planned && p.scans == 0 -> MapMark.PLANNED
+                p.imported -> MapMark.IMPORTED
+                else -> MapMark.STOP
+            }
+            MapMark(p.x, p.y, source, p.state, p.strongestRssi, p.label, approximate = false)
+        }.toMutableList()
+        var placed = 0
+        var unplaced = 0
+        var weak = 0
+        var notDetected = 0
+        var worst: Int? = null
+        survey.continuousScanSessions.filterNot { it.importedFromEsx }.forEach { session ->
+            val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
+            session.scanResults.forEach { scan ->
+                val position = if (route.size >= 2 && scan.timestamp in route.first().timestamp..route.last().timestamp) {
+                    SurveyGuide.positionAt(route, scan.timestamp)
+                } else null
+                val strongest = scan.wifiNetworks.filter { it.ssid == ssid }.maxOfOrNull { it.level }
+                val state = when {
+                    scan.wifiNetworks.isEmpty() -> PointState.NOT_MEASURED
+                    strongest == null -> PointState.SSID_NOT_DETECTED
+                    strongest < weakDbm -> PointState.WEAK
+                    else -> PointState.OK
+                }
+                if (state == PointState.WEAK) weak++
+                if (state == PointState.SSID_NOT_DETECTED) notDetected++
+                if (strongest != null) worst = minOf(worst ?: strongest, strongest)
+                if (position == null) {
+                    unplaced++
+                } else {
+                    placed++
+                    marks += MapMark(position.first, position.second, MapMark.CONTINUOUS, state, strongest, null, approximate = true)
+                }
+            }
+        }
+        val sources = SourceCounts(
+            stopPoints = coverage.count { !it.imported && it.scans > 0 },
+            continuousPlaced = placed,
+            continuousWithoutGeometry = unplaced,
+            imported = coverage.count { it.imported },
+            planned = coverage.count { it.planned && it.scans == 0 },
+            continuousWeak = weak,
+            continuousNotDetected = notDetected,
+            continuousWorst = worst
+        )
+        return marks to sources
     }
 
     fun html(model: Model): String = buildString {
@@ -319,6 +408,20 @@ object SurveyReport {
                 append("<li>No local measurement: ").append(section.count(PointState.NOT_MEASURED)).append(" points</li>")
                 append("<li>Second AP of the same SSID above the secondary threshold (redundancy hint): ").append(section.redundant).append(" points</li>")
                 append("<li>AP changes: ").append(section.apChanges.size).append("; outages: ").append(section.outages.size).append("</li></ul>")
+                section.sources?.let { src ->
+                    append("<p class=\"muted\">Sources: ").append(src.stopPoints).append(" Stop-and-Go points with local RF; ")
+                        .append(src.continuousPlaced).append(" Continuous scans on the plan (approximate position)")
+                    if (src.continuousWithoutGeometry > 0) append(", ").append(src.continuousWithoutGeometry).append(" without enough route geometry (not drawn)")
+                    append("; ").append(src.imported).append(" imported points without local RF; ").append(src.planned).append(" planned points.")
+                    if (src.continuousPlaced + src.continuousWithoutGeometry > 0) {
+                        append(" Continuous: ").append(src.continuousWeak).append(" weak (below ").append(model.weakDbm).append(" dBm), ")
+                            .append(src.continuousNotDetected).append(" SSID not detected")
+                        src.continuousWorst?.let { append(", worst ").append(it).append(" dBm") }
+                        append(".")
+                    }
+                    append("</p>")
+                }
+                floor.image?.let { image -> if (section.ssid != null) appendMap(this, image, section, model.weakDbm, ::e) }
                 val attention = section.points.filter { it.state != PointState.OK }.sortedBy { it.state }
                 if (attention.isNotEmpty()) {
                     append("<table><tr><th>Point</th><th>State</th><th>Strongest AP (scan)</th><th>dBm</th><th>Second AP</th><th>Associated AP (tests)</th><th>x, y (px)</th></tr>")
@@ -374,6 +477,42 @@ object SurveyReport {
             }
         }
         append("</body></html>")
+    }
+
+    private fun stateColor(state: String) = when (state) {
+        PointState.OK -> "#1b6e20"
+        PointState.WEAK -> "#e67e00"
+        PointState.SSID_NOT_DETECTED -> "#b00020"
+        else -> "#777777"
+    }
+
+    /** The plan with the SSID's marks, in original-image pixels. */
+    private fun appendMap(out: StringBuilder, image: PlanImage, section: SsidSection, weakDbm: Int, e: (Any?) -> String) {
+        val w = image.originalWidth
+        val h = image.originalHeight
+        val r = maxOf(w, h) / 110f
+        out.append("<figure><svg viewBox=\"0 0 $w $h\" style=\"width:100%;height:auto;border:1px solid #ccc\" role=\"img\" aria-label=\"")
+            .append(e(section.ssid)).append(" map\"><image href=\"").append(image.dataUri).append("\" width=\"$w\" height=\"$h\"/>")
+        section.marks.sortedBy { if (it.source == MapMark.CONTINUOUS) 0 else 1 }.forEach { m ->
+            val color = stateColor(m.state)
+            val title = buildString {
+                append(m.label ?: m.source).append(": ").append(stateLabel(m.state))
+                m.rssi?.let { append(" · ").append(it).append(" dBm (threshold ").append(weakDbm).append(")") }
+                if (m.approximate) append(" · approximate position")
+            }
+            when {
+                m.source == MapMark.CONTINUOUS -> out.append("<circle cx=\"${m.x}\" cy=\"${m.y}\" r=\"${r * 0.45f}\" fill=\"$color\" fill-opacity=\"0.75\" stroke=\"#fff\" stroke-dasharray=\"2 2\"><title>")
+                    .append(e(title)).append("</title></circle>")
+                m.state == PointState.NOT_MEASURED -> out.append("<circle cx=\"${m.x}\" cy=\"${m.y}\" r=\"$r\" fill=\"none\" stroke=\"#555\" stroke-width=\"${r / 4}\" stroke-dasharray=\"${r / 2} ${r / 3}\"><title>")
+                    .append(e(title)).append("</title></circle>")
+                else -> {
+                    out.append("<circle cx=\"${m.x}\" cy=\"${m.y}\" r=\"$r\" fill=\"$color\" stroke=\"#fff\" stroke-width=\"${r / 5}\"><title>").append(e(title)).append("</title></circle>")
+                    m.rssi?.let { out.append("<text x=\"${m.x}\" y=\"${m.y + r / 3}\" font-size=\"${r * 0.9f}\" text-anchor=\"middle\" fill=\"#fff\">").append(it).append("</text>") }
+                }
+            }
+        }
+        out.append("</svg><figcaption class=\"muted\">Green: good signal · orange: weak (below ").append(weakDbm)
+            .append(" dBm, value shown) · red: SSID not detected in a valid scan · dashed ring: no local measurement · small dashed dots: Continuous scans, approximate position. Areas without marks have no sample.</figcaption></figure>")
     }
 
     fun stateLabel(state: String) = when (state) {

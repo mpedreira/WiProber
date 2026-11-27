@@ -686,7 +686,7 @@ class SurveyActivity : AppCompatActivity() {
             }
             hideProjectOperation()
             result.onSuccess { (floors, bundle) ->
-                if (floors.isEmpty()) selectExportDestination(bundle)
+                if (floors.isEmpty()) chooseExportFormat()
                 else showUncalibratedExportWarning(floors.map { it.name }, bundle)
             }.onFailure { error ->
                 viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT)
@@ -699,7 +699,7 @@ class SurveyActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.uncalibrated_export_title)
             .setMessage(getString(R.string.uncalibrated_export_message, floorNames.joinToString("\n")))
-            .setPositiveButton(R.string.export_with_assumed_scale) { _, _ -> selectExportDestination(bundle) }
+            .setPositiveButton(R.string.export_with_assumed_scale) { _, _ -> chooseExportFormat() }
             .setNegativeButton(R.string.cancel_export) { _, _ ->
                 viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT)
             }
@@ -709,7 +709,21 @@ class SurveyActivity : AppCompatActivity() {
             .show()
     }
 
-    /** [bundle]: the project has throughput results, so export a ZIP with the ESX + performance file. */
+    /**
+     * Mejora 8: the report is offered even without active tests (passive and Continuous surveys
+     * get their per-SSID maps too); the plain ESX stays available.
+     */
+    private fun chooseExportFormat() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.export_format_title)
+            .setItems(arrayOf(getString(R.string.export_format_bundle), getString(R.string.export_format_esx))) { _, which ->
+                selectExportDestination(bundle = which == 0)
+            }
+            .setOnCancelListener { viewModel.finishProjectOperation(ProjectOperation.EXPORT_PREFLIGHT) }
+            .show()
+    }
+
+    /** [bundle]: export a ZIP with the ESX, the results JSON and the report; else the plain ESX. */
     private fun selectExportDestination(bundle: Boolean) {
         // A stale dialog or result after recreation must not authorize another export.
         if (viewModel.screenState.value.interaction !=

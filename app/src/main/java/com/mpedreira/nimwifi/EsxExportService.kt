@@ -70,7 +70,8 @@ class EsxExportService(
                         bundleEsxName,
                         completeArchive,
                         PerformanceExport.toBytes(performance),
-                        SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id)).toByteArray(Charsets.UTF_8)
+                        SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
+                            planImages = planImages(snapshot))).toByteArray(Charsets.UTF_8)
                     )
                     return@use
                 }
@@ -222,8 +223,30 @@ class EsxExportService(
             }
     }
 
+    /** Mejora 8: every floor plan, downscaled for the report (marks keep original-image pixels). */
+    private fun planImages(snapshot: ProjectExportSnapshot): Map<String, SurveyReport.PlanImage> = snapshot.floors.mapNotNull { floor ->
+        runCatching {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(floor.mapFile.path, bounds)
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > REPORT_MAP_MAX_SIDE) sample *= 2
+            val bitmap = android.graphics.BitmapFactory.decodeFile(floor.mapFile.path,
+                android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: return@runCatching null
+            val bytes = java.io.ByteArrayOutputStream().use { out ->
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                bitmap.recycle()
+                out.toByteArray()
+            }
+            floor.esxFloorPlanId to SurveyReport.PlanImage(
+                "data:image/jpeg;base64," + java.util.Base64.getEncoder().encodeToString(bytes),
+                floor.survey.mapInfo.width, floor.survey.mapInfo.height
+            )
+        }.getOrNull()
+    }.toMap()
+
     internal companion object {
         private const val SCALE_EPSILON = 1e-12
+        private const val REPORT_MAP_MAX_SIDE = 1_600
 
         /**
          * Whether the imported archive needs a local overlay. Active runs and planned points never do:

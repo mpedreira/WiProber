@@ -8,8 +8,8 @@ Status: **format 2** (one row per active run, with run and phase statuses). Form
 
 | Project state | *Export* produces |
 |---|---|
-| No Stop-and-Go point has performance results and no Continuous track has a roaming log | `Project.esx`, exactly as the original app |
-| Otherwise | `Project.zip` |
+| *Export* → **ESX only** | `Project.esx`, exactly as the original app |
+| *Export* → **ESX + report and results** (offered always, also for passive or Continuous-only surveys without active tests) | `Project.zip` |
 
 ZIP contents (always exactly these entries, at the root):
 
@@ -349,6 +349,8 @@ Data your app can derive from the `.esx` with no nimWifi change: APs on the same
 - Scans without performance tests: only in the `.esx`.
 
 ## 8. Readable report (`wiprober-report.html`)
+
+Each floor shows its **plan per SSID** (mejora 8): Stop-and-Go points at their exact position, Continuous scans as small dots placed on the route by time (approximate; only where two waypoints surround the scan time — the others are counted as *without enough route geometry*, never drawn), planned points and imported points without local RF as dashed rings. Weak points show their value and the threshold. Areas without marks have no sample. A source line counts each kind of evidence, and Continuous scans add their weak and not-detected counts and the worst value to the SSID figures.
 
 A self-contained HTML page (no scripts) for non-specialists, one section per floor and SSID:
 
