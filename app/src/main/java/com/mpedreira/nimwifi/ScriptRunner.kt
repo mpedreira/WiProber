@@ -261,7 +261,9 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
         guard: (HttpScriptStep, () -> ScriptStepResult) -> ScriptStepResult = { _, run -> run() }
     ): List<ScriptStepResult> {
         val variables = script.variables.toMutableMap()
-        val cookies = mutableMapOf<String, MutableMap<String, String>>()
+        // Mejora 17: a maintained cookie jar (java.net.CookieManager): domain, path and Secure
+        // are respected; cookies live for this script run only.
+        val cookies = ReplayCookieJar()
         val secrets = credentials.values.toMutableSet()
         return script.steps.mapIndexed { index, step ->
             onStep(index, step)
@@ -272,7 +274,7 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
     private fun runStep(
         step: HttpScriptStep,
         variables: MutableMap<String, String>,
-        cookies: MutableMap<String, MutableMap<String, String>>,
+        cookies: ReplayCookieJar,
         secrets: MutableSet<String>
     ): ScriptStepResult {
         val timing = TimedHttpClient.Timing()
@@ -297,22 +299,11 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
             result = result.copy(host = redactor().redact(url.host))
             val headers = step.headers.mapValues { (_, value) -> substitute(value, variables) }.toMutableMap()
             ResolvedRequestValidator.check(url, headers)
-            cookies[url.host]?.takeIf { it.isNotEmpty() }?.let { jar ->
-                headers["Cookie"] = jar.entries.joinToString("; ") { "${it.key}=${it.value}" }
-            }
+            cookies.header(url)?.let { headers["Cookie"] = it }
             val body = step.body?.let { substitute(it, variables).toByteArray(StandardCharsets.UTF_8) }
 
             val response = http.execute(step.method, url, headers, body, timing)
-            response.headers.filter { it.first.equals("Set-Cookie", true) }.forEach { (_, value) ->
-                val pair = value.substringBefore(';')
-                val name = pair.substringBefore('=').trim()
-                val cookie = pair.substringAfter('=', "").trim()
-                val jar = cookies.getOrPut(url.host) { linkedMapOf() }
-                if (name.isNotEmpty() && name.length <= 128 && cookie.length <= MAX_COOKIE_LENGTH && (name in jar || jar.size < MAX_COOKIES)) {
-                    jar[name] = cookie
-                    secrets += cookie
-                }
-            }
+            secrets += cookies.store(url, response.headers.filter { it.first.equals("Set-Cookie", true) }.map { it.second })
             val text = String(response.body, StandardCharsets.UTF_8)
             val problems = mutableListOf<Pair<String, String>>()
             val location = HttpOutcomePolicy.location(url, response.headers)
@@ -358,6 +349,37 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
 
     private companion object {
         val PLACEHOLDER = Regex("""\$\{(secret\.)?([A-Za-z0-9_]+)\}""")
+    }
+}
+
+
+/**
+ * Cookie jar of one script replay, on [java.net.CookieManager]: a cookie is only sent back to
+ * the domain and path it was set for, `Secure` cookies only over HTTPS, and at most
+ * [MAX_COOKIES] cookies of at most [MAX_COOKIE_LENGTH] characters are kept.
+ */
+internal class ReplayCookieJar {
+    private val manager = java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ORIGINAL_SERVER)
+
+    /** Stores the `Set-Cookie` headers of a response to [url]; returns the values kept (to redact them). */
+    fun store(url: URI, setCookies: List<String>): List<String> {
+        val accepted = setCookies.filter { header ->
+            val pair = header.substringBefore(';')
+            val name = pair.substringBefore('=').trim()
+            name.isNotEmpty() && name.length <= 128 && pair.length <= MAX_COOKIE_LENGTH
+        }
+        if (accepted.isEmpty()) return emptyList()
+        runCatching { manager.put(url, mapOf("Set-Cookie" to accepted)) }
+        val store = manager.cookieStore
+        while (store.cookies.size > MAX_COOKIES) store.remove(null, store.cookies.first())
+        return accepted.map { it.substringBefore(';').substringAfter('=', "").trim() }.filter { it.isNotEmpty() }
+    }
+
+    /** The `Cookie` header for a request to [url], or null. */
+    fun header(url: URI): String? = runCatching { manager.get(url, emptyMap())["Cookie"] }.getOrNull()
+        ?.filter { it.isNotBlank() }?.joinToString("; ")?.takeIf { it.isNotEmpty() }
+
+    companion object {
         const val MAX_COOKIES = 30
         const val MAX_COOKIE_LENGTH = 4_096
     }

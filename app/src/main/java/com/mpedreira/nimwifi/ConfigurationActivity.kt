@@ -41,7 +41,10 @@ class ConfigurationActivity : AppCompatActivity() {
         if (uri != null) importer.import(uri)
     }
     private val exportFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null) export(uri)
+        if (uri != null) export(uri, shareable = false)
+    }
+    private val exportShareable = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) export(uri, shareable = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,6 +94,7 @@ class ConfigurationActivity : AppCompatActivity() {
         content.addView(buttons(
             getString(R.string.config_import) to { openFile.launch(arrayOf("application/json", "application/zip", "application/octet-stream", "*/*")) },
             getString(R.string.config_export) to { exportFile.launch("wiprober-config.json") },
+            getString(R.string.config_export_shareable) to { exportShareable.launch("nimwifi-config-summary.json") },
             getString(R.string.config_remove) to ::confirmRemoveAll
         ))
 
@@ -252,11 +256,12 @@ class ConfigurationActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun export(uri: android.net.Uri) {
+    private fun export(uri: android.net.Uri, shareable: Boolean) {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val json = ConfigExport.toJson(store.load(), throughputStore.load(), guideStore.load(), store.credentialNames())
+                    val json = if (shareable) ConfigExport.toShareable(store.load(), throughputStore.load(), guideStore.load())
+                    else ConfigExport.toJson(store.load(), throughputStore.load(), guideStore.load(), store.credentialNames())
                     requireNotNull(contentResolver.openOutputStream(uri, "wt")) { "Cannot open the destination" }.use {
                         it.write(json.toByteArray(Charsets.UTF_8))
                     }

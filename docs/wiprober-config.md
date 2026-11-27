@@ -57,6 +57,13 @@ Credentials live in a separate `credentials.json`, never in the definitions, and
 - URLs must not contain `user:password@`.
 - Credential, cookie and extracted values are redacted from hosts and errors; exported paths come from the definition, without the query string and with token-like segments shown as `…`.
 
+## Operational profile and shareable summary (mejora 17)
+
+- The **operational profile** (what the phone uses, and *Export* on the configuration screen) keeps definitions with `${secret.NAME}` references: besides script headers and variables, sensitive query parameters of HTTP test URLs and of the Internet speed-test URLs are moved to the credentials on import. Credential values are never exported.
+- *Export shareable summary* writes `nimwifi-config-summary.json` to share in a ticket or with a colleague: aliases, test types, methods, counts and endpoints with hosts replaced by `host-N` placeholders; no paths, query strings, header values, bodies, cookies, expected texts or credential values. It cannot be imported.
+- Errors and traces are redacted the same way everywhere: URL credentials, query strings, `Authorization`/token-like values and every known credential, cookie or extracted value become `…`.
+- **Replay cookies** use `java.net.CookieManager` per script run: a cookie is only sent back to the domain and path it was set for, `Secure` cookies only over HTTPS, at most 30 cookies of up to 4 KB. TLS keeps certificate and host-name verification.
+
 ## HAR recordings
 
 Only GET/HEAD requests of documents, XHR and fetch are kept (at most 50); request bodies and responses are never imported. By default:

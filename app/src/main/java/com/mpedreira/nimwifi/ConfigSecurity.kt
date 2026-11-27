@@ -180,3 +180,38 @@ object HttpOutcomePolicy {
         return "${target.host ?: request.host}${Sensitive.displayPath(target.rawPath)}"
     }
 }
+
+
+/** Mejora 17: `${secret.NAME}` references outside scripts (test URLs, throughput URLs). */
+object SecretRefs {
+    private val REFERENCE = Regex("""\$\{secret\.([A-Za-z0-9_]+)\}""")
+
+    fun names(text: String?): Set<String> = text?.let { REFERENCE.findAll(it).map { m -> m.groupValues[1] }.toSet() }.orEmpty()
+
+    fun resolve(text: String, credentials: Map<String, String>): String = REFERENCE.replace(text) { match ->
+        credentials[match.groupValues[1]]
+            ?: throw MeasurementException(ErrorCodes.MISSING_CREDENTIAL, "credential ${match.groupValues[1]} not provided")
+    }
+
+    /**
+     * Replaces the values of sensitive query parameters of [url] by references, storing them in
+     * [credentials] under `<prefix>_<param>`; returns the URL to keep in the definition.
+     */
+    fun extract(url: String, prefix: String, credentials: MutableMap<String, String>, moved: MutableList<String>): String {
+        val query = url.substringAfter('?', "").substringBefore('#')
+        if (query.isEmpty()) return url
+        val params = query.split('&').filter(String::isNotEmpty).joinToString("&") { param ->
+            val key = param.substringBefore('=')
+            val value = param.substringAfter('=', "")
+            if (value.isNotEmpty() && "\${" !in value && Sensitive.isSensitiveQuery(java.net.URLDecoder.decode(key, "UTF-8"))) {
+                val name = Sensitive.credentialName(prefix, key)
+                credentials[name] = java.net.URLDecoder.decode(value, "UTF-8")
+                moved += "query $key ($prefix)"
+                "$key=${Sensitive.reference(name)}"
+            } else {
+                param
+            }
+        }
+        return url.substringBefore('?') + "?" + params
+    }
+}

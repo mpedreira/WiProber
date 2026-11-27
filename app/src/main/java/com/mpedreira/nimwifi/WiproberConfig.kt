@@ -228,14 +228,24 @@ object WiproberConfigParser {
         if (tests != null && tests.map { it.name }.toSet().size != tests.size) {
             throw ConfigException("Test names must be unique")
         }
+        // Mejora 17: secrets in test and throughput URLs move to the credentials as well.
+        val extra = (split?.credentials ?: credentials).orEmpty().toMutableMap()
+        val moved = split?.moved.orEmpty().toMutableList()
+        val safeTests = tests?.map { test -> test.url?.let { test.copy(url = SecretRefs.extract(it, test.name, extra, moved)) } ?: test }
+        val safeThroughput = root.obj("throughput")?.let(::parseThroughput)?.let { t ->
+            t.copy(
+                internetDownloadUrl = SecretRefs.extract(t.internetDownloadUrl, "internet_download", extra, moved),
+                internetUploadUrl = SecretRefs.extract(t.internetUploadUrl, "internet_upload", extra, moved)
+            )
+        }
         return WiproberConfig(
-            throughput = root.obj("throughput")?.let(::parseThroughput),
+            throughput = safeThroughput,
             guide = root.obj("guide")?.let(::parseGuide),
-            tests = tests,
+            tests = safeTests,
             scripts = split?.scripts,
             roaming = root.obj("roaming")?.let(::parseRoaming),
-            credentials = split?.credentials ?: credentials,
-            stripped = split?.moved.orEmpty()
+            credentials = extra.takeIf { it.isNotEmpty() || credentials != null || split != null },
+            stripped = moved
         )
     }
 

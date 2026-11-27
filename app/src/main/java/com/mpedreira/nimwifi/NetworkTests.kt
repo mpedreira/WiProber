@@ -169,7 +169,9 @@ class NetworkTestRunner(
     /** DNS server port; tests point it at a local fake server. */
     private val dnsPort: Int = 53,
     /** Tracks sockets and ping processes so cancelling or a deadline closes them. */
-    private val control: MeasurementControl = MeasurementControl()
+    private val control: MeasurementControl = MeasurementControl(),
+    /** Mejora 17: `${secret.NAME}` values for test URLs (never written to results). */
+    private val credentials: Map<String, String> = emptyMap()
 ) {
     fun run(test: NetworkTest): NetworkTestResult {
         val start = network?.association()
@@ -345,7 +347,7 @@ class NetworkTestRunner(
             result = result.replace("\${dns}", link.dnsServers.firstOrNull()?.hostAddress
                 ?: throw MeasurementException(ErrorCodes.NO_DNS_SERVER, "no DNS server"))
         }
-        return result
+        return SecretRefs.resolve(result, credentials)
     }
 
     private fun elapsed(start: Long): Double = round1((System.nanoTime() - start) / 1_000_000.0)

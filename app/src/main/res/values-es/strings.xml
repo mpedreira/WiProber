@@ -381,4 +381,5 @@
     <string name="export_format_esx">Solo ESX</string>
     <string name="config_change_failed">No se ha cambiado la configuración: %1$s</string>
     <string name="config_corrupt">No se puede leer la configuración guardada (%1$s). No se usa; quítala y vuelve a importarla.</string>
+    <string name="config_export_shareable">Exportar resumen compartible</string>
 </resources>

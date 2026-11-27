@@ -75,13 +75,19 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                     network = network,
                     systemPing = NetworkTestRunner::runSystemPing,
                     clock = clock,
-                    control = control
+                    control = control,
+                    credentials = credentials
                 ),
                 scriptRunner = ScriptRunner(timedHttp, credentials),
                 clock = clock,
                 control = control
             )
-            runner.measure(settings, imported.enabledTests, imported.enabledScripts, listener)
+            // Credential references in the throughput URLs are resolved only here, for the run.
+            val resolved = settings.copy(
+                internetDownloadUrl = runCatching { SecretRefs.resolve(settings.internetDownloadUrl, credentials) }.getOrDefault(settings.internetDownloadUrl),
+                internetUploadUrl = runCatching { SecretRefs.resolve(settings.internetUploadUrl, credentials) }.getOrDefault(settings.internetUploadUrl)
+            )
+            runner.measure(resolved, imported.enabledTests, imported.enabledScripts, listener)
         } finally {
             control.clearRunDeadline()
             selected?.close()
