@@ -300,4 +300,9 @@
     <string name="config_writes_title">This profile sends write requests</string>
     <string name="config_writes_message">These steps replay POST/PUT/PATCH/DELETE requests at every point and may create or change real records:\n\n%1$s\n\nActivate them anyway?</string>
     <string name="config_writes_confirm">Activate with writes</string>
+    <string name="save_failed">The project could not be saved: %1$s</string>
+    <string name="save_retry">Retry</string>
+    <string name="survey_service_channel">Survey in progress</string>
+    <string name="survey_service_track">Continuous track in progress</string>
+    <string name="survey_service_tests">Active tests in progress</string>
 </resources>

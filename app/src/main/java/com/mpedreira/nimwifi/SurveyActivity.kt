@@ -75,6 +75,7 @@ class SurveyActivity : AppCompatActivity() {
     private var availableFloors: List<FloorOption> = emptyList()
     private var isProjectReady = false
     private var projectSaveJob: Job? = null
+    private var saveFailureSnackbar: com.google.android.material.snackbar.Snackbar? = null
     private var trackingStatusJob: Job? = null
     private var stopAndGoScanJob: Job? = null
     private var continuousScanLoopJob: Job? = null
@@ -115,6 +116,7 @@ class SurveyActivity : AppCompatActivity() {
             if (!blockingProjectOperation && canChangeFloor()) finish()
         }
         setupObservers()
+        setupBackgroundObservers()
         showFirstTimeWarningIfNeeded()
         val interruptedOperation = if (savedInstanceState != null) {
             viewModel.recoverAfterActivityRecreation()
@@ -154,6 +156,8 @@ class SurveyActivity : AppCompatActivity() {
         stopAndGoScanJob?.cancel()
         continuousScanLoopJob?.cancel()
         roamingJob?.cancel()
+        // Leaving the survey ends its tracks and runs (the ViewModel is cleared): stop the service.
+        if (isFinishing) SurveyForegroundService.update(applicationContext, null)
         progressDialog?.dismiss()
         progressDialog = null
         wifiScanner.close()
@@ -246,14 +250,6 @@ class SurveyActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 var previous = SurveyScreenState()
                 viewModel.screenState.collect { state ->
-                    val surveyChanged = state.scanPoints != previous.scanPoints ||
-                        state.continuousScanSessions != previous.continuousScanSessions ||
-                        state.notes != previous.notes ||
-                        state.metersPerUnit != previous.metersPerUnit ||
-                        state.skippedSuggestions != previous.skippedSuggestions ||
-                        state.activeRuns != previous.activeRuns ||
-                        state.plannedPoints != previous.plannedPoints
-
                     renderPointMarkers(state)
                     binding.pointsOverlay.setCompletedTracks(state.continuousScanSessions)
                     renderSurveyGuide(state)
@@ -340,7 +336,6 @@ class SurveyActivity : AppCompatActivity() {
 
                     updateSurveyModeUi(state)
                     updateButtonStates(state)
-                    if (surveyChanged) scheduleProjectSave()
                     previous = state
                 }
             }
@@ -1743,20 +1738,65 @@ class SurveyActivity : AppCompatActivity() {
         persistCurrentProject(SAVE_DEBOUNCE_MILLIS)
     }
 
+    /** Saves in the process-wide [ProjectAutosave] scope, so it also completes in the background. */
     private fun persistCurrentProject(delayMillis: Long = 0L) {
         val projectId = currentProjectId ?: return
         val floorId = currentFloorId ?: return
         val snapshot = createProjectSnapshot() ?: return
-        projectSaveJob = lifecycleScope.launch {
-            if (delayMillis > 0) delay(delayMillis)
-            val result = withContext(Dispatchers.IO) {
-                runCatching { projectRepository.saveProject(projectId, floorId, snapshot) }
+        val repository = projectRepository
+        projectSaveJob = ProjectAutosave.schedule(delayMillis) { repository.saveProject(projectId, floorId, snapshot) }
+    }
+
+    /**
+     * Collected for as long as the Activity exists (also while stopped): saves progressive test
+     * results and track changes in the background, keeps the foreground service in step with
+     * tracks/tests and warns when saving keeps failing.
+     */
+    private fun setupBackgroundObservers() {
+        lifecycleScope.launch {
+            var previous: SurveyScreenState? = null
+            viewModel.screenState.collect { state ->
+                val last = previous
+                if (last != null && surveyChanged(last, state)) scheduleProjectSave()
+                val reason = when {
+                    state.interaction is SurveyInteraction.ActiveTesting -> SurveyForegroundService.REASON_TESTS
+                    state.isTracking -> SurveyForegroundService.REASON_TRACK
+                    else -> null
+                }
+                val lastReason = last?.let {
+                    when {
+                        it.interaction is SurveyInteraction.ActiveTesting -> SurveyForegroundService.REASON_TESTS
+                        it.isTracking -> SurveyForegroundService.REASON_TRACK
+                        else -> null
+                    }
+                }
+                if (last == null || reason != lastReason) SurveyForegroundService.update(applicationContext, reason)
+                previous = state
             }
-            result.onFailure { error ->
-                Log.e("ProjectStorage", "Cannot save project", error)
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ProjectAutosave.failure.collect { failure ->
+                    saveFailureSnackbar?.dismiss()
+                    saveFailureSnackbar = failure?.let { reason ->
+                        com.google.android.material.snackbar.Snackbar
+                            .make(binding.root, getString(R.string.save_failed, reason), com.google.android.material.snackbar.Snackbar.LENGTH_INDEFINITE)
+                            .setAction(R.string.save_retry) { persistCurrentProject() }
+                            .also { it.show() }
+                    }
+                }
             }
         }
     }
+
+    private fun surveyChanged(previous: SurveyScreenState, state: SurveyScreenState): Boolean =
+        state.scanPoints != previous.scanPoints ||
+            state.continuousScanSessions != previous.continuousScanSessions ||
+            state.notes != previous.notes ||
+            state.metersPerUnit != previous.metersPerUnit ||
+            state.skippedSuggestions != previous.skippedSuggestions ||
+            state.activeRuns != previous.activeRuns ||
+            state.plannedPoints != previous.plannedPoints
 
     private fun createProjectSnapshot(): ProjectSnapshot? {
         return viewModel.projectSnapshot()
