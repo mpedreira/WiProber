@@ -97,8 +97,12 @@ class ThroughputRunner(
         val port: Int,
         val downloadEndpoint: String?,
         val uploadEndpoint: String?,
-        /** The upload goes to another host than the pre-checked one: it is evaluated on its own. */
+        /** Mejora 14: the upload endpoint (scheme, host, effective port) differs: it is pre-checked and measured on its own. */
         val uploadIndependent: Boolean,
+        val downloadEndpointId: String? = null,
+        val uploadEndpointId: String? = null,
+        val uploadHost: String? = null,
+        val uploadPort: Int? = null,
         val download: (InetAddress) -> TransferResult,
         /** Null when the direction is not configured. */
         val upload: ((InetAddress?) -> TransferResult)?
@@ -283,7 +287,12 @@ class ThroughputRunner(
             port = download?.let(::defaultPort) ?: 443,
             downloadEndpoint = download?.host,
             uploadEndpoint = upload?.host,
-            uploadIndependent = upload?.host != null && upload.host != download?.host,
+            // Same host on another port (or scheme) is another endpoint.
+            uploadIndependent = upload?.host != null && endpointId(upload) != download?.let(::endpointId),
+            downloadEndpointId = download?.takeIf { it.host != null }?.let(::endpointId),
+            uploadEndpointId = upload?.takeIf { it.host != null }?.let(::endpointId),
+            uploadHost = upload?.host,
+            uploadPort = upload?.let(::defaultPort),
             download = { http.download(config.internetDownloadUrl, config.internetDurationSeconds) },
             upload = if (upload == null) null else {
                 { http.upload(config.internetUploadUrl, config.internetDurationSeconds) }
@@ -292,6 +301,9 @@ class ThroughputRunner(
     }
 
     private fun defaultPort(uri: URI): Int = if (uri.port > 0) uri.port else if (uri.scheme.equals("http", true)) 80 else 443
+
+    /** Identity of an HTTP endpoint: scheme, host and effective port (never the path or query). */
+    private fun endpointId(uri: URI): String = "${uri.scheme.lowercase()}://${uri.host}:${defaultPort(uri)}"
 
     private fun connectionInfo(association: Association?): WifiConnectionInfo? {
         if (association == null || !association.known) return null
@@ -361,6 +373,9 @@ class ThroughputRunner(
         val stats = latency!!.value
         val latencyCode = latency!!.code ?: if (stats != null && stats.failures > 0) ErrorCodes.PARTIAL_LOSS else null
 
+        var uploadPrecheckValue: LatencyStats? = null
+        var uploadPrecheckCode: String? = null
+
         /** The result with the phases finished so far; the others stay pending. */
         fun assemble(download: PhaseOutcome<TransferResult>?, upload: PhaseOutcome<TransferResult>?, end: Association?) = base.copy(
             ssidEnd = end?.ssid,
@@ -384,6 +399,11 @@ class ThroughputRunner(
             upSeconds = upload?.value?.seconds?.let(::round),
             uploadStatus = upload?.status ?: RunStatus.PENDING,
             uploadErrorCode = upload?.code,
+            downloadEndpointId = target.downloadEndpointId ?: target.downloadEndpoint,
+            uploadEndpointId = target.uploadEndpointId ?: target.uploadEndpoint,
+            downloadPrecheckAddress = stats?.address?.hostAddress,
+            uploadPrecheckAddress = if (target.uploadIndependent) uploadPrecheckValue?.address?.hostAddress else stats?.address?.hostAddress,
+            uploadPrecheckErrorCode = if (target.uploadIndependent) uploadPrecheckCode else null,
             error = errors.joinToString("; ").ifEmpty { null }
         )
         report(keys[0], latency!!.status, latencyCode, assemble(null, null, null))
@@ -407,6 +427,7 @@ class ThroughputRunner(
         report(keys[1], download.status, download.code, assemble(download, null, null))
 
         val uploadTest = target.upload
+        var uploadPrecheck: PhaseOutcome<LatencyStats>?
         val upload: PhaseOutcome<TransferResult> = when {
             uploadTest == null -> {
                 errors += "upload: not configured"
@@ -417,6 +438,26 @@ class ThroughputRunner(
                 errors += "upload skipped: server unreachable"
                 tracker.skip(target.alias, ThroughputPhase.UPLOAD)
                 PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.SKIPPED_UNREACHABLE)
+            }
+            target.uploadIndependent && target.uploadHost != null -> {
+                // Its own pre-check (and IP), even when the download endpoint failed.
+                uploadPrecheck = phase("upload precheck", errors, LATENCY_DEADLINE_MILLIS) {
+                    tcpLatency(target.uploadHost, target.uploadPort ?: 443, samples = 1)
+                }
+                uploadPrecheckValue = uploadPrecheck.value
+                uploadPrecheckCode = uploadPrecheck.code
+                if (uploadPrecheck.value == null) {
+                    errors += "upload skipped: server unreachable"
+                    tracker.skip(target.alias, ThroughputPhase.UPLOAD)
+                    PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.SKIPPED_UNREACHABLE)
+                } else {
+                    var outcome: PhaseOutcome<TransferResult>? = null
+                    tracker.run(target.alias, ThroughputPhase.UPLOAD, target.durationSeconds) {
+                        outcome = phase("upload", errors, transferDeadline) { uploadTest(uploadPrecheckValue?.address) }
+                        outcome?.value?.let { toMbps(it.bitsPerSecond) }
+                    }
+                    outcome!!
+                }
             }
             else -> {
                 var outcome: PhaseOutcome<TransferResult>? = null
@@ -438,7 +479,7 @@ class ThroughputRunner(
      * handshake fails is abandoned for the next one; once one answers, all its samples are taken
      * and failed ones are counted, not discarded with the valid ones.
      */
-    private fun tcpLatency(host: String, port: Int): LatencyStats {
+    private fun tcpLatency(host: String, port: Int, samples: Int = LATENCY_SAMPLES): LatencyStats {
         val net = network ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI)
         val candidates = AddressPolicy.candidates(net.resolve(host))
         if (candidates.isEmpty()) throw MeasurementException(ErrorCodes.RESOLUTION_FAILED, "no address for the host")
@@ -459,7 +500,7 @@ class ThroughputRunner(
         }
         for (address in candidates) {
             val first = sample(address) ?: continue
-            val rest = (2..LATENCY_SAMPLES).map { sample(address) }
+            val rest = (2..samples).map { sample(address) }
             val ok = listOf(first) + rest.filterNotNull()
             return latencyStats(ok, rest.count { it == null }, address)
         }

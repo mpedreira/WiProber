@@ -158,3 +158,25 @@ data class ImportPreview(
         }
     }
 }
+
+
+/**
+ * Mejora 14: success of an HTTP service check. Without an expected status only 2xx succeeds; a
+ * 3xx is a visible [ErrorCodes.REDIRECT] (a redirect to a login page is not "the service works")
+ * unless the profile allows redirects or expects that exact status.
+ */
+object HttpOutcomePolicy {
+    fun problem(status: Int, expectStatus: Int?, allowRedirect: Boolean, location: String?): Pair<String, String>? = when {
+        expectStatus != null -> if (status == expectStatus) null else ErrorCodes.HTTP_STATUS to "status $status, expected $expectStatus"
+        status in 200..299 -> null
+        status in 300..399 -> if (allowRedirect) null else ErrorCodes.REDIRECT to "redirect $status to ${location ?: "?"}"
+        else -> ErrorCodes.HTTP_STATUS to "status $status"
+    }
+
+    /** Where a redirect goes, without query or token-like path segments. */
+    fun location(request: java.net.URI, headers: List<Pair<String, String>>): String? {
+        val raw = headers.lastOrNull { it.first.equals("Location", true) }?.second ?: return null
+        val target = runCatching { request.resolve(raw.trim()) }.getOrNull() ?: return null
+        return "${target.host ?: request.host}${Sensitive.displayPath(target.rawPath)}"
+    }
+}

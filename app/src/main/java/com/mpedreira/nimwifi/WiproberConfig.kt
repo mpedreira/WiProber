@@ -51,7 +51,9 @@ data class NetworkTest(
     val expectContains: String? = null,
     val enabled: Boolean = true,
     /** Exported alias; the stable identifier is [name]. */
-    val alias: String? = null
+    val alias: String? = null,
+    /** Mejora 14: a 3xx counts as success only when allowed (default: it is a visible `redirect`). */
+    val allowRedirect: Boolean = false
 ) {
     val displayAlias: String get() = alias?.takeIf { it.isNotBlank() } ?: name
 
@@ -125,7 +127,9 @@ data class HttpScriptStep(
     /** Text the response body must contain. */
     val expectContains: String? = null,
     /** Variables to read from a JSON response: name to path like `$.data.token` or `$.items[0].id`. */
-    val extract: Map<String, String> = emptyMap()
+    val extract: Map<String, String> = emptyMap(),
+    /** Mejora 14: a 3xx counts as success only when allowed or expected. */
+    val allowRedirect: Boolean = false
 ) {
     val isWrite: Boolean get() = method.uppercase() !in READ_METHODS
 
@@ -248,7 +252,8 @@ object WiproberConfigParser {
             expectStatus = json.int("expectStatus"),
             expectContains = json.string("expectContains"),
             enabled = json.bool("enabled") ?: true,
-            alias = json.string("alias")?.trim()?.take(60)
+            alias = json.string("alias")?.trim()?.take(60),
+            allowRedirect = json.bool("allowRedirect") ?: false
         )
         when (type) {
             NetworkTest.HTTP -> checkUrl(test.url ?: throw ConfigException("Test \"$name\" needs \"url\""), "Test \"$name\"")
@@ -329,7 +334,8 @@ object WiproberConfigParser {
             allowWrite = json.bool("allowWrite") ?: false,
             expectStatus = json.int("expectStatus"),
             expectContains = json.string("expectContains"),
-            extract = json.stringMap("extract")
+            extract = json.stringMap("extract"),
+            allowRedirect = json.bool("allowRedirect") ?: false
         )
         if (step.method !in SUPPORTED_METHODS) throw ConfigException("$where: unsupported method ${step.method}")
         if (step.isWrite && !step.allowWrite) {

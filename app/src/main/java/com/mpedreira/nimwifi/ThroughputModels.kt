@@ -47,6 +47,13 @@ data class ThroughputTestResult(
     val resolvedAddress: String? = null,
     val downloadEndpoint: String? = null,
     val uploadEndpoint: String? = null,
+    /** Mejora 14: endpoint identity `scheme://host:port` of each direction. */
+    val downloadEndpointId: String? = null,
+    val uploadEndpointId: String? = null,
+    /** IP the pre-check of each direction connected to (the transport's own IP is not observable). */
+    val downloadPrecheckAddress: String? = null,
+    val uploadPrecheckAddress: String? = null,
+    val uploadPrecheckErrorCode: String? = null,
     val rssi: Int? = null,
     val linkMbps: Int? = null,
     val rxLinkMbps: Int? = null,

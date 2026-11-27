@@ -54,7 +54,8 @@ data class PointDetails(
                 results.networkTests.orEmpty().forEach { t ->
                     val value = t.dnsMs ?: t.rttAvgMs ?: t.connectMs ?: t.totalMs
                     add("${t.alias ?: t.name} (${t.type}${t.method?.let { "/$it" } ?: ""}): " +
-                        if (t.ok) n(value, "ms") + (t.lossPct?.takeIf { it > 0 }?.let { " · ${it}%" } ?: "") else "⚠ ${t.errorCode ?: "error"}")
+                        (if (t.ok) n(value, "ms") + (t.lossPct?.takeIf { it > 0 }?.let { " · ${it}%" } ?: "") else "⚠ ${t.errorCode ?: "error"}") +
+                        (t.redirectLocation?.let { " → $it" } ?: ""))
                 }
                 results.scripts.orEmpty().forEach { s ->
                     val ok = s.steps.count { it.ok }

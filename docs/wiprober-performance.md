@@ -162,6 +162,10 @@ Every test of a run uses one Wi-Fi network (`networkId`): names resolve with its
 
 Several reasons are separated by `; `.
 
+### Endpoints per direction (mejora 14)
+
+Each direction is identified by `downloadEndpointId` / `uploadEndpointId` = `scheme://host:effective-port` (the same host on another port is another endpoint). When the upload endpoint differs it gets its **own pre-check** and is measured even if the download pre-check failed; `downloadPrecheckAddress` / `uploadPrecheckAddress` are the IPs the pre-checks connected to (`uploadPrecheckErrorCode` when it failed). The IP the HTTP transport itself used is not observable without changing the destination or breaking TLS, so it is not reported. Times and statuses are per direction.
+
 ## 3b. Network tests (`networkTests`)
 
 Configured in the imported file (`tests` section, see the [example](wiprober-config.example.json)); they run at each point after the throughput tests. Each row also carries the position fields of section 3 (`surveyId`, `floorPlanId`, `floorName`, `x`, `y`, `measuredAt`).
@@ -196,6 +200,8 @@ Configured in the imported file (`tests` section, see the [example](wiprober-con
 | `error` | string \| null | Why it failed: `no reply`, `2 of 10 lost`, `NXDOMAIN`, `SERVFAIL`, `status 500, expected 200`, `no default gateway`… |
 
 `${gateway}` and `${dns}` in the configuration are replaced with the default gateway and first DNS server the Wi-Fi network assigned.
+
+**Redirect policy (HTTP tests and script steps).** Without `expectStatus` only 2xx succeeds; a 3xx fails with `redirect` and `redirectLocation` (host and path, no query) shows where it went, e.g. a login page. It counts as success only with `"allowRedirect": true` or when `expectStatus` is that status. Earlier versions accepted any 3xx.
 
 ## 3c. HTTP scripts (`scriptRuns`, `scriptSteps`)
 

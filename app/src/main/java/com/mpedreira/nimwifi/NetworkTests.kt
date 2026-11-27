@@ -45,6 +45,8 @@ data class NetworkTestResult(
     val totalMs: Double? = null,
     val status: Int? = null,
     val bytes: Long? = null,
+    /** Mejora 14: where a 3xx pointed (host and path, no query). */
+    val redirectLocation: String? = null,
     val sent: Int? = null,
     val received: Int? = null,
     val lossPct: Double? = null,
@@ -273,18 +275,18 @@ class NetworkTestRunner(
         )
         return try {
             val response = http.execute("GET", url, emptyMap(), null, timing)
+            val location = HttpOutcomePolicy.location(url, response.headers)
+            val outcome = HttpOutcomePolicy.problem(response.status, test.expectStatus, test.allowRedirect, location)
             val problems = buildList {
-                val expected = test.expectStatus
-                if (expected != null && response.status != expected) add("status ${response.status}, expected $expected")
-                if (expected == null && response.status !in 200..399) add("status ${response.status}")
+                outcome?.let { add(it.second) }
                 test.expectContains?.let { if (it !in String(response.body, Charsets.UTF_8)) add("expected text not found") }
             }
             withTiming(base).copy(
-                status = response.status, bytes = response.bytes,
+                status = response.status, bytes = response.bytes, redirectLocation = location,
                 ok = problems.isEmpty(), error = problems.joinToString("; ").ifEmpty { null },
                 errorCode = when {
                     problems.isEmpty() -> null
-                    problems.any { it.startsWith("status") } -> ErrorCodes.HTTP_STATUS
+                    outcome != null -> outcome.first
                     else -> ErrorCodes.EXPECTATION_FAILED
                 }
             )

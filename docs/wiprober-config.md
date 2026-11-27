@@ -68,6 +68,10 @@ Only GET/HEAD requests of documents, XHR and fetch are kept (at most 50); reques
 
 The preview lists what was stripped and which credentials must be provided for those steps to run.
 
+## Redirects
+
+HTTP tests and script steps succeed on 2xx. A 3xx is reported as `redirect` (with where it went) unless the test or step sets `"allowRedirect": true` or `expectStatus` to that code — so a redirect to a login page is never counted as a working service by accident.
+
 ## Requests at run time
 
 - Every connection is bound to the Wi-Fi network; without Wi-Fi nothing is sent and each script is exported as `skipped` (`not_on_wifi`).

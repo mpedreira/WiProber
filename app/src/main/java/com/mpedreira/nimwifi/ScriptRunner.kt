@@ -56,7 +56,9 @@ data class ScriptStepResult(
     val bytes: Long? = null,
     val error: String? = null,
     /** Structured cause ([ErrorCodes]); [error] never repeats secrets. */
-    val errorCode: String? = null
+    val errorCode: String? = null,
+    /** Mejora 14: where a 3xx pointed (host and path, no query). */
+    val redirectLocation: String? = null
 )
 
 /**
@@ -311,9 +313,9 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
             }
             val text = String(response.body, StandardCharsets.UTF_8)
             val problems = mutableListOf<Pair<String, String>>()
-            val expected = step.expectStatus
-            if (expected != null && response.status != expected) problems += ErrorCodes.HTTP_STATUS to "status ${response.status}, expected $expected"
-            if (expected == null && response.status !in 200..399) problems += ErrorCodes.HTTP_STATUS to "status ${response.status}"
+            val location = HttpOutcomePolicy.location(url, response.headers)
+            HttpOutcomePolicy.problem(response.status, step.expectStatus, step.allowRedirect, location)?.let { problems += it }
+            result = result.copy(redirectLocation = location?.let { redactor().redact(it) })
             step.expectContains?.let { if (it !in text) problems += ErrorCodes.EXPECTATION_FAILED to "expected text not found" }
             step.extract.forEach { (name, path) ->
                 val value = JsonPathLite.read(text, path)

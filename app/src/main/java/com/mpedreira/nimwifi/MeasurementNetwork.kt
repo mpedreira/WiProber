@@ -109,6 +109,8 @@ object ErrorCodes {
     const val PARTIAL_LOSS = "partial_loss"
     const val NO_REPLY = "no_reply"
     const val CANCELLED = "cancelled"
+    /** A 3xx the profile did not expect (e.g. a redirect to a login page). */
+    const val REDIRECT = "redirect"
     /** Not started: what was left of the point's budget could not fit the phase. */
     const val BUDGET_EXHAUSTED = "budget_exhausted"
     /** The user skipped the tests of this point ("Skip point"). */
