@@ -82,7 +82,9 @@ object SurveyReport {
         val outages: List<Event>,
         val runs: List<RunFact> = emptyList(),
         val marks: List<MapMark> = emptyList(),
-        val sources: SourceCounts? = null
+        val sources: SourceCounts? = null,
+        /** Verdict against the configured [Requirements]; null without requirements. */
+        val verdict: SsidVerdict? = null
     ) {
         fun count(state: String) = points.count { it.state == state }
         /** Mejora 11: good primary signal and a second AP of the same SSID above the secondary threshold. */
@@ -123,6 +125,7 @@ object SurveyReport {
         /** Mejora 10: results without an identified association, with their reasons. */
         val unknownAssociation: SsidSection? = null,
         val image: PlanImage? = null,
+        val floorPlanId: String? = null,
         /** rc.2 · 5: floor totals, each event counted once although it is shown in two sections. */
         val totals: FloorTotals = FloorTotals(0, 0)
     )
@@ -145,8 +148,12 @@ object SurveyReport {
         val profile: String = SignalProfile.DEFAULT.id,
         val floors: List<FloorSection>,
         /** Mejora 1: what the selection covers (all runs, one run, an interval). */
-        val selectionDetail: String? = null
-    )
+        val selectionDetail: String? = null,
+        /** Requirements applied to the verdict; null (or empty): no verdict, the report as before. */
+        val requirements: Requirements? = null
+    ) {
+        val hasVerdict: Boolean get() = requirements != null && !requirements.isEmpty
+    }
 
     fun build(
         snapshot: ProjectExportSnapshot,
@@ -160,8 +167,11 @@ object SurveyReport {
         fromMs: Long? = null,
         toMs: Long? = null,
         /** Floor plans by floorPlanId, to draw the maps. */
-        planImages: Map<String, PlanImage> = emptyMap()
+        planImages: Map<String, PlanImage> = emptyMap(),
+        /** Thresholds of the verdict; without them the report is exactly as before. */
+        requirements: Requirements? = null
     ): Model = Model(
+        requirements = requirements?.takeUnless { it.isEmpty },
         profile = profile,
         selectionDetail = listOfNotNull(runId?.let { "run $it" },
             if (fromMs != null || toMs != null) "runs from ${fromMs ?: "start"} to ${toMs ?: "end"}" else null).joinToString("; ").ifEmpty { null },
@@ -182,11 +192,12 @@ object SurveyReport {
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
                     survey.scanPoints.filter(SsidCoverage::isValidScan).groupBy(ScanPoint::pointId).filterValues { it.size > 1 }.keys).size,
-                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events) },
+                ssids = ssidsFor(survey, chosenSsid).map { ssid -> section(ssid, survey, runs, weakDbm, selection, SignalProfile.of(profile).secondaryDbm, events, requirements, floor.name) },
                 // Also without active tests: roaming events without any SSID are shown there once.
                 unknownAssociation = section(null, survey, runs, weakDbm, selection, events = events)
                     .takeIf { it.runs.isNotEmpty() || it.apChanges.isNotEmpty() || it.outages.isNotEmpty() },
                 image = planImages[floor.esxFloorPlanId],
+                floorPlanId = floor.esxFloorPlanId,
                 // rc.3 · 4: from the floor's events, not from the (limited) sections shown.
                 totals = FloorTotals.of(events)
             )
@@ -267,7 +278,7 @@ object SurveyReport {
     }
 
     private fun section(ssid: String?, survey: ProjectSnapshot, runs: List<ActiveRun>, weakDbm: Int, selection: RunSelection, secondaryDbm: Int = SignalProfile.of(null).secondaryDbm,
-                        events: List<FloorEvent> = floorEvents(survey, runs)): SsidSection {
+                        events: List<FloorEvent> = floorEvents(survey, runs), requirements: Requirements? = null, floorName: String = ""): SsidSection {
         val labels = SsidCoverage.labels(survey.scanPoints, survey.plannedPoints)
         // Runs of this SSID: by the SSID of their results, else by the network observed before the run.
         val ssidRuns = runs.filter { run ->
@@ -382,7 +393,13 @@ object SurveyReport {
         val outages = mine.filter { it.outage }.map { it.event }
         val coverage = ssid?.let { SsidCoverage.points(survey.scanPoints, survey.plannedPoints, it, weakDbm, secondaryDbm, survey.activeRuns) }.orEmpty()
         val (marks, sources) = if (ssid != null) marks(ssid, survey, coverage, weakDbm) else emptyList<MapMark>() to null
-        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources)
+        // The verdict judges this SSID alone, with the same points, runs and events as the section.
+        val verdict = if (ssid != null && requirements != null && !requirements.isEmpty) {
+            VerdictEvaluator.evaluate(requirements, ssid, floorName, coverage, runs, events, weakDbm)
+        } else {
+            null
+        }
+        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources, verdict)
     }
 
     /**
@@ -471,6 +488,7 @@ object SurveyReport {
         append("<b>Degradación de red</b>: la conexión Wi-Fi sigue pero rinde menos (descarga, subida o latencia peores, pérdidas parciales). ")
         append("<b>Caída hacia un servicio</b>: un destino concreto deja de responder (fallos o códigos de error en sus pruebas) aunque la red siga; mírese junto a los cambios de AP del mismo intervalo. ")
         append("El iPerf3 privado mide la red hasta el servidor propio; Internet incluye además la salida a Internet; los servicios internos son las aplicaciones (DNS, ping, TCP, HTTP, scripts).</div>")
+        if (model.hasVerdict) appendVerdictSummary(this, model, ::e)
         model.floors.forEach { floor ->
             append("<h2>Planta: ").append(e(floor.floorName)).append("</h2>")
             append("<p class=\"muted\">").append(floor.runs).append(" ejecuciones de pruebas; ").append(floor.remeasuredPoints).append(" puntos medidos más de una vez.</p>")
@@ -480,6 +498,97 @@ object SurveyReport {
             (floor.ssids + listOfNotNull(floor.unknownAssociation)).forEach { section -> appendSection(this, model, floor, section, ::e) }
         }
         append("</body></html>")
+    }
+
+    private fun stateClass(state: String) = when (state) {
+        VerdictState.PASS -> "ok"
+        VerdictState.FAIL -> "bad"
+        else -> "weak"
+    }
+
+    private fun num(value: Double?): String = when {
+        value == null -> "—"
+        value % 1.0 == 0.0 -> value.toLong().toString()
+        else -> "%.1f".format(java.util.Locale.ROOT, value)
+    }
+
+    /** Verdict at the top: per floor and SSID, with explicit denominators, then the requirements applied. */
+    private fun appendVerdictSummary(out: StringBuilder, model: Model, e: (Any?) -> String) = with(out) {
+        append("<h2>Veredicto</h2><p class=\"muted\">Cada SSID se juzga por separado. «Cumple» sobre los puntos con datos válidos de todos los requisitos; ")
+        append("«faltan datos»: puntos planificados, importados sin RF local o con pruebas omitidas, canceladas o sin valor. Un dato ausente nunca cuenta como 0.</p>")
+        append("<table><tr><th>Planta</th><th>SSID</th><th>Veredicto</th><th>Puntos que cumplen</th><th>Faltan datos</th><th>Comprobaciones de planta</th></tr>")
+        model.floors.forEach { floor ->
+            floor.ssids.mapNotNull { it.verdict }.forEach { v ->
+                append("<tr><td>").append(e(floor.floorName)).append("</td><td>").append(e(v.ssid)).append("</td><td class=\"").append(stateClass(v.state)).append("\">")
+                    .append(VerdictState.label(v.state)).append("</td><td>")
+                append(v.passing).append(" de ").append(v.withData).append(" con datos")
+                v.percentPassing?.let { append(" (").append(num(it)).append(" %)") }
+                append("</td><td>").append(v.missing).append(" de ").append(v.points.size).append("</td><td>")
+                append(e(v.floorChecks.filter { it.state != VerdictState.PASS }.joinToString("; ") { "${it.label}: ${VerdictState.label(it.state)}" }.ifEmpty { if (v.floorChecks.isEmpty()) "—" else "cumplen" }))
+                append("</td></tr>")
+            }
+        }
+        append("</table>")
+        val r = model.requirements ?: return@with
+        append("<details><summary>Requisitos aplicados</summary><ul>")
+        append("<li>Señal: AP más fuerte ≥ ").append(model.weakDbm).append(" dBm (perfil «").append(e(model.profile)).append("»)</li>")
+        r.throughput.orEmpty().forEach { t ->
+            append("<li>iPerf3 privado «").append(e(t.alias)).append("»: ")
+            append(listOfNotNull(t.minDownMbps?.let { "bajada ≥ ${num(it)} Mbit/s" }, t.minUpMbps?.let { "subida ≥ ${num(it)} Mbit/s" },
+                t.maxLatencyMedianMs?.let { "latencia ≤ ${num(it)} ms" }, t.maxLatencyP95Ms?.let { "latencia p95 ≤ ${num(it)} ms" },
+                t.maxLatencyLossPct?.let { "pérdida de muestras ≤ ${num(it)} %" }).joinToString(", ").let(e)).append("</li>")
+        }
+        r.networkTests.orEmpty().forEach { t ->
+            append("<li>Prueba «").append(e(t.alias)).append("»: ")
+            append(listOfNotNull(t.maxMedianMs?.let { "tiempo ≤ ${num(it)} ms" }, t.maxP95Ms?.let { "p95 ≤ ${num(it)} ms" },
+                t.maxLossPct?.let { "pérdida ≤ ${num(it)} %" }).joinToString(", ").let(e)).append("</li>")
+        }
+        r.roaming?.let { ro ->
+            append("<li>Roaming: ").append(listOfNotNull(ro.maxOutageMs?.let { "ventana de pérdida ≤ $it ms" },
+                ro.maxLossesPerFloor?.let { "como mucho $it pérdidas por planta" }).joinToString(", ").let(e)).append("</li>")
+        }
+        append("<li>Un corte de alcance durante la medición de un punto hace que no cumpla, aunque su mediana sea buena.</li></ul></details>")
+    }
+
+    /** Per section: the points that fail and why (requirement, value, threshold, run). */
+    private fun appendVerdict(out: StringBuilder, v: SsidVerdict, e: (Any?) -> String) = with(out) {
+        append("<p>Veredicto: <b class=\"").append(stateClass(v.state)).append("\">").append(VerdictState.label(v.state)).append("</b> — ")
+            .append(v.passing).append(" de ").append(v.withData).append(" puntos con datos cumplen")
+        v.percentPassing?.let { append(" (").append(num(it)).append(" %)") }
+        append("; faltan datos en ").append(v.missing).append(".")
+        if (v.outagesOnFloor > 0) {
+            append(" <b>").append(v.outagesOnFloor).append(" pérdidas de alcance</b> en esta planta")
+            if (v.floorChecks.none { it.requirement.startsWith("roaming:") }) append(" (sin requisito de roaming configurado: no deciden el veredicto, véase «Roaming y cortes»)")
+            append(".")
+        }
+        append("</p>")
+        val failing = v.points.filter { it.state == VerdictState.FAIL }
+        val floorFails = v.floorChecks.filter { it.state != VerdictState.PASS }
+        if (failing.isNotEmpty() || floorFails.isNotEmpty()) {
+            append("<h4>Qué no cumple</h4><table><tr><th>Punto</th><th>Requisito</th><th>Valor</th><th>Umbral</th><th>Ejecución</th><th>Detalle</th></tr>")
+            failing.forEach { p ->
+                p.failed.forEach { c ->
+                    append("<tr><td>").append(e(p.label)).append("</td><td>").append(e(c.label)).append("</td><td>").append(e(num(c.value) + " " + c.unit))
+                        .append("</td><td>").append(e(c.threshold?.let { num(it) + " " + c.unit } ?: "—")).append("</td><td>").append(e(c.runId ?: "—"))
+                        .append("</td><td>").append(e(c.reason ?: "—")).append("</td></tr>")
+                }
+            }
+            floorFails.forEach { c ->
+                append("<tr><td>planta</td><td>").append(e(c.label)).append("</td><td>").append(e(num(c.value) + " " + c.unit)).append("</td><td>")
+                    .append(e(c.threshold?.let { num(it) + " " + c.unit } ?: "—")).append("</td><td>—</td><td>")
+                    .append(e(VerdictState.label(c.state) + (c.reason?.let { " · $it" } ?: ""))).append("</td></tr>")
+            }
+            append("</table>")
+        }
+        val missing = v.points.filter { it.state == VerdictState.MISSING }
+        if (missing.isNotEmpty()) {
+            append("<details><summary>Puntos sin datos suficientes (").append(missing.size).append(")</summary><ul>")
+            missing.forEach { p ->
+                append("<li>").append(e(p.label)).append(": ")
+                    .append(e(p.checks.filter { it.state == VerdictState.MISSING }.joinToString("; ") { "${it.label} — ${it.reason ?: "sin dato"}" })).append("</li>")
+            }
+            append("</ul></details>")
+        }
     }
 
     private fun time(ms: Long?): String = ms?.let {
@@ -494,6 +603,7 @@ object SurveyReport {
             append("<ul><li>Cambios de AP: ").append(section.apChanges.size).append(" · pérdidas de alcance: ").append(section.outages.size).append("</li></ul>")
         } else {
             append("<h3>SSID «").append(e(section.ssid)).append("» · ").append(e(floor.floorName)).append("</h3>")
+            section.verdict?.let { appendVerdict(this, it, e) }
             // Summary
             append("<ul><li class=\"ok\">Buena señal: ").append(section.count(PointState.OK)).append(" puntos</li>")
             append("<li class=\"weak\">Señal débil medida: ").append(section.count(PointState.WEAK)).append(" puntos</li>")

@@ -97,7 +97,9 @@ data class SsidVerdict(
     val state: String,
     val points: List<PointVerdict>,
     /** Checks of the SSID on the floor as a whole (p95, roaming outages and their count). */
-    val floorChecks: List<Check>
+    val floorChecks: List<Check>,
+    /** Reachability/association losses of this SSID on the floor, always reported (also without a roaming requirement). */
+    val outagesOnFloor: Int = 0
 ) {
     val passing: Int get() = points.count { it.state == VerdictState.PASS }
     val failing: Int get() = points.count { it.state == VerdictState.FAIL }
@@ -128,7 +130,7 @@ object VerdictEvaluator {
         val points = coverage.map { point -> pointVerdict(requirements, ssid, point, runs.filter { it.pointId == point.pointId }, ssidEvents, weakDbm) }
         val floorChecks = floorChecks(requirements, ssid, coverage, runs, ssidEvents)
         val state = VerdictState.combine(points.map { it.state } + floorChecks.map { it.state })
-        return SsidVerdict(ssid, floorName, state, points, floorChecks)
+        return SsidVerdict(ssid, floorName, state, points, floorChecks, ssidEvents.filter { it.outage }.distinctBy { it.event.key }.size)
     }
 
     private fun pointVerdict(

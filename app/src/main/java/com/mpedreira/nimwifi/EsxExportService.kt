@@ -81,15 +81,18 @@ class EsxExportService(
             // Mejora 18: the whole artifact is staged and verified before the destination is opened.
             val artifact = if (bundleEsxName != null) {
                 val now = System.currentTimeMillis()
-                val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot)
+                // The verdict's thresholds come from the active configuration profile (none: no verdict).
+                val requirements = runCatching { WiproberConfigStore(appContext).load().requirements }.getOrNull()
+                val reportModel = SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
+                    planImages = planImages(snapshot), requirements = requirements)
+                val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot, reportModel)
                 bundleArchive.outputStream().buffered().use { output ->
                     PerformanceExport.writeBundle(
                         output,
                         bundleEsxName,
                         completeArchive,
                         PerformanceExport.toBytes(performance),
-                        SurveyReport.html(SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
-                            planImages = planImages(snapshot))).toByteArray(Charsets.UTF_8)
+                        SurveyReport.html(reportModel).toByteArray(Charsets.UTF_8)
                     )
                 }
                 StagedExport.verifyZip(bundleArchive, setOf(bundleEsxName, PerformanceExport.FILE_NAME, SurveyReport.FILE_NAME), nestedEsx = bundleEsxName)

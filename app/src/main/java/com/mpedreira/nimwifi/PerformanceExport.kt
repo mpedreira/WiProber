@@ -34,7 +34,8 @@ object PerformanceExport {
     /** Where a run's point is: exact floor-plan pixels plus the survey of the run's scan in this ESX, if any. */
     private class Position(val surveyId: String?, val floorPlanId: String, val floorName: String, val x: Float, val y: Float)
 
-    fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot? = null): JsonObject {
+    /** [verdict]: the report model; with requirements its verdict is exported (additive `requirements`/`verdicts`). */
+    fun build(report: EkahauReport?, esxFileName: String, generatedAt: Long, snapshot: ProjectExportSnapshot? = null, verdict: SurveyReport.Model? = null): JsonObject {
         val rows = JsonArray()
         val networkRows = JsonArray()
         val scriptRows = JsonArray()
@@ -126,7 +127,52 @@ object PerformanceExport {
                     }
                 }
             })
+            // Only with requirements: without them the file is exactly as before.
+            verdict?.takeIf { it.hasVerdict }?.let { model ->
+                add("requirements", GsonBuilder().create().toJsonTree(model.requirements).asJsonObject.apply {
+                    addProperty("rssiThresholdDbm", model.weakDbm)
+                    addProperty("signalProfile", model.profile)
+                })
+                add("verdicts", JsonArray().apply {
+                    model.floors.forEach { floor -> floor.ssids.mapNotNull { it.verdict }.forEach { add(verdictRow(floor, it)) } }
+                })
+            }
         }
+    }
+
+    private fun checkRow(c: Check) = JsonObject().apply {
+        addProperty("requirement", c.requirement)
+        addProperty("label", c.label)
+        addProperty("state", c.state)
+        addProperty("value", c.value)
+        addProperty("threshold", c.threshold)
+        addProperty("unit", c.unit)
+        addProperty("runId", c.runId)
+        addProperty("reason", c.reason)
+    }
+
+    private fun verdictRow(floor: SurveyReport.FloorSection, v: SsidVerdict) = JsonObject().apply {
+        addProperty("floorName", floor.floorName)
+        addProperty("floorPlanId", floor.floorPlanId)
+        addProperty("ssid", v.ssid)
+        addProperty("state", v.state)
+        addProperty("pointsPassing", v.passing)
+        addProperty("pointsFailing", v.failing)
+        addProperty("pointsMissingData", v.missing)
+        addProperty("pointsWithData", v.withData)
+        addProperty("percentPassing", v.percentPassing)
+        addProperty("outagesOnFloor", v.outagesOnFloor)
+        add("floorChecks", JsonArray().apply { v.floorChecks.forEach { add(checkRow(it)) } })
+        add("points", JsonArray().apply {
+            v.points.forEach { p ->
+                add(JsonObject().apply {
+                    addProperty("pointId", p.pointId)
+                    addProperty("label", p.label)
+                    addProperty("state", p.state)
+                    add("checks", JsonArray().apply { p.checks.forEach { add(checkRow(it)) } })
+                })
+            }
+        })
     }
 
     fun toBytes(json: JsonObject): ByteArray =
