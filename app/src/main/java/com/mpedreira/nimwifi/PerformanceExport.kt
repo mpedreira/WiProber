@@ -147,6 +147,30 @@ object PerformanceExport {
                     }
                 }
             })
+            // Every radio of the floors' local scans with its inferred identity (additive).
+            verdict?.floors?.filter { it.inventory.isNotEmpty() }?.takeIf { it.isNotEmpty() }?.let { floors ->
+                add("apInventory", JsonArray().apply {
+                    floors.forEach { floor ->
+                        floor.inventory.forEach { ap ->
+                            add(JsonObject().apply {
+                                addProperty("floorName", floor.floorName)
+                                addProperty("floorPlanId", floor.floorPlanId)
+                                addProperty("bssid", ap.bssid)
+                                add("ssids", JsonArray().apply { ap.ssids.forEach(::add) })
+                                addProperty("frequencyMhz", ap.frequency)
+                                addProperty("band", WifiBands.of(ap.frequency))
+                                addProperty("channel", ap.frequency?.let(WifiChannels::channel))
+                                addProperty("bestRssi", ap.bestRssi)
+                                addProperty("inferredVendor", ap.identity.vendor)
+                                addProperty("inferredVendorSource", ap.identity.vendorSource)
+                                addProperty("inferredModel", ap.identity.model)
+                                addProperty("advertisedName", ap.identity.advertisedName)
+                                addProperty("locallyAdministered", ap.identity.locallyAdministered)
+                            })
+                        }
+                    }
+                })
+            }
             // Only with requirements: without them the file is exactly as before.
             verdict?.takeIf { it.hasVerdict }?.let { model ->
                 add("requirements", GsonBuilder().create().toJsonTree(model.requirements).asJsonObject.apply {

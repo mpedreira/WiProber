@@ -69,7 +69,8 @@ class VerdictReportTest {
         assertTrue(plain.floors.single().ssids.all { it.verdict == null })
         val before = PerformanceExport.build(null, "Site.esx", t0, snapshot)
         val after = PerformanceExport.build(null, "Site.esx", t0, snapshot, plain)
-        assertEquals(before, after)
+        // The AP inventory (always, additive) is the only addition; the verdict is not there.
+        assertEquals(before, after.deepCopy().apply { remove("apInventory") })
         assertFalse(after.has("verdicts") || after.has("requirements"))
     }
 
@@ -80,7 +81,7 @@ class VerdictReportTest {
         val json = PerformanceExport.build(null, "Site.esx", t0, snapshot, model)
         // Additive: every key of before is there with the same value.
         before.keySet().forEach { assertEquals(it, before[it], json[it]) }
-        assertEquals(before.keySet() + setOf("requirements", "verdicts"), json.keySet())
+        assertEquals(before.keySet() + setOf("requirements", "verdicts", "apInventory"), json.keySet())
         val applied = json.getAsJsonObject("requirements")
         assertEquals(50.0, applied.getAsJsonArray("throughput")[0].asJsonObject["minDownMbps"].asDouble, 0.0)
         assertEquals(-67, applied["rssiThresholdDbm"].asInt)

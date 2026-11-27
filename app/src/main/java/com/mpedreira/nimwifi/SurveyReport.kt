@@ -128,6 +128,8 @@ object SurveyReport {
         val floorPlanId: String? = null,
         /** How this floor's radios are named: user's table, band and channel. */
         val apLabels: ApLabels = ApLabels.EMPTY,
+        /** Every radio of the floor's local scans with its inferred AP identity. */
+        val inventory: List<ApInventoryEntry> = emptyList(),
         /** rc.2 · 5: floor totals, each event counted once although it is shown in two sections. */
         val totals: FloorTotals = FloorTotals(0, 0)
     )
@@ -175,7 +177,9 @@ object SurveyReport {
         /** Thresholds of the verdict; without them the report is exactly as before. */
         requirements: Requirements? = null,
         /** The user's BSSID → AP table; unmapped BSSIDs are shown as they are. */
-        apNames: ApDirectory = ApDirectory.EMPTY
+        apNames: ApDirectory = ApDirectory.EMPTY,
+        /** IEEE OUI registry for the inferred vendor; empty: only what beacons advertise. */
+        ouiRegistry: OuiRegistry = OuiRegistry.EMPTY
     ): Model = Model(
         requirements = requirements?.takeUnless { it.isEmpty },
         apNames = apNames,
@@ -194,9 +198,11 @@ object SurveyReport {
                     (fromMs == null || run.startedAt >= fromMs) && (toMs == null || run.startedAt <= toMs)
             }
             val events = floorEvents(survey, runs)
-            val apLabels = ApLabels(apNames, ApLabels.radios(survey))
+            val inventory = ApInventory.of(survey, apNames, ouiRegistry)
+            val apLabels = ApLabels(apNames, ApLabels.radios(survey), inventory.associate { it.bssid to it.identity })
             FloorSection(
                 apLabels = apLabels,
+                inventory = inventory,
                 floorName = floor.name,
                 runs = survey.activeRuns.size,
                 remeasuredPoints = (survey.activeRuns.groupBy(ActiveRun::pointId).filterValues { it.size > 1 }.keys +
@@ -504,9 +510,27 @@ object SurveyReport {
             append("<p>Total de la planta: ").append(floor.totals.apChanges).append(" cambios de AP · ").append(floor.totals.outages)
                 .append(" pérdidas de alcance (cada evento una vez, aunque aparezca en dos SSID).</p>")
             if (floor.ssids.isEmpty()) append("<p>Sin escaneos Wi-Fi locales en esta planta.</p>")
+            appendInventory(this, floor, ::e)
             (floor.ssids + listOfNotNull(floor.unknownAssociation)).forEach { section -> appendSection(this, model, floor, section, ::e) }
         }
         append("</body></html>")
+    }
+
+    /** Every radio heard on the floor, with what was inferred about its AP (collapsed). */
+    private fun appendInventory(out: StringBuilder, floor: FloorSection, e: (Any?) -> String) = with(out) {
+        if (floor.inventory.isEmpty()) return@with
+        append("<details><summary>Inventario de APs de la planta (").append(floor.inventory.size).append(" radios)</summary>")
+        append("<p class=\"muted\">Cada BSSID es una radio medida; nunca se agrupan. Marca y modelo son <b>inferidos</b> (se indica la fuente: WPS anunciado por el AP, ")
+        append("asignación OUI del IEEE o IE de fabricante); un BSSID administrado localmente no tiene OUI de fabricante. El nombre de la tabla de AP es el que importaste.</p>")
+        append("<table><tr><th>BSSID</th><th>Nombre (tabla)</th><th>SSID</th><th>Banda</th><th>Mejor dBm</th><th>Marca inferida</th><th>Modelo</th><th>Nombre anunciado</th></tr>")
+        floor.inventory.forEach { ap ->
+            val id = ap.identity
+            append("<tr><td>").append(e(ap.bssid)).append("</td><td>").append(e(ap.userName ?: "—")).append("</td><td>").append(e(ap.ssids.joinToString(", ").ifEmpty { "(oculto)" }))
+                .append("</td><td>").append(e(WifiBands.radio(ap.frequency) ?: "—")).append("</td><td>").append(e(ap.bestRssi ?: "—")).append("</td><td>")
+                .append(e(id.vendor?.let { "$it (${ApIdentity.sourceLabel(id.vendorSource)})" } ?: if (id.locallyAdministered) "— (BSSID administrado localmente)" else "—"))
+                .append("</td><td>").append(e(id.model?.let { "$it (por WPS)" } ?: "—")).append("</td><td>").append(e(id.advertisedName ?: "—")).append("</td></tr>")
+        }
+        append("</table></details>")
     }
 
     /** `2,4 GHz −58 · 5 GHz −71` for one point; `—` when no band was heard. */

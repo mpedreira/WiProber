@@ -96,7 +96,14 @@ class ApDirectory(entries: List<ApName>) {
  * band and channel when the floor's local scans or tests saw it. [radios]: normalized BSSID →
  * frequency (MHz). Display only.
  */
-class ApLabels(val directory: ApDirectory = ApDirectory.EMPTY, private val radios: Map<String, Int> = emptyMap()) {
+class ApLabels(
+    val directory: ApDirectory = ApDirectory.EMPTY,
+    private val radios: Map<String, Int> = emptyMap(),
+    /** Inferred AP identity by normalized BSSID ([ApIdentity]); shown marked as inferred. */
+    private val identities: Map<String, ApIdentityInfo> = emptyMap()
+) {
+    fun identity(bssid: String?): ApIdentityInfo? = Bssids.normalize(bssid)?.let(identities::get)
+
     fun frequency(bssid: String?): Int? = Bssids.normalize(bssid)?.let(radios::get)
 
     fun band(bssid: String?): String? = WifiBands.of(frequency(bssid))
@@ -104,7 +111,7 @@ class ApLabels(val directory: ApDirectory = ApDirectory.EMPTY, private val radio
     /** `AP-P3-04 (aa:bb:… · 5 GHz c36)`, `aa:bb:… (2,4 GHz c6)` or the BSSID alone. */
     fun label(bssid: String?): String? {
         bssid ?: return null
-        val details = listOfNotNull(WifiBands.radio(frequency(bssid)))
+        val details = listOfNotNull(WifiBands.radio(frequency(bssid)), identity(bssid)?.shortVendor?.let { "$it (inferido)" })
         val name = directory.name(bssid)
         return when {
             name != null -> "$name (" + (listOf(bssid) + details).joinToString(" · ") + ")"

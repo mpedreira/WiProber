@@ -86,7 +86,7 @@ class EsxExportService(
                 val imported = runCatching { WiproberConfigStore(appContext).load() }.getOrNull()
                 val apNames = imported?.apDirectory ?: ApDirectory.EMPTY
                 val reportModel = SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
-                    planImages = planImages(snapshot), requirements = imported?.requirements, apNames = apNames)
+                    planImages = planImages(snapshot), requirements = imported?.requirements, apNames = apNames, ouiRegistry = ouiRegistry())
                 val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot, reportModel, apNames)
                 bundleArchive.outputStream().buffered().use { output ->
                     PerformanceExport.writeBundle(
@@ -110,6 +110,11 @@ class EsxExportService(
             bundleArchive.delete()
         }
     }
+
+    /** The bundled IEEE OUI registry (inferred vendors), read once; empty if it cannot be read. */
+    private fun ouiRegistry(): OuiRegistry = registry ?: runCatching {
+        appContext.resources.openRawResource(R.raw.oui_registry).use(OuiRegistry::read)
+    }.getOrDefault(OuiRegistry.EMPTY).also { registry = it }
 
     private fun writeCompleteExport(
         snapshot: ProjectExportSnapshot,
@@ -266,6 +271,9 @@ class EsxExportService(
     }.toMap()
 
     internal companion object {
+        /** The bundled OUI registry, read once per process. */
+        @Volatile private var registry: OuiRegistry? = null
+
         private const val SCALE_EPSILON = 1e-12
         private const val REPORT_MAP_MAX_SIDE = 1_600
 
