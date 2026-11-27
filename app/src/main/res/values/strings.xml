@@ -249,10 +249,15 @@
     <string name="throughput_cancel_tests">Cancel tests</string>
     <string name="throughput_cancelling">Cancelling… finished phases are kept</string>
     <string name="last_template_undone">Last imported point template removed</string>
-    <string name="action_map_ssid">Map SSID (passive coverage)…</string>
+    <string name="action_map_ssid">Primary network (SSID and band)…</string>
     <string name="action_point_template">Import point template…</string>
-    <string name="map_ssid_title">SSID shown on the map and first in the report</string>
     <string name="map_ssid_automatic">Automatic (most widely detected)</string>
+    <string name="map_network_title">Primary network on the map (SSID and band), also first in the report</string>
+    <string name="map_network_all_bands">%1$s · all bands</string>
+    <string name="map_network_band">%1$s · %2$s</string>
+    <string name="band_24">2.4 GHz</string>
+    <string name="band_5">5 GHz</string>
+    <string name="band_6">6 GHz</string>
     <string name="map_ssid_selected">Map: %1$s. Green = good signal, orange = weak signal measured, red with a cross = SSID not detected in a valid scan, hollow = no local measurement. Signal is the strongest AP of this SSID in the scan (not necessarily the connected AP); circles are an approximate influence area.</string>
     <string name="point_actions_title">Point %1$s</string>
     <string name="point_measure_here">Measure at this point (scan + tests)</string>

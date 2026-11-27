@@ -402,6 +402,7 @@ object WiproberConfigParser {
             spacingMeters = json.double("spacingMeters") ?: d.spacingMeters,
             coverageRadiusMeters = json.double("coverageRadiusMeters") ?: d.coverageRadiusMeters,
             ssidFilter = json.string("ssid") ?: d.ssidFilter,
+            bandFilter = json.string("band")?.trim()?.lowercase()?.removeSuffix("ghz")?.trim()?.replace(',', '.') ?: d.bandFilter,
             profile = json.string("profile") ?: d.profile
         ).sanitized()
     }

@@ -55,6 +55,12 @@ data class PointCoverage(
 data class BandSignal(val band: String, val bssid: String, val rssi: Int, val frequency: Int)
 
 /**
+ * The primary network the map shows: an SSID and, optionally, one band (null = every band).
+ * Each (SSID, band) is judged on its own, like each SSID.
+ */
+data class MapNetwork(val ssid: String, val band: String? = null)
+
+/**
  * Per-SSID point classification. Each SSID is evaluated on its own: a strong guest network
  * never makes a point look covered for the operational one.
  */
@@ -74,6 +80,26 @@ object SsidCoverage {
         return counts.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).map { it.key }
     }
 
+    /**
+     * Networks the map can show, most widely detected SSID first: each SSID with every band,
+     * then each band it was heard in on this floor (local scans only).
+     */
+    fun networks(scanPoints: List<ScanPoint>, sessions: List<ContinuousScanSession> = emptyList()): List<MapNetwork> {
+        val bands = mutableMapOf<String, MutableSet<String>>()
+        fun add(n: WifiNetworkInfo) { WifiBands.of(n.frequency)?.let { if (n.ssid.isNotEmpty()) bands.getOrPut(n.ssid) { mutableSetOf() } += it } }
+        scanPoints.filter(::isValidScan).forEach { p -> p.wifiNetworks.forEach(::add) }
+        sessions.filterNot { it.importedFromEsx }.forEach { s -> s.scanResults.forEach { r -> r.wifiNetworks.forEach(::add) } }
+        return ssids(scanPoints, sessions).flatMap { ssid ->
+            listOf(MapNetwork(ssid)) + WifiBands.ORDER.filter { it in bands[ssid].orEmpty() }.map { MapNetwork(ssid, it) }
+        }
+    }
+
+    /** The primary network: the chosen SSID (and band), else the most widely detected SSID in every band. */
+    fun selectedNetwork(chosen: String, band: String?, scanPoints: List<ScanPoint>, sessions: List<ContinuousScanSession>): MapNetwork? {
+        val explicit = chosen.trim().ifEmpty { null }
+        return explicit?.let { MapNetwork(it, band?.takeIf { b -> b in WifiBands.ORDER }) } ?: ssids(scanPoints, sessions).firstOrNull()?.let { MapNetwork(it) }
+    }
+
     /** The SSID to show: the chosen one, else the most widely detected; null when nothing was scanned. */
     fun selected(chosen: String, scanPoints: List<ScanPoint>, sessions: List<ContinuousScanSession>): String? =
         chosen.trim().ifEmpty { null } ?: ssids(scanPoints, sessions).firstOrNull()
@@ -87,7 +113,9 @@ object SsidCoverage {
         ssid: String,
         weakDbm: Int = DEFAULT_WEAK_DBM,
         secondaryDbm: Int = SignalProfile.DEFAULT.secondaryDbm,
-        runs: List<ActiveRun> = emptyList()
+        runs: List<ActiveRun> = emptyList(),
+        /** Only this band decides the state (the primary network is SSID + band); null = every band. */
+        band: String? = null
     ): List<PointCoverage> {
         val labels = labels(scanPoints, planned)
         val byPoint = scanPoints.filter { it.pointId != null }.groupBy { it.pointId!! }
@@ -99,8 +127,10 @@ object SsidCoverage {
             val ranked = latest?.wifiNetworks.orEmpty().filter { it.ssid == ssid }
                 .groupBy { it.bssid.lowercase() }.values.map { list -> list.maxBy(WifiNetworkInfo::level) }
                 .sortedByDescending(WifiNetworkInfo::level)
-            val strongest = ranked.firstOrNull()
-            val second = ranked.getOrNull(1)
+            // With a band, only that band's APs of the SSID decide the state and the second AP.
+            val inBand = if (band == null) ranked else ranked.filter { WifiBands.of(it.frequency) == band }
+            val strongest = inBand.firstOrNull()
+            val second = inBand.getOrNull(1)
             val bands = ranked.groupBy { WifiBands.of(it.frequency) }.filterKeys { it != null }
                 .map { (band, list) -> list.maxBy(WifiNetworkInfo::level).let { BandSignal(band!!, it.bssid, it.level, it.frequency) } }
                 .sortedBy { WifiBands.ORDER.indexOf(it.band) }

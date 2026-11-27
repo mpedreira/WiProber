@@ -42,6 +42,7 @@ object ConfigExport {
                 addProperty("spacingMeters", guide.spacingMeters)
                 addProperty("coverageRadiusMeters", guide.coverageRadiusMeters)
                 addProperty("ssid", guide.ssidFilter)
+                if (guide.bandFilter.isNotEmpty()) addProperty("band", guide.bandFilter)
                 addProperty("profile", guide.profile)
             })
             imported.roaming?.let { roaming ->

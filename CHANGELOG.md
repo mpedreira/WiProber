@@ -6,6 +6,7 @@ nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (M
 
 ### Added
 - **Bands in the report**: 2.4, 5 and 6 GHz are told apart inside each SSID (per-band summary, *Por banda* column, band and channel next to every AP, band changes marked). Optional `requirements.bands` asks for a minimum signal in one band.
+- **Primary network on the map = SSID + band**: the map menu lets you choose an SSID in every band or in one band (2.4, 5 or 6 GHz); the coverage gradient and the point colours use only that network (`guide.band` in the configuration).
 - **Inferred AP vendor and model**: from the AP's WPS data, the BSSID's IEEE OUI (registry bundled) or a vendor element, always marked as inferred with its source; per-floor AP inventory in the report and `apInventory` in the export. BSSIDs are never grouped.
 
 ### Changed

@@ -121,15 +121,27 @@ object PointActionsDialogs {
         }.getOrNull()
     }
 
-    /** Single choice among the SSIDs scanned on the floor; "automatic" = the most widely detected. */
-    fun showSsidPicker(context: Context, ssids: List<String>, current: String, onChosen: (String) -> Unit) {
-        val automatic = context.getString(R.string.map_ssid_automatic)
-        val items = listOf(automatic) + ssids
-        val checked = ssids.indexOf(current).let { if (it < 0) 0 else it + 1 }
+    /** `Ops · 5 GHz`, `Ops · all bands`. */
+    fun networkLabel(context: Context, network: MapNetwork): String = when (network.band) {
+        null -> context.getString(R.string.map_network_all_bands, network.ssid)
+        else -> context.getString(R.string.map_network_band, network.ssid, context.getString(when (network.band) {
+            WifiBands.B24 -> R.string.band_24
+            WifiBands.B5 -> R.string.band_5
+            else -> R.string.band_6
+        }))
+    }
+
+    /**
+     * The primary network (SSID + band) of the map: "automatic" (the most widely detected SSID,
+     * every band), an SSID in every band, or an SSID in one band.
+     */
+    fun showNetworkPicker(context: Context, networks: List<MapNetwork>, current: MapNetwork?, onChosen: (MapNetwork?) -> Unit) {
+        val items = listOf(context.getString(R.string.map_ssid_automatic)) + networks.map { networkLabel(context, it) }
+        val checked = current?.let { networks.indexOf(it) }?.takeIf { it >= 0 }?.plus(1) ?: 0
         MaterialAlertDialogBuilder(context)
-            .setTitle(R.string.map_ssid_title)
+            .setTitle(R.string.map_network_title)
             .setSingleChoiceItems(items.toTypedArray(), checked) { dialog, which ->
-                onChosen(if (which == 0) "" else ssids[which - 1])
+                onChosen(if (which == 0) null else networks[which - 1])
                 dialog.dismiss()
             }
             .setNegativeButton(android.R.string.cancel, null)

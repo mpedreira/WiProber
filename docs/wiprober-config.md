@@ -22,6 +22,8 @@ Since 4.0.0-rc.2 the run is bound to the **network approved in that check** (its
 
 `guide.profile` sets when a point's signal is weak on the map and in the report: `pda` (handheld scanners, −67 dBm, second AP −72 dBm, default), `voz` (voice, −67/−67) or `datos` (data, −70/−75). The same profiles as the wifianalisys report; they can also be chosen in the survey-guide settings.
 
+**Primary network (SSID and band).** `guide.ssid` and `guide.band` (`2.4`, `5` or `6`; empty or absent = every band) choose the network the map is coloured by; on the phone, survey menu → *Primary network (SSID and band)…*, which lists each SSID in every band and in each band it was heard in on the floor. The coverage gradient and the point colours (good / weak / not detected) then use only that SSID's APs in that band: a point covered on 2.4 GHz but not on 5 GHz shows as not covered for *SSID · 5 GHz*. Another SSID or band never fills the gaps. A band without an SSID is ignored; *Automatic* keeps the most widely detected SSID in every band. The report still covers every SSID, with its per-band breakdown.
+
 ## Configuration ZIP and comments
 
 A configuration ZIP holds `wiprober-config.json` and, optionally, `.har` recordings: each one becomes one more script (with the HAR rules below). Other files (a README) are ignored. In any imported JSON, keys starting with `_` are comments (`"_comment": "…"`), also inside tests, steps, headers and credentials. Opening a configuration file or ZIP from a file manager imports it with the same preview.

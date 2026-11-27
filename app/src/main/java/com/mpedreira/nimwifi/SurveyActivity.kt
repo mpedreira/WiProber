@@ -367,16 +367,20 @@ class SurveyActivity : AppCompatActivity() {
                 }
                 R.id.action_map_ssid -> {
                     val state = viewModel.screenState.value
-                    PointActionsDialogs.showSsidPicker(
+                    val settings = surveyGuideStore.load()
+                    // The primary network is SSID + band; "automatic" keeps the most detected SSID, every band.
+                    PointActionsDialogs.showNetworkPicker(
                         this,
-                        SsidCoverage.ssids(state.scanPoints, state.continuousScanSessions),
-                        surveyGuideStore.load().ssidFilter
-                    ) { ssid ->
-                        surveyGuideStore.save(surveyGuideStore.load().copy(ssidFilter = ssid))
+                        SsidCoverage.networks(state.scanPoints, state.continuousScanSessions),
+                        settings.ssidFilter.ifBlank { null }?.let { MapNetwork(it, settings.band) }
+                    ) { network ->
+                        surveyGuideStore.save(surveyGuideStore.load().copy(ssidFilter = network?.ssid.orEmpty(), bandFilter = network?.band.orEmpty()))
                         val current = viewModel.screenState.value
                         renderSurveyGuide(current)
                         renderPointMarkers(current)
-                        mapSsid(current)?.let { Toast.makeText(this, getString(R.string.map_ssid_selected, it), Toast.LENGTH_LONG).show() }
+                        mapNetwork(current)?.let {
+                            Toast.makeText(this, getString(R.string.map_ssid_selected, PointActionsDialogs.networkLabel(this, it)), Toast.LENGTH_LONG).show()
+                        }
                     }
                     true
                 }
@@ -518,12 +522,17 @@ class SurveyActivity : AppCompatActivity() {
     }
 
     /** SSID the map shows: the chosen one, else the most widely detected on this floor. */
-    private fun mapSsid(state: SurveyScreenState): String? =
-        SsidCoverage.selected(surveyGuideStore.load().ssidFilter, state.scanPoints, state.continuousScanSessions)
+    private fun mapSsid(state: SurveyScreenState): String? = mapNetwork(state)?.ssid
+
+    /** The primary network (SSID + band) the map is coloured by. */
+    private fun mapNetwork(state: SurveyScreenState): MapNetwork? = surveyGuideStore.load().let { settings ->
+        SsidCoverage.selectedNetwork(settings.ssidFilter, settings.band, state.scanPoints, state.continuousScanSessions)
+    }
 
     /** Points coloured by their state for the map SSID; planned points as hollow rings. */
     private fun renderPointMarkers(state: SurveyScreenState) {
-        val ssid = mapSsid(state)
+        val network = mapNetwork(state)
+        val ssid = network?.ssid
         binding.pointsOverlay.setScanPoints(emptyList())
         binding.pointsOverlay.setPointMarkers(
             if (ssid == null) {
@@ -531,7 +540,7 @@ class SurveyActivity : AppCompatActivity() {
                     state.plannedPoints.map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED) }
             } else {
                 SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid, surveyGuideStore.load().signal.primaryDbm,
-                    surveyGuideStore.load().signal.secondaryDbm, state.activeRuns).map { PointsOverlayView.PointMarker(it.x, it.y, it.state, it.secondaryOk) } +
+                    surveyGuideStore.load().signal.secondaryDbm, state.activeRuns, band = network.band).map { PointsOverlayView.PointMarker(it.x, it.y, it.state, it.secondaryOk) } +
                     state.scanPoints.filter { it.pointId == null }.map { PointsOverlayView.PointMarker(it.x, it.y, null) }
             }
         )
@@ -585,7 +594,7 @@ class SurveyActivity : AppCompatActivity() {
             samples = if (showGuide) {
                 // One SSID at a time: another SSID's signal never fills this one's gaps.
                 // Recomputed only when its inputs change (mejora 18), not on progress-only updates.
-                mapSsid(state)?.let { coverageCache.samples(state.scanPoints, state.continuousScanSessions, it) }.orEmpty()
+                mapNetwork(state)?.let { coverageCache.samples(state.scanPoints, state.continuousScanSessions, it.ssid, it.band) }.orEmpty()
             } else {
                 emptyList()
             },
@@ -626,7 +635,7 @@ class SurveyActivity : AppCompatActivity() {
             R.string.guide_legend,
             formatGuideNumber(config.spacingMeters),
             formatGuideNumber(config.coverageRadiusMeters),
-            mapSsid(state) ?: getString(R.string.guide_legend_no_ssid),
+            mapNetwork(state)?.let { PointActionsDialogs.networkLabel(this, it) } ?: getString(R.string.guide_legend_no_ssid),
             formatGuideNumber(1.0 / scale)
         )
     }

@@ -12,16 +12,25 @@ data class SurveyGuideSettings(
     val coverageRadiusMeters: Double = DEFAULT_RADIUS_METERS,
     /** Only networks with this SSID count for the coverage colour; empty = every network. */
     val ssidFilter: String = "",
+    /**
+     * With [ssidFilter], only its APs in this band ([WifiBands]: `2.4`, `5`, `6`) colour the map:
+     * the primary network is SSID + band. Empty = every band (as before).
+     */
+    val bandFilter: String = "",
     /** Signal profile ([SignalProfile]) that decides when a point's signal is weak. */
     val profile: String = SignalProfile.DEFAULT.id
 ) {
     val signal: SignalProfile get() = SignalProfile.of(profile)
+
+    /** The primary network's band, or null for every band. */
+    val band: String? get() = bandFilter.ifEmpty { null }
 
     fun sanitized(): SurveyGuideSettings = copy(
         spacingMeters = spacingMeters.takeIf { it.isFinite() }?.coerceIn(1.0, 100.0) ?: DEFAULT_SPACING_METERS,
         coverageRadiusMeters = coverageRadiusMeters.takeIf { it.isFinite() }?.coerceIn(0.5, 50.0)
             ?: DEFAULT_RADIUS_METERS,
         ssidFilter = ssidFilter.trim(),
+        bandFilter = bandFilter.trim().takeIf { it in WifiBands.ORDER && ssidFilter.isNotBlank() }.orEmpty(),
         profile = SignalProfile.of(profile).id
     )
 
@@ -58,26 +67,29 @@ data class CoverageSample(val x: Float, val y: Float, val bestRssi: Int?)
  * immutable and replaced on change, so an identity check skips progress-only updates cheaply.
  */
 class CoverageSampleCache(
-    private val compute: (List<ScanPoint>, List<ContinuousScanSession>, String) -> List<CoverageSample> = SurveyGuide::coverageSamples
+    private val compute: (List<ScanPoint>, List<ContinuousScanSession>, String, String?) -> List<CoverageSample> =
+        { points, sessions, ssid, band -> SurveyGuide.coverageSamples(points, sessions, ssid, band) }
 ) {
     private var points: List<ScanPoint>? = null
     private var sessions: List<ContinuousScanSession>? = null
     private var ssid: String? = null
+    private var band: String? = null
     private var cached: List<CoverageSample> = emptyList()
 
     var computations = 0
         private set
 
-    fun samples(scanPoints: List<ScanPoint>, continuous: List<ContinuousScanSession>, ssidFilter: String): List<CoverageSample> {
-        val same = ssid == ssidFilter &&
+    fun samples(scanPoints: List<ScanPoint>, continuous: List<ContinuousScanSession>, ssidFilter: String, bandFilter: String? = null): List<CoverageSample> {
+        val same = ssid == ssidFilter && band == bandFilter &&
             (points === scanPoints || points == scanPoints) &&
             (sessions === continuous || sessions == continuous)
         if (!same) {
-            cached = compute(scanPoints, continuous, ssidFilter)
+            cached = compute(scanPoints, continuous, ssidFilter, bandFilter)
             computations++
             points = scanPoints
             sessions = continuous
             ssid = ssidFilter
+            band = bandFilter
         }
         return cached
     }
@@ -107,14 +119,16 @@ object SurveyGuide {
     fun coverageSamples(
         scanPoints: List<ScanPoint>,
         sessions: List<ContinuousScanSession>,
-        ssidFilter: String = ""
+        ssidFilter: String = "",
+        /** Only this band ([WifiBands]); null = every band. */
+        band: String? = null
     ): List<CoverageSample> = buildList {
-        scanPoints.filter(SsidCoverage::isValidScan).forEach { add(CoverageSample(it.x, it.y, bestRssi(it.wifiNetworks, ssidFilter))) }
+        scanPoints.filter(SsidCoverage::isValidScan).forEach { add(CoverageSample(it.x, it.y, bestRssi(it.wifiNetworks, ssidFilter, band))) }
         sessions.filterNot { it.importedFromEsx }.forEach { session ->
             val route = session.waypoints.sortedBy(RoutePointWrapper::timestamp)
             session.scanResults.forEach { scan ->
                 positionAt(route, scan.timestamp)?.let { (x, y) ->
-                    add(CoverageSample(x, y, bestRssi(scan.wifiNetworks, ssidFilter)))
+                    add(CoverageSample(x, y, bestRssi(scan.wifiNetworks, ssidFilter, band)))
                 }
             }
         }
@@ -235,9 +249,10 @@ object SurveyGuide {
         return hsvToArgb(120f * t.coerceIn(0f, 1f), 0.85f, 0.9f)
     }
 
-    private fun bestRssi(networks: List<WifiNetworkInfo>, ssidFilter: String): Int? =
+    private fun bestRssi(networks: List<WifiNetworkInfo>, ssidFilter: String, band: String? = null): Int? =
         networks.asSequence()
             .filter { ssidFilter.isEmpty() || it.ssid == ssidFilter }
+            .filter { band == null || WifiBands.of(it.frequency) == band }
             .maxOfOrNull(WifiNetworkInfo::level)
 
     /** Linear position on the route at [timestamp] (both relative to the session start). */

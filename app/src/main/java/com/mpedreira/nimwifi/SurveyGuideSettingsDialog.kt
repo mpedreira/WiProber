@@ -20,6 +20,7 @@ class SurveyGuideSettingsStore(context: Context) {
             spacingMeters = prefs.getFloat(SPACING, defaults.spacingMeters.toFloat()).toDouble(),
             coverageRadiusMeters = prefs.getFloat(RADIUS, defaults.coverageRadiusMeters.toFloat()).toDouble(),
             ssidFilter = prefs.getString(SSID, null) ?: defaults.ssidFilter,
+            bandFilter = prefs.getString(BAND, null) ?: defaults.bandFilter,
             profile = prefs.getString(PROFILE, null) ?: defaults.profile
         ).sanitized()
     }
@@ -31,6 +32,7 @@ class SurveyGuideSettingsStore(context: Context) {
             putFloat(SPACING, clean.spacingMeters.toFloat())
             putFloat(RADIUS, clean.coverageRadiusMeters.toFloat())
             putString(SSID, clean.ssidFilter)
+            putString(BAND, clean.bandFilter)
             putString(PROFILE, clean.profile)
         }
     }
@@ -41,6 +43,7 @@ class SurveyGuideSettingsStore(context: Context) {
         const val SPACING = "spacing_m"
         const val RADIUS = "radius_m"
         const val SSID = "ssid_filter"
+        const val BAND = "band_filter"
         const val PROFILE = "signal_profile"
     }
 }
