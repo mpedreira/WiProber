@@ -42,7 +42,9 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
         control: MeasurementControl,
         listener: RunListener
     ): PointThroughput = runCancellable(control, "active-tests") {
-        val network = wifiNetworks.select()
+        val selected = wifiNetworks.select()
+        // Name lookups never hold a phase longer than DNS_TIMEOUT_MILLIS, nor pile up (mejora 7).
+        val network: MeasurementNetwork? = selected?.let { BoundedResolveNetwork(it, BoundedCalls(DNS_TIMEOUT_MILLIS, name = "dns")) }
         try {
             control.startRunDeadline(ThroughputRunner.runDeadlineMillis(settings, imported.enabledTests, imported.enabledScripts))
             val beacons = scanResults.mapNotNull { result ->
@@ -81,7 +83,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
             runner.measure(settings, imported.enabledTests, imported.enabledScripts, listener)
         } finally {
             control.clearRunDeadline()
-            network?.close()
+            selected?.close()
         }
     }
 
@@ -161,6 +163,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
 
     private companion object {
         const val ROAMING_CONNECT_TIMEOUT_MILLIS = 1_000
+        const val DNS_TIMEOUT_MILLIS = 5_000L
     }
 }
 

@@ -672,6 +672,7 @@ class MainViewModel @JvmOverloads constructor(
         scanId: String?,
         phases: List<PhaseRecord>,
         profile: String?,
+        budgetMillis: Long? = null,
         executor: suspend (MeasurementControl, RunListener) -> PointThroughput
     ): String? {
         val state = _screenState.value
@@ -681,7 +682,7 @@ class MainViewModel @JvmOverloads constructor(
         val run = ActiveRun(
             runId = runId, pointId = pointId, scanId = scanId, startedAt = clock.now(),
             status = RunStatus.RUNNING, profile = profile, phases = phases,
-            x = position.x, y = position.y
+            x = position.x, y = position.y, budgetMillis = budgetMillis
         )
         _screenState.value = state.copy(
             activeRuns = state.activeRuns + run,

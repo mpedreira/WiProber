@@ -40,8 +40,13 @@ class ThroughputProgressDialog(
         }
     }
 
-    fun show() {
-        stepText.setText(R.string.throughput_progress_starting)
+    /** [budgetMillis]: the point's maximum duration, shown before the first phase. */
+    fun show(budgetMillis: Long? = null) {
+        stepText.text = if (budgetMillis != null) {
+            activity.getString(R.string.throughput_progress_budget, ((budgetMillis + 999) / 1_000).toInt())
+        } else {
+            activity.getString(R.string.throughput_progress_starting)
+        }
         phaseText.text = ""
         finishedText.visibility = View.GONE
         bar.isIndeterminate = true

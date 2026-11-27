@@ -159,6 +159,7 @@ class ThroughputRunner(
         tracker.run(test.displayAlias, ThroughputPhase.NETWORK_TEST, null, detail = test.type) {
             val runner = networkTests
             result = try {
+                control.checkBudget(networkTestDeadline(test))
                 control.phase(networkTestDeadline(test)) {
                     runner?.run(test) ?: NetworkTestResult(
                         name = test.name, type = test.type, target = null, method = null,
@@ -179,7 +180,12 @@ class ThroughputRunner(
             result?.takeIf { it.ok }?.let { it.dnsMs ?: it.rttAvgMs ?: it.totalMs }
         }
         val finished = result!!
-        report(testKey(test), if (finished.ok) RunStatus.COMPLETED else RunStatus.FAILED, finished.errorCode, finished)
+        val status = when {
+            finished.ok -> RunStatus.COMPLETED
+            finished.errorCode == ErrorCodes.BUDGET_EXHAUSTED -> RunStatus.SKIPPED
+            else -> RunStatus.FAILED
+        }
+        report(testKey(test), status, finished.errorCode, finished)
         return finished
     }
 
@@ -218,8 +224,24 @@ class ThroughputRunner(
             onResult = { result ->
                 tracker.finishStep(script.displayAlias, result)
                 soFar += result
-                report(scriptKey(script, index), if (result.ok) RunStatus.COMPLETED else RunStatus.FAILED, result.errorCode,
-                    base.copy(steps = soFar.toList()))
+                val status = when {
+                    result.ok -> RunStatus.COMPLETED
+                    result.errorCode == ErrorCodes.BUDGET_EXHAUSTED -> RunStatus.SKIPPED
+                    else -> RunStatus.FAILED
+                }
+                report(scriptKey(script, index), status, result.errorCode, base.copy(steps = soFar.toList()))
+            },
+            // Every step has its own deadline (mejora 7) and is not started without budget for it.
+            guard = { step, run ->
+                try {
+                    control.checkBudget(SCRIPT_STEP_DEADLINE_MILLIS)
+                    control.phase(SCRIPT_STEP_DEADLINE_MILLIS, run)
+                } catch (e: MeasurementCancelled) {
+                    throw e
+                } catch (e: MeasurementException) {
+                    ScriptStepResult(name = step.name, method = step.method, host = null, path = null,
+                        error = ErrorClassifier.detail(e), errorCode = e.code)
+                }
             }
         )
         return base.copy(bssidEnd = network?.association()?.bssid, steps = results)
@@ -463,6 +485,12 @@ class ThroughputRunner(
         if (network?.isAvailable() == false) {
             errors += "$label: ${ErrorCodes.WIFI_LOST}"
             return PhaseOutcome(null, RunStatus.FAILED, ErrorCodes.WIFI_LOST)
+        }
+        try {
+            control.checkBudget(deadlineMillis)
+        } catch (e: MeasurementException) {
+            errors += "$label: ${ErrorCodes.BUDGET_EXHAUSTED}"
+            return PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.BUDGET_EXHAUSTED)
         }
         return try {
             PhaseOutcome(control.phase(deadlineMillis, block), RunStatus.COMPLETED, null)

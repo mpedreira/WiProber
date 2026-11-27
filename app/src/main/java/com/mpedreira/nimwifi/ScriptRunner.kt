@@ -252,14 +252,16 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
     fun run(
         script: HttpScript,
         onStep: (index: Int, step: HttpScriptStep) -> Unit = { _, _ -> },
-        onResult: (ScriptStepResult) -> Unit = {}
+        onResult: (ScriptStepResult) -> Unit = {},
+        /** Wraps each step (deadline, budget); the default runs it as it is. */
+        guard: (HttpScriptStep, () -> ScriptStepResult) -> ScriptStepResult = { _, run -> run() }
     ): List<ScriptStepResult> {
         val variables = script.variables.toMutableMap()
         val cookies = mutableMapOf<String, MutableMap<String, String>>()
         val secrets = credentials.values.toMutableSet()
         return script.steps.mapIndexed { index, step ->
             onStep(index, step)
-            runStep(step, variables, cookies, secrets).also(onResult)
+            guard(step) { runStep(step, variables, cookies, secrets) }.also(onResult)
         }
     }
 

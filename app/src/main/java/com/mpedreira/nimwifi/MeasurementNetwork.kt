@@ -109,6 +109,8 @@ object ErrorCodes {
     const val PARTIAL_LOSS = "partial_loss"
     const val NO_REPLY = "no_reply"
     const val CANCELLED = "cancelled"
+    /** Not started: what was left of the point's budget could not fit the phase. */
+    const val BUDGET_EXHAUSTED = "budget_exhausted"
     /** The user skipped the tests of this point ("Skip point"). */
     const val SKIPPED_BY_USER = "skipped_by_user"
     const val INTERRUPTED = "interrupted"
@@ -130,7 +132,7 @@ object ErrorCodes {
 }
 
 /** A failure with a structured [code]; [message] is a safe, secret-free detail. */
-class MeasurementException(val code: String, message: String? = null, cause: Throwable? = null) :
+open class MeasurementException(val code: String, message: String? = null, cause: Throwable? = null) :
     IOException(message ?: code, cause)
 
 /**

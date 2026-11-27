@@ -11,6 +11,9 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
+/** A phase whose block returned after its deadline: the value is discarded. */
+class LateResult(deadlineMillis: Long) : MeasurementException(ErrorCodes.TIMEOUT, "phase deadline of $deadlineMillis ms reached; late result discarded")
+
 /** Thrown inside a run once it was cancelled; it is a [CancellationException] so it propagates. */
 class MeasurementCancelled(val reason: String) : CancellationException(reason)
 
@@ -30,6 +33,7 @@ class MeasurementControl(private val nanoTime: () -> Long = System::nanoTime) {
     @Volatile private var phaseTimedOut = false
     private var phaseTimer: ScheduledFuture<*>? = null
     private var runTimer: ScheduledFuture<*>? = null
+    @Volatile private var runDeadlineAt: Long? = null
 
     /** Registers a socket/connection/process so cancel and deadlines can close it. */
     fun <T : Any> track(resource: T): T {
@@ -64,11 +68,27 @@ class MeasurementControl(private val nanoTime: () -> Long = System::nanoTime) {
     /** Whole-run deadline: when it expires the run is cancelled with [ErrorCodes.TIMEOUT]. */
     fun startRunDeadline(millis: Long) {
         runTimer?.cancel(false)
+        runDeadlineAt = nanoTime() + millis * 1_000_000L
         runTimer = scheduler.schedule({ cancel(ErrorCodes.TIMEOUT) }, millis, TimeUnit.MILLISECONDS)
     }
 
     fun clearRunDeadline() {
         runTimer?.cancel(false)
+        runDeadlineAt = null
+    }
+
+    /** Monotonic milliseconds left of the point's budget; null without one. */
+    fun remainingRunMillis(): Long? = runDeadlineAt?.let { ((it - nanoTime()) / 1_000_000L).coerceAtLeast(0L) }
+
+    /**
+     * Mejora 7: a phase that cannot fit in what is left of the point's budget is not started
+     * (it would only be killed by the point deadline): [ErrorCodes.BUDGET_EXHAUSTED].
+     */
+    fun checkBudget(phaseMillis: Long) {
+        val left = remainingRunMillis() ?: return
+        if (left < minOf(phaseMillis, MIN_PHASE_MILLIS)) {
+            throw MeasurementException(ErrorCodes.BUDGET_EXHAUSTED, "$left ms left of the point budget, phase needs up to $phaseMillis ms")
+        }
     }
 
     /**
@@ -81,7 +101,16 @@ class MeasurementControl(private val nanoTime: () -> Long = System::nanoTime) {
         val start = nanoTime()
         phaseTimer = scheduler.schedule({ phaseTimedOut = true; closeAll() }, deadlineMillis, TimeUnit.MILLISECONDS)
         try {
-            return block()
+            val value = block()
+            // A value that arrives after the deadline is discarded: the phase timed out even if
+            // the block never threw (mejora 7).
+            if (phaseTimedOut || (nanoTime() - start) / 1_000_000 >= deadlineMillis) {
+                checkActive()
+                throw LateResult(deadlineMillis)
+            }
+            return value
+        } catch (e: LateResult) {
+            throw e
         } catch (e: Exception) {
             checkActive()
             if (phaseTimedOut || (nanoTime() - start) / 1_000_000 >= deadlineMillis) {
@@ -116,6 +145,9 @@ class MeasurementControl(private val nanoTime: () -> Long = System::nanoTime) {
         /** No cancellation, no deadlines: for callers that do not need them. */
         val NONE: MeasurementControl get() = MeasurementControl()
 
+        /** Shortest useful phase: below this a phase is never started on what is left of the budget. */
+        const val MIN_PHASE_MILLIS = 3_000L
+
         private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "measurement-deadlines").apply { isDaemon = true }
         }
@@ -141,3 +173,39 @@ suspend fun <T> runCancellable(control: MeasurementControl, name: String, block:
         }
         worker.start()
     }
+
+
+/**
+ * Mejora 7: blocking calls that cannot be interrupted (name lookups) run on a small pool with a
+ * wait limit and a cap on the calls still pending: a slow DNS never holds a phase longer than
+ * [timeoutMillis] and never piles up threads.
+ */
+class BoundedCalls(private val timeoutMillis: Long, maxPending: Int = 2, private val name: String = "bounded") {
+    private val pending = java.util.concurrent.Semaphore(maxPending)
+    private val executor = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "$name-call").apply { isDaemon = true } }
+
+    fun <T> call(what: String, block: () -> T): T {
+        if (!pending.tryAcquire()) throw MeasurementException(ErrorCodes.TIMEOUT, "$what: too many calls still pending")
+        val future = try {
+            executor.submit<T> { try { block() } finally { pending.release() } }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            pending.release()
+            throw MeasurementException(ErrorCodes.IO_ERROR, "$what: rejected", e)
+        }
+        return try {
+            future.get(timeoutMillis, TimeUnit.MILLISECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            // A blocked lookup cannot be interrupted: it keeps its slot until it really ends, so
+            // the pending cap holds. Its late answer is discarded.
+            future.cancel(false)
+            throw MeasurementException(ErrorCodes.TIMEOUT, "$what did not answer in $timeoutMillis ms")
+        } catch (e: java.util.concurrent.ExecutionException) {
+            throw (e.cause as? Exception) ?: e
+        }
+    }
+}
+
+/** [delegate] with name lookups bounded by [calls] (the binding to the Wi-Fi network is kept). */
+class BoundedResolveNetwork(private val delegate: MeasurementNetwork, private val calls: BoundedCalls) : MeasurementNetwork by delegate {
+    override fun resolve(host: String): List<java.net.InetAddress> = calls.call("DNS lookup of the target") { delegate.resolve(host) }
+}

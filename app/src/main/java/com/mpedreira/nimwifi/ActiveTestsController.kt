@@ -43,7 +43,8 @@ class ActiveTestsController(
         val phases = ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts)
         if (phases.isEmpty()) return
         val probe = probe
-        viewModel.startActiveRun(pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS) { control, listener ->
+        val budget = ThroughputRunner.runDeadlineMillis(settings, imported.enabledTests, imported.enabledScripts)
+        viewModel.startActiveRun(pointId, scanId, phases, profile = PROFILE_DEVICE_SETTINGS, budgetMillis = budget) { control, listener ->
             probe.measure(settings, imported, credentials, scanResults, control, listener)
         }
     }
@@ -59,9 +60,10 @@ class ActiveTestsController(
             if (finished != null) statusText().text = ActiveRunSummary.format(activity, finished)
             return
         }
+        val budget = state.activeRuns.firstOrNull { it.runId == testing.runId }?.budgetMillis
         val dialog = progressDialog ?: ThroughputProgressDialog(
             activity, onCancel = { viewModel.cancelActiveRun() }, onSkip = { viewModel.skipActiveRun() }
-        ).also { it.show(); progressDialog = it }
+        ).also { it.show(budget); progressDialog = it }
         state.activeRunProgress?.takeIf { it != previous.activeRunProgress || dialog.isFresh }?.let(dialog::update)
     }
 

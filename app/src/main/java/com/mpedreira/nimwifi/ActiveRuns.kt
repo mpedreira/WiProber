@@ -49,7 +49,9 @@ data class ActiveRun(
     val results: PointThroughput? = null,
     /** Position of [pointId] in original floor-plan pixels, so runs on imported or planned points export too. */
     val x: Float? = null,
-    val y: Float? = null
+    val y: Float? = null,
+    /** Mejora 7: the point's finite time budget, shown before starting. */
+    val budgetMillis: Long? = null
 ) {
     val isFinished: Boolean get() = status !in RunStatus.UNFINISHED
 
