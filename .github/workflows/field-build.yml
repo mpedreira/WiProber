@@ -106,9 +106,9 @@ jobs:
           EXPECTED_CODE=$(echo "$EXPECTED" | sed -n 's/^versionCode=//p')
           BADGING=$("$BT/aapt" dump badging "$APK" | head -1)
           echo "$BADGING"
-          PACKAGE=$(echo "$BADGING" | sed -n "s/.*name='\([^']*\)'.*/\1/p")
-          CODE=$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
-          NAME=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          PACKAGE=$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          CODE=$(echo "$BADGING" | sed -n "s/.* versionCode='\([^']*\)'.*/\1/p")
+          NAME=$(echo "$BADGING" | sed -n "s/.* versionName='\([^']*\)'.*/\1/p")
           test "$PACKAGE" = "com.mpedreira.nimwifi.debug" || { echo "::error::Package $PACKAGE"; exit 1; }
           test "$NAME" = "${{ steps.version.outputs.name }}-debug" || { echo "::error::versionName $NAME"; exit 1; }
           test "$CODE" = "$EXPECTED_CODE" || { echo "::error::versionCode $CODE, expected $EXPECTED_CODE"; exit 1; }
