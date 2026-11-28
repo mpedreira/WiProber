@@ -98,6 +98,18 @@ data class ThroughputTestResult(
     /** When the rate-limited server may be tried again (epoch ms). */
     val downloadRetryAt: Long? = null,
     val uploadRetryAt: Long? = null,
+    /**
+     * RC4 · 2: per direction, the proxy Android has configured for the URL ([ProxyKind]), the
+     * route the measuring connection took ([HttpRoute]) and the last HTTP status it got.
+     */
+    val downloadProxyConfig: String? = null,
+    val downloadRoute: String? = null,
+    val downloadHttpStatus: Int? = null,
+    val uploadProxyConfig: String? = null,
+    val uploadRoute: String? = null,
+    val uploadHttpStatus: Int? = null,
+    /** How [latencyMs] was taken: a direct TCP handshake to the origin, even when HTTP goes via a proxy. */
+    val latencyRoute: String? = null,
     val error: String? = null
 ) {
     companion object {

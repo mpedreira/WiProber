@@ -37,6 +37,19 @@ The LibreSpeed entries come from the official list (`server-list.json` of github
 
 **HTTP 429** (*the server is limiting requests*): new requests to that destination stop at once; bytes other connections moved before are kept as `downPartialMbps`/`upPartialMbps` for diagnosis only — never a valid value, median or verdict input — and with no bytes the phase has no value. The phase is `failed` with `rate_limited`. nimWifi does not ask that server (host and port) again before its `Retry-After` (seconds or an HTTP date; 60 s without it): later phases and runs to it are `skipped` with `rate_limited` and `downloadRetryAt`/`uploadRetryAt`, other destinations go on, and the series keeps the same server — switching it is your decision. HTTP 407 (proxy authentication) is `proxy_auth_required`, a different cause.
 
+## Probar servidor and the web proxy
+
+*Probar servidor* (in *Pruebas de velocidad*) checks the destination selected in the drop-down — or, with *Personalizado*, the URLs typed, before saving — with one short, bounded request per URL (download up to 1 MB, upload 64 KB), each on its own even on the same host. It uses the Wi-Fi network the tests would use and the same HTTP client, can be cancelled, and is never saved with a point. For each URL it shows the protocol, the HTTP code and whether the server answers as the client expects.
+
+For every HTTP URL nimWifi records:
+
+- **Proxy configured in Android** for that network and URL: `none`, `manual` (a host in the exclusion list counts as `none`), `pac` or `unknown`.
+- **Route observed** on the very connection that made the request: `proxy` (explicit proxy), `direct` or `undetermined` (it failed before the route was known; with PAC, Android resolves the script through a local proxy, so the request cannot tell where PAC sent it).
+
+The Internet speed test uses Android's HTTP client on the Wi-Fi `Network`, which applies that network's proxy. HTTP tests and script steps use nimWifi's own client, which opens a socket to the destination: their route is always `direct`, even with a proxy configured, and the report says so. Write confirmations and redirect handling do not change.
+
+With a proxy for the URL (`manual` not excluded, or `pac`), a failed direct TCP check to the origin no longer skips the HTTP transfer: HTTP is tried through the configured route. `latencyMs` keeps its meaning — a direct TCP handshake to the origin (`latencyRoute: direct`). Without a proxy, an unreachable server still skips its transfers. 407 (`proxy_auth_required`: the proxy wants credentials) and 429 (`rate_limited`) are told apart. Only safe metadata is kept (no proxy credentials, no query strings). nimWifi sees an explicit proxy; a transparent intermediary, a reverse proxy or the exact origin of a 429 need other evidence.
+
 ## Survey guide and signal profile
 
 `guide.profile` sets when a point's signal is weak on the map and in the report: `pda` (handheld scanners, −67 dBm, second AP −72 dBm, default), `voz` (voice, −67/−67) or `datos` (data, −70/−75). The same profiles as the wifianalisys report; they can also be chosen in the survey-guide settings.

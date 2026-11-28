@@ -60,7 +60,13 @@ data class ScriptStepResult(
     /** Structured cause ([ErrorCodes]); [error] never repeats secrets. */
     val errorCode: String? = null,
     /** Mejora 14: where a 3xx pointed (host and path, no query). */
-    val redirectLocation: String? = null
+    val redirectLocation: String? = null,
+    /**
+     * RC4 · 2: the proxy Android has configured for this URL and the route the script client took.
+     * The script client opens its own socket to the destination: it never uses that proxy.
+     */
+    val proxyConfig: String? = null,
+    val route: String? = null
 )
 
 /**
@@ -255,7 +261,12 @@ class TimedHttpClient(
  * reach the result: hosts and errors are redacted and the exported path comes from the
  * definition (no query, token-like segments hidden).
  */
-class ScriptRunner(private val http: TimedHttpClient, private val credentials: Map<String, String> = emptyMap()) {
+class ScriptRunner(
+    private val http: TimedHttpClient,
+    private val credentials: Map<String, String> = emptyMap(),
+    /** RC4 · 2: the measured network's proxy for a URL ([ProxyKind]). */
+    private val proxyFor: (java.net.URL) -> String = { ProxyKind.NONE }
+) {
     fun run(
         script: HttpScript,
         onStep: (index: Int, step: HttpScriptStep) -> Unit = { _, _ -> },
@@ -285,9 +296,13 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
         var result = ScriptStepResult(name = step.name, method = step.method, host = null, path = Sensitive.displayPath(templatePath))
         val start = System.nanoTime()
         fun total() = ((System.nanoTime() - start) / 100_000.0).roundToLong() / 10.0
+        var proxyConfig: String? = null
         fun withTiming(r: ScriptStepResult) = r.copy(
             dnsMs = timing.dnsMs, connectMs = timing.connectMs, tlsMs = timing.tlsMs,
-            ttfbMs = timing.ttfbMs, downloadMs = timing.downloadMs
+            ttfbMs = timing.ttfbMs, downloadMs = timing.downloadMs,
+            proxyConfig = proxyConfig,
+            // A direct socket: once it connected, the route is direct; before that, unknown.
+            route = if (timing.connectMs != null) HttpRoute.DIRECT else HttpRoute.UNDETERMINED
         )
         val redactor = { Redactor(secrets) }
         try {
@@ -300,6 +315,7 @@ class ScriptRunner(private val http: TimedHttpClient, private val credentials: M
                 throw MeasurementException(ErrorCodes.INVALID_TARGET, "resolved URL is not valid")
             }
             result = result.copy(host = redactor().redact(url.host))
+            proxyConfig = runCatching { proxyFor(url.toURL()) }.getOrDefault(ProxyKind.UNKNOWN)
             val headers = step.headers.mapValues { (_, value) -> substitute(value, variables) }.toMutableMap()
             ResolvedRequestValidator.check(url, headers)
             cookies.header(url)?.let { headers["Cookie"] = it }

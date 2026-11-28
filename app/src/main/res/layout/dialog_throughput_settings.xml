@@ -180,6 +180,16 @@
             android:layout_marginTop="4dp"
             android:textAppearance="?attr/textAppearanceBodySmall" />
 
+        <!-- RC4 · 2: a short, cancellable check of the selected destination; never saved with a point. -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/testServer"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:minHeight="48dp"
+            android:text="@string/server_check_button" />
+
         <com.google.android.material.textfield.TextInputLayout
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"

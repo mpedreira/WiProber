@@ -146,6 +146,12 @@ Shared by `measurements`, `networkTests` and `scriptSteps`.
 | `serverLocation` | string \| null | Where the provider served from, when it says (Cloudflare data centre, e.g. `MAD`) |
 | `downPartialMbps`, `upPartialMbps` | number \| null | Rate of the bytes moved before an HTTP 429: diagnosis only, never in medians or verdicts |
 | `downloadRetryAt`, `uploadRetryAt` | ISO-8601 \| null | When the rate-limited server may be tried again |
+| `downloadProxyConfig`, `uploadProxyConfig` | string \| null | RC4: proxy Android has configured for that URL: `none`, `manual`, `pac`, `unknown` |
+| `downloadRoute`, `uploadRoute` | string \| null | Route of the measuring connection: `proxy`, `direct`, `undetermined` |
+| `downloadHttpStatus`, `uploadHttpStatus` | integer \| null | Last HTTP status seen in that direction (e.g. 200, 407, 429) |
+| `latencyRoute` | string \| null | `direct`: `latencyMs` is a direct TCP handshake to the origin, also when HTTP goes through a proxy |
+
+`networkTests` (HTTP) and `scriptSteps` rows add `proxyConfig` and `route` (always `direct` once connected: that client opens its own socket and does not use the proxy).
 | `downBytes`, `downSeconds`, `upBytes`, `upSeconds` | number \| null | Bytes counted and real duration of each transfer |
 | `error` | string \| null | What failed; `null` when everything was measured |
 

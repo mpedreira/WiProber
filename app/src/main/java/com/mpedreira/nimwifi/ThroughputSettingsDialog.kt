@@ -125,6 +125,17 @@ object ThroughputSettingsDialog {
 
         val current = store.load()
 
+        /** The settings as typed now (not saved): what *Probar servidor* checks. */
+        fun typed() = current.copy(
+            internetServerId = selectedServer,
+            customDownloadUrl = downloadUrl.text?.toString().orEmpty(),
+            customUploadUrl = uploadUrl.text?.toString().orEmpty(),
+            internetDownloadUrl = downloadUrl.text?.toString().orEmpty(),
+            internetUploadUrl = uploadUrl.text?.toString().orEmpty(),
+            expectedSsid = expectedSsid.text?.toString().orEmpty()
+        ).sanitized()
+        view.findViewById<android.view.View>(R.id.testServer).setOnClickListener { ServerCheckDialog.run(activity, typed()) }
+
         fill(current)
         val dialog = MaterialAlertDialogBuilder(activity)
             .setTitle(R.string.throughput_settings_title)

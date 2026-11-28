@@ -112,7 +112,11 @@ class ThroughputRunner(
         /** RC4 · 1: the Internet destination selected, for the export. */
         val serverId: String? = null,
         val serverLabel: String? = null,
-        val download: (InetAddress) -> TransferResult,
+        /** RC4 · 2: the HTTP URLs, to know whether a proxy may carry them. */
+        val downloadUrl: java.net.URL? = null,
+        val uploadUrl: java.net.URL? = null,
+        /** The pre-checked address (null for HTTP via a proxy, where the client resolves itself). */
+        val download: (InetAddress?) -> TransferResult,
         /** Null when the direction is not configured. */
         val upload: ((InetAddress?) -> TransferResult)?
     )
@@ -288,7 +292,7 @@ class ThroughputRunner(
         downloadEndpoint = "${config.iperfHost}:${config.iperfPort}",
         uploadEndpoint = "${config.iperfHost}:${config.iperfPort}",
         uploadIndependent = false,
-        download = { address -> iperf.run(address, config.iperfPort, config.iperfDurationSeconds, Iperf3Client.Direction.DOWNLOAD) },
+        download = { address -> iperf.run(requireNotNull(address), config.iperfPort, config.iperfDurationSeconds, Iperf3Client.Direction.DOWNLOAD) },
         upload = { address ->
             iperf.run(requireNotNull(address), config.iperfPort, config.iperfDurationSeconds, Iperf3Client.Direction.UPLOAD)
         }
@@ -319,6 +323,8 @@ class ThroughputRunner(
             uploadHost = upload?.host,
             uploadPort = upload?.let(::defaultPort),
             serverId = config.internetServerId.ifEmpty { null },
+            downloadUrl = runCatching { java.net.URL(config.internetDownloadUrl.replace("{bytes}", "0")) }.getOrNull(),
+            uploadUrl = config.internetUploadUrl.takeIf { it.isNotEmpty() }?.let { runCatching { java.net.URL(it) }.getOrNull() },
             serverLabel = config.internetServer?.label ?: "Personalizado",
             download = { http.download(config.internetDownloadUrl, config.internetDurationSeconds) },
             upload = if (upload == null) null else {
@@ -392,6 +398,13 @@ class ThroughputRunner(
         }
 
         val errors = mutableListOf<String>()
+        // RC4 · 2: with a proxy for the URL, a failed direct TCP check does not mean HTTP fails.
+        val isHttp = target.method == ThroughputTestResult.METHOD_HTTP
+        val proxy = if (isHttp) runCatching { network?.proxy() }.getOrNull() ?: ProxyConfig.UNKNOWN else null
+        val downloadViaProxy = isHttp && target.downloadUrl?.let { proxy?.mayProxy(it) } == true
+        val uploadViaProxy = isHttp && target.uploadUrl?.let { proxy?.mayProxy(it) } == true
+        var downloadObserved: RouteObservation? = null
+        var uploadObserved: RouteObservation? = null
         var latency: PhaseOutcome<LatencyStats>? = null
         tracker.run(target.alias, ThroughputPhase.LATENCY, null) {
             latency = phase("latency", errors, LATENCY_DEADLINE_MILLIS) { tcpLatency(target.host, target.port) }
@@ -424,6 +437,13 @@ class ThroughputRunner(
             serverLocation = download?.value?.serverLocation ?: upload?.value?.serverLocation,
             internetServerId = target.serverId,
             internetServerLabel = target.serverId?.let { target.serverLabel },
+            latencyRoute = HttpRoute.DIRECT,
+            downloadProxyConfig = downloadObserved?.proxyConfig ?: target.downloadUrl?.let { proxy?.forUrl(it) },
+            downloadRoute = downloadObserved?.route,
+            downloadHttpStatus = downloadObserved?.httpStatus,
+            uploadProxyConfig = uploadObserved?.proxyConfig ?: target.uploadUrl?.let { proxy?.forUrl(it) },
+            uploadRoute = uploadObserved?.route,
+            uploadHttpStatus = uploadObserved?.httpStatus,
             downBytes = download?.value?.bytes,
             downSeconds = download?.value?.seconds?.let(::round),
             downloadStatus = download?.status ?: RunStatus.PENDING,
@@ -450,7 +470,7 @@ class ThroughputRunner(
         } else {
             null
         }
-        if (address == null) {
+        if (address == null && !downloadViaProxy) {
             // The pre-checked endpoint is unreachable: its transfers would only add more timeouts.
             errors += "download skipped: server unreachable"
             download = PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.SKIPPED_UNREACHABLE)
@@ -461,7 +481,9 @@ class ThroughputRunner(
         } else {
             var outcome: PhaseOutcome<TransferResult>? = null
             tracker.run(target.alias, ThroughputPhase.DOWNLOAD, target.durationSeconds) {
+                if (address == null) errors += "latency: direct TCP to the origin failed; HTTP tried through the configured proxy"
                 outcome = phase("download", errors, transferDeadline) { target.download(address) }
+                if (isHttp) downloadObserved = http.observation(HttpSpeedTest.DOWNLOAD)
                 outcome?.value?.let { toMbps(it.bitsPerSecond) }
             }
             download = outcome!!
@@ -485,7 +507,7 @@ class ThroughputRunner(
                 tracker.skip(target.alias, ThroughputPhase.UPLOAD)
                 PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.NOT_CONFIGURED)
             }
-            address == null && !target.uploadIndependent -> {
+            address == null && !target.uploadIndependent && !uploadViaProxy -> {
                 errors += "upload skipped: server unreachable"
                 tracker.skip(target.alias, ThroughputPhase.UPLOAD)
                 PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.SKIPPED_UNREACHABLE)
@@ -497,7 +519,7 @@ class ThroughputRunner(
                 }
                 uploadPrecheckValue = uploadPrecheck.value
                 uploadPrecheckCode = uploadPrecheck.code
-                if (uploadPrecheck.value == null) {
+                if (uploadPrecheck.value == null && !uploadViaProxy) {
                     errors += "upload skipped: server unreachable"
                     tracker.skip(target.alias, ThroughputPhase.UPLOAD)
                     PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.SKIPPED_UNREACHABLE)
@@ -505,6 +527,7 @@ class ThroughputRunner(
                     var outcome: PhaseOutcome<TransferResult>? = null
                     tracker.run(target.alias, ThroughputPhase.UPLOAD, target.durationSeconds) {
                         outcome = phase("upload", errors, transferDeadline) { uploadTest(uploadPrecheckValue?.address) }
+                        if (isHttp) uploadObserved = http.observation(HttpSpeedTest.UPLOAD)
                         outcome?.value?.let { toMbps(it.bitsPerSecond) }
                     }
                     outcome!!
@@ -514,6 +537,7 @@ class ThroughputRunner(
                 var outcome: PhaseOutcome<TransferResult>? = null
                 tracker.run(target.alias, ThroughputPhase.UPLOAD, target.durationSeconds) {
                     outcome = phase("upload", errors, transferDeadline) { uploadTest(address) }
+                    if (isHttp) uploadObserved = http.observation(HttpSpeedTest.UPLOAD)
                     outcome?.value?.let { toMbps(it.bitsPerSecond) }
                 }
                 outcome!!

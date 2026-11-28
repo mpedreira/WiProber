@@ -446,6 +446,8 @@ object PerformanceExport {
         addProperty("totalMs", test.totalMs)
         addProperty("status", test.status)
         addProperty("redirectLocation", test.redirectLocation)
+        addProperty("proxyConfig", test.proxyConfig)
+        addProperty("route", test.route)
         addProperty("seriesId", Series.networkTest(test).id)
         addProperty("seriesComparable", Series.networkTest(test).comparable)
         addProperty("bytes", test.bytes)
@@ -521,6 +523,8 @@ object PerformanceExport {
         addProperty("totalMs", step.totalMs)
         addProperty("bytes", step.bytes)
         addProperty("redirectLocation", step.redirectLocation)
+        addProperty("proxyConfig", step.proxyConfig)
+        addProperty("route", step.route)
         addProperty("errorCode", step.errorCode)
         addProperty("error", step.error ?: run.error)
     }
@@ -591,6 +595,14 @@ object PerformanceExport {
         addProperty("upPartialMbps", test.upPartialMbps)
         addProperty("downloadRetryAt", test.downloadRetryAt?.let(::isoUtc))
         addProperty("uploadRetryAt", test.uploadRetryAt?.let(::isoUtc))
+        // RC4 · 2: proxy configured for each URL, route of the measuring connection, last HTTP status.
+        addProperty("latencyRoute", test.latencyRoute)
+        addProperty("downloadProxyConfig", test.downloadProxyConfig)
+        addProperty("downloadRoute", test.downloadRoute)
+        addProperty("downloadHttpStatus", test.downloadHttpStatus)
+        addProperty("uploadProxyConfig", test.uploadProxyConfig)
+        addProperty("uploadRoute", test.uploadRoute)
+        addProperty("uploadHttpStatus", test.uploadHttpStatus)
         addProperty("error", test.error)
     }
 

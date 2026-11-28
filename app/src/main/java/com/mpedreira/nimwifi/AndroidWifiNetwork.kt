@@ -119,6 +119,16 @@ class AndroidMeasurementNetwork internal constructor(
 
     override fun isAvailable(): Boolean = network in AndroidWifiNetworks.wifiNetworks(connectivity)
 
+    /** This network's own proxy settings (LinkProperties), the ones openHttp() applies. */
+    override fun proxy(): ProxyConfig = runCatching {
+        val proxy = connectivity.getLinkProperties(network)?.httpProxy ?: return@runCatching ProxyConfig.NONE
+        when {
+            proxy.pacFileUrl != null && proxy.pacFileUrl != android.net.Uri.EMPTY -> ProxyConfig(ProxyKind.PAC, pacUrl = proxy.pacFileUrl.toString())
+            !proxy.host.isNullOrEmpty() -> ProxyConfig(ProxyKind.MANUAL, proxy.host, proxy.port, proxy.exclusionList.orEmpty().toList())
+            else -> ProxyConfig.NONE
+        }
+    }.getOrDefault(ProxyConfig.UNKNOWN)
+
     override fun association(): Association {
         if (monitor != null) {
             val info = monitor.wifiInfo(network) ?: return Association.UNKNOWN

@@ -74,7 +74,8 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                     // Load adapted to the provider (RC4 · 1): few connections and bounded bodies.
                     streams = settings.sanitized().internetStreams,
                     control = control,
-                    maxUploadChunkBytes = settings.sanitized().internetMaxUploadChunkBytes
+                    maxUploadChunkBytes = settings.sanitized().internetMaxUploadChunkBytes,
+                    proxyFor = { url -> network?.proxy()?.forUrl(url) ?: ProxyKind.UNKNOWN }
                 ),
                 network = network,
                 beacons = beacons,
@@ -90,7 +91,7 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                     control = control,
                     credentials = credentials
                 ),
-                scriptRunner = ScriptRunner(timedHttp, credentials),
+                scriptRunner = ScriptRunner(timedHttp, credentials) { url -> network?.proxy()?.forUrl(url) ?: ProxyKind.UNKNOWN },
                 clock = clock,
                 control = control
             )
@@ -111,6 +112,24 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
      * before anything is sent. Blocking (up to about a second on Android 12+): call it off the
      * main thread.
      */
+    /**
+     * RC4 · 2: *Probar servidor* on the Wi-Fi network the tests would use (same selection as the
+     * preflight) and the same HTTP client. Blocking and bounded; [control] cancels it. Null when
+     * there is no Wi-Fi. The result is shown, never saved with a point.
+     */
+    fun checkServer(settings: ThroughputSettings, credentials: Map<String, String>, control: MeasurementControl): Pair<String?, List<ServerCheck.UrlCheck>>? {
+        val clean = settings.sanitized()
+        val network = wifiNetworks.select(clean.expectedSsid) ?: return null
+        return try {
+            val ssid = runCatching { network.association().ssid }.getOrNull()
+            fun resolved(url: String) = runCatching { SecretRefs.resolve(url, credentials) }.getOrDefault(url)
+            ssid to ServerCheck.run(resolved(clean.internetDownloadUrl), resolved(clean.internetUploadUrl), network::openHttp,
+                { url -> network.proxy().forUrl(url) }, control)
+        } finally {
+            network.close()
+        }
+    }
+
     fun preflight(expectedSsid: String): NetworkPreflight {
         val network = wifiNetworks.select(expectedSsid)
         return try {

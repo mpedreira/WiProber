@@ -178,6 +178,9 @@ object HttpOutcomePolicy {
         expectStatus != null -> if (status == expectStatus) null else ErrorCodes.HTTP_STATUS to "status $status, expected $expectStatus"
         status in 200..299 -> null
         status in 300..399 -> if (allowRedirect) null else ErrorCodes.REDIRECT to "redirect $status to ${location ?: "?"}"
+        // RC4 · 2: a proxy asking for authentication and a server limiting requests are other causes.
+        status == 407 -> ErrorCodes.PROXY_AUTH_REQUIRED to "status 407: proxy authentication required"
+        status == 429 -> ErrorCodes.RATE_LIMITED to "status 429: the server is limiting requests"
         else -> ErrorCodes.HTTP_STATUS to "status $status"
     }
 

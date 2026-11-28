@@ -29,6 +29,8 @@ interface MeasurementNetwork {
     /** Association of this network (not whatever Wi-Fi Android reports globally). */
     fun association(): Association
     fun isAvailable(): Boolean
+    /** RC4 · 2: the HTTP proxy Android has configured for this network. */
+    fun proxy(): ProxyConfig = ProxyConfig.NONE
 }
 
 /**

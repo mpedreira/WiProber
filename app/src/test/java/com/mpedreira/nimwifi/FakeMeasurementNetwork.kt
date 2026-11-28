@@ -37,6 +37,10 @@ class FakeMeasurementNetwork(
     override fun association(): Association = associationProvider()
     override fun isAvailable(): Boolean = available()
 
+    /** RC4 · 2: the proxy this network reports. */
+    var proxyConfig: ProxyConfig = ProxyConfig.NONE
+    override fun proxy(): ProxyConfig = proxyConfig
+
     companion object {
         val LOOPBACK: InetAddress = InetAddress.getByName("127.0.0.1")
         val DEFAULT_AP = Association(

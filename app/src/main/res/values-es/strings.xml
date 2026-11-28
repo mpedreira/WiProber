@@ -421,6 +421,24 @@ El ESX de origen sin cambios es otra opción del menú de exportación, y los ar
 SHA-256: %1$s</string>
     <string name="action_continue">Continuar</string>
     <string name="throughput_internet_server">Servidor de Internet</string>
+    <string name="server_check_button">Probar servidor</string>
+    <string name="server_check_running">Probando el servidor por la Wi-Fi…</string>
+    <string name="server_check_title">Prueba del servidor</string>
+    <string name="server_check_no_wifi">No hay red Wi-Fi: no se ha enviado nada.</string>
+    <string name="server_check_header">Red Wi-Fi: %1$s. Una petición breve por URL; no se guarda en ningún punto.</string>
+    <string name="server_check_line">%1$s · %2$s\n%3$s · proxy: %4$s · ruta: %5$s · HTTP %6$s\n%7$s</string>
+    <string name="server_check_download">Descarga</string>
+    <string name="server_check_upload">Subida</string>
+    <string name="server_check_ok">Responde como se espera (%1$s bytes en %2$s ms)</string>
+    <string name="server_check_failed">No responde como se espera: %1$s</string>
+    <string name="server_check_retry">El servidor está limitando peticiones (HTTP 429): reintenta en %1$s s.</string>
+    <string name="proxy_kind_none">ninguno</string>
+    <string name="proxy_kind_manual">manual</string>
+    <string name="proxy_kind_pac">PAC</string>
+    <string name="proxy_kind_unknown">desconocido</string>
+    <string name="route_proxy">proxy explícito</string>
+    <string name="route_direct">directa</string>
+    <string name="route_undetermined">indeterminada</string>
     <string name="run_summary_served_from">Servido desde: %1$s</string>
     <string name="run_summary_rate_limited">El servidor de Internet está limitando peticiones (HTTP 429): sus valores no cuentan. Se puede reintentar a partir de las %1$s; el resto de pruebas ha continuado.</string>
     <string name="throughput_server_custom">Personalizado (tus dos URLs)</string>

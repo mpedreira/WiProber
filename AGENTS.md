@@ -101,7 +101,8 @@ When changing ESX handling, add fixture-based tests that validate JSON relations
 
 - Never put internal hosts, URLs or credentials in the code or the repository; they come from the imported configuration or device settings. Repository examples use `example.com` names.
 - Bind every test socket and HTTP connection to the Wi-Fi `Network`. Without Wi-Fi, send nothing and report `not connected to a Wi-Fi network`.
-- Tests at one point run sequentially, never in parallel. Anything not measured is `null` with the reason in `error`, never `0`. A server that cannot be connected to skips its remaining phases.
+- Tests at one point run sequentially, never in parallel. Anything not measured is `null` with the reason in `error`, never `0`. A server that cannot be connected to skips its remaining phases — except an HTTP transfer whose URL the network's proxy may carry (manual not excluded, or PAC): a failed direct TCP check proves nothing there, so HTTP is tried through that route (RC4).
+- HTTP 429 is `rate_limited` (the server limits requests), never a network failure nor a rate: bytes moved before it are diagnosis only, and the endpoint is not asked again before its `Retry-After`. HTTP 407 is `proxy_auth_required`.
 - Replayed requests are read-only unless the step sets `allowWrite`; the parser and the runner both enforce it, and activating a profile with writes needs explicit confirmation. Exported HTTP targets never include the query string.
 - Credentials are stored apart from definitions and referenced as `${secret.NAME}`; never show, export or log their values (nor cookie or extracted values). Keep `docs/wiprober-config.md` in sync.
 - Keep `docs/wiprober-performance.md` and `docs/wiprober-config.example.json` in sync with the code; `ExampleConfigTest` parses the example.

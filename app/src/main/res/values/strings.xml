@@ -421,6 +421,24 @@ The unchanged source ESX is a separate option in the export menu, and the analys
 SHA-256: %1$s</string>
     <string name="action_continue">Continue</string>
     <string name="throughput_internet_server">Internet server</string>
+    <string name="server_check_button">Test server</string>
+    <string name="server_check_running">Testing the server on the Wi-Fi network…</string>
+    <string name="server_check_title">Server test</string>
+    <string name="server_check_no_wifi">No Wi-Fi network: nothing was sent.</string>
+    <string name="server_check_header">Wi-Fi network: %1$s. One short request per URL; nothing is saved with any point.</string>
+    <string name="server_check_line">%1$s · %2$s\n%3$s · proxy: %4$s · route: %5$s · HTTP %6$s\n%7$s</string>
+    <string name="server_check_download">Download</string>
+    <string name="server_check_upload">Upload</string>
+    <string name="server_check_ok">Answers as expected (%1$s bytes in %2$s ms)</string>
+    <string name="server_check_failed">Does not answer as expected: %1$s</string>
+    <string name="server_check_retry">The server is limiting requests (HTTP 429): try again in %1$s s.</string>
+    <string name="proxy_kind_none">none</string>
+    <string name="proxy_kind_manual">manual</string>
+    <string name="proxy_kind_pac">PAC</string>
+    <string name="proxy_kind_unknown">unknown</string>
+    <string name="route_proxy">explicit proxy</string>
+    <string name="route_direct">direct</string>
+    <string name="route_undetermined">undetermined</string>
     <string name="run_summary_served_from">Served from: %1$s</string>
     <string name="run_summary_rate_limited">The Internet server is limiting requests (HTTP 429): its values are not counted. It can be tried again from %1$s; other tests went on.</string>
     <string name="throughput_server_custom">Custom (your two URLs)</string>

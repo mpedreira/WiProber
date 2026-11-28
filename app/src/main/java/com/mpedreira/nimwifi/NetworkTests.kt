@@ -55,7 +55,10 @@ data class NetworkTestResult(
     val rttMaxMs: Double? = null,
     val jitterMs: Double? = null,
     val error: String? = null,
-    val errorCode: String? = null
+    val errorCode: String? = null,
+    /** RC4 · 2: HTTP tests: the proxy configured for the URL and the route (a direct socket). */
+    val proxyConfig: String? = null,
+    val route: String? = null
 )
 
 /** Addresses the Wi-Fi network's DHCP/RA gave the phone. */
@@ -293,10 +296,13 @@ class NetworkTestRunner(
         val timing = TimedHttpClient.Timing()
         val start = System.nanoTime()
         val target = "${url.host}${Sensitive.displayPath(url.rawPath)}" // no query nor token-like segments: they may hold secrets
+        val proxyConfig = runCatching { network!!.proxy().forUrl(url.toURL()) }.getOrDefault(ProxyKind.UNKNOWN)
         fun withTiming(result: NetworkTestResult) = result.copy(
             target = target, method = url.scheme.lowercase(),
             dnsMs = timing.dnsMs, connectMs = timing.connectMs, tlsMs = timing.tlsMs,
-            ttfbMs = timing.ttfbMs, downloadMs = timing.downloadMs, totalMs = elapsed(start)
+            ttfbMs = timing.ttfbMs, downloadMs = timing.downloadMs, totalMs = elapsed(start),
+            proxyConfig = proxyConfig,
+            route = if (timing.connectMs != null) HttpRoute.DIRECT else HttpRoute.UNDETERMINED
         )
         return try {
             val response = http.execute("GET", url, emptyMap(), null, timing)

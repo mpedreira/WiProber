@@ -23,8 +23,14 @@ class HttpSpeedTest(
     /** Largest upload body per request (the provider's limit; see [InternetServer]). */
     private val maxUploadChunkBytes: Int = MAX_UPLOAD_CHUNK_BYTES,
     /** Wall clock, to turn a `Retry-After` HTTP date into a delay. */
-    private val wallClock: () -> Long = System::currentTimeMillis
+    private val wallClock: () -> Long = System::currentTimeMillis,
+    /** RC4 · 2: the proxy the measured network has configured for a URL ([ProxyKind]). */
+    private val proxyFor: (URL) -> String = { ProxyKind.NONE }
 ) {
+    /** RC4 · 2: first route observed per direction (`download`, `upload`) in the last transfer. */
+    private val observations = java.util.concurrent.ConcurrentHashMap<String, RouteObservation>()
+
+    fun observation(direction: String): RouteObservation? = observations[direction]
     /** Last data centre / location the provider reported (Cloudflare: CF-RAY suffix). */
     private val location = AtomicReference<String?>()
     /**
@@ -33,6 +39,7 @@ class HttpSpeedTest(
      */
     fun download(urlTemplate: String, durationSeconds: Int): TransferResult {
         val url = URL(urlTemplate.replace(BYTES_PLACEHOLDER, DOWNLOAD_CHUNK_BYTES.toString()))
+        observations.remove(DOWNLOAD)
         val result = parallel(durationSeconds) { deadline, counted ->
             val buffer = ByteArray(BUFFER_SIZE)
             request(url, "GET") { input ->
@@ -54,6 +61,7 @@ class HttpSpeedTest(
      */
     fun upload(url: String, durationSeconds: Int): TransferResult {
         val target = URL(url)
+        observations.remove(UPLOAD)
         val payload = ByteArray(maxUploadChunkBytes).also(SecureRandom()::nextBytes)
         return parallel(durationSeconds) { _, counted ->
             val requestStart = nanoTime()
@@ -116,7 +124,9 @@ class HttpSpeedTest(
         send: ((HttpURLConnection) -> Unit)? = null,
         receive: (InputStream) -> Unit
     ) {
+        val direction = if (method == "GET") DOWNLOAD else UPLOAD
         val connection = control.track(open(url))
+        var observed = false
         try {
             connection.requestMethod = method
             connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
@@ -126,6 +136,9 @@ class HttpSpeedTest(
             connection.setRequestProperty("User-Agent", USER_AGENT)
             send?.invoke(connection)
             val code = connection.responseCode
+            // The same connection that measures says whether it went through a proxy.
+            observations.putIfAbsent(direction, RouteObservation.observed(runCatching { proxyFor(url) }.getOrDefault(ProxyKind.UNKNOWN), connection.usingProxy(), code))
+            observed = true
             connection.getHeaderField("cf-ray")?.substringAfterLast('-', "")?.takeIf { it.length in 2..5 && it.all(Char::isLetter) }?.let { location.set(it.uppercase()) }
             when {
                 code == 429 -> throw RateLimitedException(RateLimits.endpoint(url.host, url.port.takeIf { it > 0 } ?: url.defaultPort),
@@ -134,6 +147,9 @@ class HttpSpeedTest(
                 code !in 200..299 -> throw MeasurementException(ErrorCodes.HTTP_STATUS, "HTTP $code from ${url.host}")
             }
             connection.inputStream.use(receive)
+        } catch (e: Exception) {
+            if (!observed) observations.putIfAbsent(direction, RouteObservation.undetermined(runCatching { proxyFor(url) }.getOrDefault(ProxyKind.UNKNOWN)))
+            throw e
         } finally {
             control.untrack(connection)
             connection.disconnect()
@@ -154,9 +170,11 @@ class HttpSpeedTest(
     private fun bitsPerSecond(bytes: Long, nanos: Long): Double =
         if (nanos > 0L) bytes * 8.0 * NANOS_PER_SECOND / nanos else 0.0
 
-    private companion object {
+    companion object {
         const val BYTES_PLACEHOLDER = "{bytes}"
         const val DEFAULT_STREAMS = 4
+        const val DOWNLOAD = "download"
+        const val UPLOAD = "upload"
         const val DOWNLOAD_CHUNK_BYTES = 25_000_000
         const val MIN_UPLOAD_CHUNK_BYTES = 256 * 1024
         const val MAX_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024

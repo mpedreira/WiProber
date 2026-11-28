@@ -84,12 +84,20 @@ object SurveyReport {
         val marks: List<MapMark> = emptyList(),
         val sources: SourceCounts? = null,
         /** Verdict against the configured [Requirements]; null without requirements. */
-        val verdict: SsidVerdict? = null
+        val verdict: SsidVerdict? = null,
+        /** RC4 · 2: how HTTP requests went (proxy configured, route, status, cause), grouped. */
+        val routes: List<RouteFact> = emptyList()
     ) {
         fun count(state: String) = points.count { it.state == state }
         /** Mejora 11: good primary signal and a second AP of the same SSID above the secondary threshold. */
         val redundant: Int get() = points.count { it.secondaryOk }
     }
+
+    /** RC4 · 2: one kind of HTTP outcome of a destination and direction, with how many points showed it. */
+    data class RouteFact(
+        val destination: String, val direction: String, val proxyConfig: String?, val route: String?,
+        val httpStatus: Int?, val cause: String?, val points: Int
+    )
 
     /** Mejora 8: the floor plan embedded in the report (downscaled; marks use original-image pixels). */
     data class PlanImage(val dataUri: String, val originalWidth: Int, val originalHeight: Int)
@@ -414,7 +422,7 @@ object SurveyReport {
         } else {
             null
         }
-        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources, verdict)
+        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources, verdict, routeFacts(ssidRuns, ssid))
     }
 
     /**
@@ -430,6 +438,27 @@ object SurveyReport {
             else -> "método desconocido"
         }
         return "${log.targetAlias ?: "destino"} · $method · cada ${log.intervalMillis} ms"
+    }
+
+    /** RC4 · 2: HTTP routes of the SSID's runs: Internet transfers, HTTP tests and script steps. */
+    private fun routeFacts(runs: List<ActiveRun>, ssid: String?): List<RouteFact> {
+        data class Key(val destination: String, val direction: String, val proxy: String?, val route: String?, val status: Int?, val cause: String?)
+        val seen = linkedMapOf<Key, MutableSet<String>>()
+        fun add(point: String, key: Key) { if (key.route != null || key.proxy != null) seen.getOrPut(key) { linkedSetOf() } += point }
+        runs.forEach { run ->
+            run.results?.tests.orEmpty().filter { it.ssid == ssid && it.method == ThroughputTestResult.METHOD_HTTP }.forEach { t ->
+                val name = t.internetServerLabel ?: t.target
+                add(run.pointId, Key(name, "descarga", t.downloadProxyConfig, t.downloadRoute, t.downloadHttpStatus, t.downloadErrorCode))
+                add(run.pointId, Key(name, "subida", t.uploadProxyConfig, t.uploadRoute, t.uploadHttpStatus, t.uploadErrorCode))
+            }
+            run.results?.networkTests.orEmpty().filter { it.ssid == ssid && it.type == NetworkTest.HTTP }.forEach { t ->
+                add(run.pointId, Key(t.alias ?: t.name, "prueba HTTP", t.proxyConfig, t.route, t.status, t.errorCode))
+            }
+            run.results?.scripts.orEmpty().filter { it.ssid == ssid }.forEach { script ->
+                script.steps.forEach { step -> add(run.pointId, Key("${script.alias ?: script.name} · ${step.name}", "paso de script", step.proxyConfig, step.route, step.status, step.errorCode)) }
+            }
+        }
+        return seen.map { (k, points) -> RouteFact(k.destination, k.direction, k.proxy, k.route, k.status, k.cause, points.size) }
     }
 
     private fun marks(ssid: String, survey: ProjectSnapshot, coverage: List<PointCoverage>, weakDbm: Int): Pair<List<MapMark>, SourceCounts> {
@@ -738,6 +767,18 @@ object SurveyReport {
                     .append("</td><td>").append(e(listOfNotNull(ev.toSsid, floor.apLabels.label(ev.to)).joinToString(" · ").ifEmpty { "—" }))
                     .append("</td><td>").append(e(ev.detail ?: "—")).append("</td><td>")
                     .append(if (ev.x != null && ev.y != null) e("%.0f, %.0f px (aprox.)".format(java.util.Locale.ROOT, ev.x, ev.y)) else "—").append("</td></tr>")
+            }
+            append("</table>")
+        }
+        if (section.routes.isNotEmpty()) {
+            append("<h4>Rutas HTTP y causas</h4><p class=\"muted\">Proxy configurado en Android para cada URL y ruta observada por el cliente que hizo la petición. ")
+            append("Las pruebas de velocidad usan el cliente HTTP de Android (respeta el proxy); las pruebas HTTP y los scripts abren su propio socket (ruta directa, no usan el proxy). ")
+            append("407 = el proxy pide autenticación; 429 = el servidor limita peticiones (sus valores no cuentan). Un intermediario transparente o el origen exacto de un 429 no son visibles desde la app.</p>")
+            append("<table><tr><th>Destino</th><th>Dirección</th><th>Proxy configurado</th><th>Ruta observada</th><th>HTTP</th><th>Causa</th><th>Puntos</th></tr>")
+            section.routes.forEach { r ->
+                append("<tr><td>").append(e(r.destination)).append("</td><td>").append(e(r.direction)).append("</td><td>").append(e(HttpRoute.proxyLabel(r.proxyConfig)))
+                    .append("</td><td>").append(e(HttpRoute.label(r.route))).append("</td><td>").append(e(r.httpStatus ?: "—")).append("</td><td>")
+                    .append(e(r.cause ?: "—")).append("</td><td>").append(r.points).append("</td></tr>")
             }
             append("</table>")
         }
