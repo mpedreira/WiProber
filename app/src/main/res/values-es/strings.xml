@@ -478,4 +478,5 @@ SHA-256: %1$s</string>
     <string name="point_sheet_route">proxy: %1$s · ruta: %2$s</string>
     <string name="point_sheet_history">Historial completo (%1$d escaneos, %2$d ejecuciones)</string>
     <string name="point_sheet_hide_history">Ocultar historial</string>
+    <string name="template_floor_changed">La planta cambió durante la importación: no se añadió nada. Vuelve a importar la plantilla en su planta.</string>
 </resources>

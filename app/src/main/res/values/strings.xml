@@ -478,4 +478,5 @@ SHA-256: %1$s</string>
     <string name="point_sheet_route">proxy: %1$s · route: %2$s</string>
     <string name="point_sheet_history">Full history (%1$d scans, %2$d runs)</string>
     <string name="point_sheet_hide_history">Hide history</string>
+    <string name="template_floor_changed">The floor changed during the import: nothing was added. Import the template again on its floor.</string>
 </resources>

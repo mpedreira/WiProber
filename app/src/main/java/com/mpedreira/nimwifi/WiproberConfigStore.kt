@@ -103,6 +103,36 @@ class WiproberConfigStore(
         Status(Status.CORRUPT, activeRevision(), e.message ?: e.javaClass.simpleName)
     }
 
+    /**
+     * RC4 · 4: one coherent copy of the active profile and its credentials (the same revision),
+     * for a whole run from the network check to the result. Kept in memory per directory and
+     * replaced when this process saves, activates or removes a profile; read it off the main
+     * thread the first time. An unreadable profile is not cached (empty, see [status]).
+     */
+    data class Snapshot(val revision: String?, val imported: Imported, val credentials: Map<String, String>)
+
+    fun snapshot(): Snapshot {
+        val key = directory.absolutePath
+        snapshots[key]?.let { return it }
+        val generation = generations[key] ?: 0L
+        return try {
+            val revision = activeRevision()
+            val profile = read()
+            Snapshot(revision, profile?.imported ?: Imported(), profile?.credentials.orEmpty()).also {
+                // A save that finished meanwhile wins over this older read.
+                if ((generations[key] ?: 0L) == generation) snapshots[key] = it
+            }
+        } catch (e: Exception) {
+            Snapshot(runCatching { activeRevision() }.getOrNull(), Imported(), emptyMap())
+        }
+    }
+
+    private fun invalidate() {
+        val key = directory.absolutePath
+        generations.merge(key, 1L, Long::plus)
+        snapshots.remove(key)
+    }
+
     /** The active profile; empty when absent or unreadable (see [status] to tell them apart). */
     fun load(): Imported = runCatching { read()?.imported }.getOrNull() ?: Imported()
 
@@ -176,6 +206,7 @@ class WiproberConfigStore(
     }
 
     fun clear() {
+        invalidate()
         pointer.delete()
         revisions.deleteRecursively()
         legacyFile.delete()
@@ -211,6 +242,7 @@ class WiproberConfigStore(
             target.deleteRecursively()
             throw e
         }
+        invalidate()
         prune(keep = setOf(revision))
         return revision
     }
@@ -252,6 +284,9 @@ class WiproberConfigStore(
     }
 
     companion object {
+        private val snapshots = java.util.concurrent.ConcurrentHashMap<String, Snapshot>()
+        private val generations = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
         /** Must match the backup exclusions in res/xml. */
         const val DIRECTORY = "private-config"
         private const val FILE_NAME = "imported.json"

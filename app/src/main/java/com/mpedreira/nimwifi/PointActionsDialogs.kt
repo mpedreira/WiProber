@@ -150,7 +150,7 @@ object PointActionsDialogs {
      * Mejora 20: counts, repeated ids and points outside the plan, and a thumbnail of the plan
      * with the points to add. Without plan identity the user confirms that it is the right plan.
      */
-    fun showTemplatePreview(context: Context, preview: PointTemplateParser.Preview, mapFile: java.io.File?, onAccept: () -> Unit) {
+    fun showTemplatePreview(context: Context, preview: PointTemplateParser.Preview, thumbnail: android.graphics.Bitmap?, onAccept: () -> Unit) {
         val message = StringBuilder(context.getString(
             R.string.template_preview_message,
             preview.points.size,
@@ -175,12 +175,23 @@ object PointActionsDialogs {
             .setMessage(message.toString())
             .setPositiveButton(if (preview.needsConfirmation) R.string.template_add_confirm else R.string.template_add) { _, _ -> onAccept() }
             .setNegativeButton(android.R.string.cancel, null)
-        templateThumbnail(context, mapFile, preview)?.let(builder::setView)
+        thumbnail?.let { bitmap ->
+            builder.setView(android.widget.ImageView(context).apply {
+                setImageBitmap(bitmap)
+                adjustViewBounds = true
+                val pad = (16 * context.resources.displayMetrics.density).toInt()
+                setPadding(pad, pad / 2, pad, 0)
+                contentDescription = context.getString(R.string.template_preview_title)
+            })
+        }
         builder.show()
     }
 
-    /** The plan, downscaled, with the points to add drawn on it; null when the plan cannot be read. */
-    private fun templateThumbnail(context: Context, mapFile: java.io.File?, preview: PointTemplateParser.Preview): android.view.View? {
+    /**
+     * The plan, downscaled, with the points to add drawn on it; null when the plan cannot be read.
+     * RC4 · 4: blocking (decode and drawing), called off the main thread.
+     */
+    fun templateBitmap(mapFile: java.io.File?, preview: PointTemplateParser.Preview): android.graphics.Bitmap? {
         if (mapFile == null || !mapFile.isFile) return null
         return runCatching {
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -195,13 +206,7 @@ object PointActionsDialogs {
             val s = bitmap.width.toFloat() / bounds.outWidth
             val radius = maxOf(3f, bitmap.width / 120f)
             preview.points.forEach { canvas.drawCircle(it.x * s, it.y * s, radius, paint) }
-            android.widget.ImageView(context).apply {
-                setImageBitmap(bitmap)
-                adjustViewBounds = true
-                val pad = (16 * context.resources.displayMetrics.density).toInt()
-                setPadding(pad, pad / 2, pad, 0)
-                contentDescription = context.getString(R.string.template_preview_title)
-            }
+            bitmap
         }.getOrNull()
     }
 

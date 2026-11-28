@@ -77,9 +77,7 @@ class SurveyActivity : AppCompatActivity() {
     private var saveFailureSnackbar: com.google.android.material.snackbar.Snackbar? = null
     /** The configuration screen may change the guide (SSID, profile): redraw on return. */
     private val configurationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        val state = viewModel.screenState.value
-        renderSurveyGuide(state)
-        renderPointMarkers(state)
+        renderMap(viewModel.screenState.value)
     }
     private var trackingStatusJob: Job? = null
     private var stopAndGoScanJob: Job? = null
@@ -215,7 +213,9 @@ class SurveyActivity : AppCompatActivity() {
                 override fun onPointTemplateSelected(uri: Uri?) {
                     val floorKey = currentFloorId
                     if (uri != null && floorKey != null) {
-                        activeTests.importPointTemplate(uri, floorKey, currentMapUri?.path?.let(::File), currentFloorPlanId)
+                        activeTests.importPointTemplate(uri, floorKey, currentMapUri?.path?.let(::File), currentFloorPlanId) {
+                            currentFloorId == floorKey
+                        }
                     }
                 }
 
@@ -253,9 +253,11 @@ class SurveyActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 var previous = SurveyScreenState()
                 viewModel.screenState.collect { state ->
-                    renderPointMarkers(state)
+                    // One read of the guide settings per state; every derivation below is memoized.
+                    val guideSettings = surveyGuideStore.load()
+                    renderPointMarkers(state, guideSettings)
                     binding.pointsOverlay.setCompletedTracks(state.continuousScanSessions)
-                    renderSurveyGuide(state)
+                    renderSurveyGuide(state, guideSettings)
                     activeTests.render(state, previous)
                     binding.pointsOverlay.setActiveTrack(
                         state.activeTrackPoints.map { android.graphics.PointF(it.x, it.y) }
@@ -287,7 +289,7 @@ class SurveyActivity : AppCompatActivity() {
                     binding.surveySummaryText.text = if (state.plannedPoints.isEmpty() && state.activeRuns.isEmpty()) {
                         floorSummary
                     } else {
-                        val counts = PointStatus.all(state).values.groupingBy { it }.eachCount()
+                        val counts = mapDerivations.statuses(state).values.groupingBy { it }.eachCount()
                         floorSummary + "\n" + getString(R.string.point_status_counts,
                             counts[PointStatus.PENDING] ?: 0, counts[PointStatus.COVERAGE] ?: 0,
                             counts[PointStatus.PERFORMANCE] ?: 0, counts[PointStatus.FAILURE] ?: 0)
@@ -381,7 +383,7 @@ class SurveyActivity : AppCompatActivity() {
                 }
                 R.id.action_survey_guide -> {
                     SurveyGuideSettingsDialog.show(this, surveyGuideStore) {
-                        renderSurveyGuide(viewModel.screenState.value)
+                        renderMap(viewModel.screenState.value)
                     }
                     true
                 }
@@ -400,8 +402,7 @@ class SurveyActivity : AppCompatActivity() {
                     ) { network ->
                         surveyGuideStore.save(surveyGuideStore.load().copy(ssidFilter = network?.ssid.orEmpty(), bandFilter = network?.band.orEmpty()))
                         val current = viewModel.screenState.value
-                        renderSurveyGuide(current)
-                        renderPointMarkers(current)
+                        renderMap(current)
                         mapNetwork(current)?.let {
                             Toast.makeText(this, getString(R.string.map_ssid_selected, PointActionsDialogs.networkLabel(this, it)), Toast.LENGTH_LONG).show()
                         }
@@ -552,34 +553,27 @@ class SurveyActivity : AppCompatActivity() {
         }
     }
 
+    /** RC4 · 4: map derivations, recomputed only when their own inputs change. */
+    private val mapDerivations = MapDerivations()
+
     /** SSID the map shows: the chosen one, else the most widely detected on this floor. */
     private fun mapSsid(state: SurveyScreenState): String? = mapNetwork(state)?.ssid
 
     /** The primary network (SSID + band) the map is coloured by. */
-    private fun mapNetwork(state: SurveyScreenState): MapNetwork? = surveyGuideStore.load().let { settings ->
-        SsidCoverage.selectedNetwork(settings.ssidFilter, settings.band, state.scanPoints, state.continuousScanSessions)
+    private fun mapNetwork(state: SurveyScreenState, settings: SurveyGuideSettings = surveyGuideStore.load()): MapNetwork? =
+        mapDerivations.network(state, settings)
+
+    /** Redraws the map after its settings changed (guide, SSID, profile). */
+    private fun renderMap(state: SurveyScreenState) {
+        val settings = surveyGuideStore.load()
+        renderSurveyGuide(state, settings)
+        renderPointMarkers(state, settings)
     }
 
-    /** Points coloured by their state for the map SSID; planned points as hollow rings. */
-    private fun renderPointMarkers(state: SurveyScreenState) {
-        val network = mapNetwork(state)
-        val ssid = network?.ssid
-        // RC4 · 3: performance passed / failed as a badge on each point.
-        val statuses = PointStatus.all(state)
+    /** Points coloured by their state for the map network, with their status badge; planned points as hollow rings. */
+    private fun renderPointMarkers(state: SurveyScreenState, settings: SurveyGuideSettings) {
         binding.pointsOverlay.setScanPoints(emptyList())
-        binding.pointsOverlay.setPointMarkers(
-            if (ssid == null) {
-                state.scanPoints.distinctBy { it.pointId ?: it.scanId ?: "${it.x},${it.y}" }
-                    .map { PointsOverlayView.PointMarker(it.x, it.y, null, status = it.pointId?.let(statuses::get)) } +
-                    state.plannedPoints.filter { p -> state.scanPoints.none { it.pointId == p.pointId } }
-                        .map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED, status = statuses[it.pointId]) }
-            } else {
-                SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid, surveyGuideStore.load().signal.primaryDbm,
-                    surveyGuideStore.load().signal.secondaryDbm, state.activeRuns, band = network.band)
-                    .map { PointsOverlayView.PointMarker(it.x, it.y, it.state, it.secondaryOk, statuses[it.pointId]) } +
-                    state.scanPoints.filter { it.pointId == null }.map { PointsOverlayView.PointMarker(it.x, it.y, null) }
-            }
-        )
+        binding.pointsOverlay.setPointMarkers(mapDerivations.markers(state, settings))
     }
 
     /** The existing point under a tap (touch radius in screen pixels converted to plan pixels). */
@@ -589,17 +583,20 @@ class SurveyActivity : AppCompatActivity() {
         return SsidCoverage.pointAt(state.scanPoints, state.plannedPoints, original[0], original[1], radius)
     }
 
-    private fun showPointActions(state: SurveyScreenState, pointId: String, tapX: Float, tapY: Float) {
+    private fun showPointActions(state: SurveyScreenState, pointId: String, tapX: Float, tapY: Float) = lifecycleScope.launch {
         val label = SsidCoverage.labels(state.scanPoints, state.plannedPoints)[pointId] ?: pointId
+        // RC4 · 4: the profile is read off the main thread (in memory after the first time).
+        val canRunActiveTests = activeTests.hasTests()
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@launch
         PointActionsDialogs.showPointActions(
-            this, label,
-            canRunActiveTests = activeTests.hasTests(),
+            this@SurveyActivity, label,
+            canRunActiveTests = canRunActiveTests,
             onDetails = {
                 val current = viewModel.screenState.value
                 val ssid = mapSsid(current)
                 val network = mapNetwork(current)
                 PointDetails.of(current, pointId, ssid, network?.band)?.let {
-                    PointActionsDialogs.showPointDetails(this, it, ssid, network?.let { n -> PointActionsDialogs.networkLabel(this, n) })
+                    PointActionsDialogs.showPointDetails(this@SurveyActivity, it, ssid, network?.let { n -> PointActionsDialogs.networkLabel(this@SurveyActivity, n) })
                 }
             },
             onMeasure = { measure ->
@@ -622,47 +619,36 @@ class SurveyActivity : AppCompatActivity() {
             surveyGuideStore.load().enabled && (state.metersPerUnit ?: 0.0) > 0.0
 
     /** Coverage gradient, next suggested point, Skip button and the "calibrate first" hint. */
-    private val coverageCache = CoverageSampleCache()
 
-    private fun renderSurveyGuide(state: SurveyScreenState) {
-        val settings = surveyGuideStore.load()
+    private fun renderSurveyGuide(state: SurveyScreenState, settings: SurveyGuideSettings) {
         val map = state.mapInfo
         val scale = state.metersPerUnit?.takeIf { it > 0.0 }
         val showGuide = settings.enabled && map != null && scale != null
+        val network = mapNetwork(state, settings)
         binding.pointsOverlay.setCoverage(
-            samples = if (showGuide) {
-                // One SSID at a time: another SSID's signal never fills this one's gaps.
-                // Recomputed only when its inputs change (mejora 18), not on progress-only updates.
-                mapNetwork(state)?.let { coverageCache.samples(state.scanPoints, state.continuousScanSessions, it.ssid, it.band) }.orEmpty()
-            } else {
-                emptyList()
-            },
+            // One SSID at a time: another SSID's signal never fills this one's gaps.
+            // Recomputed only when its inputs change (mejora 18), not on progress-only updates.
+            samples = if (showGuide) mapDerivations.coverage(state, settings) else emptyList(),
             radiusPx = if (showGuide) (settings.coverageRadiusMeters / scale!!).toFloat() else null,
             sourceWidth = map?.width ?: 0,
-            sourceHeight = map?.height ?: 0
+            sourceHeight = map?.height ?: 0,
+            // RC4 · 4: another floor or network discards the layer at once; new points of the same one keep it until redrawn.
+            layer = listOf(currentFloorId, map?.fileName, network)
         )
-        val suggestion = if (showGuide && state.scanMode == SurveyScanMode.STOP_AND_GO) {
-            state.movedSuggestion ?: SurveyGuide.suggestNext(
-                map!!.width, map.height, scale, settings,
-                SurveyGuide.measurementOrder(state.scanPoints, state.continuousScanSessions),
-                state.skippedSuggestions
-            )
-        } else {
-            null
-        }
+        val suggestion = if (showGuide) mapDerivations.suggestion(state, settings) else null
         currentSuggestion = suggestion
         binding.pointsOverlay.setSuggestion(
             suggestion?.let { android.graphics.PointF(it.x, it.y) },
             moved = state.movedSuggestion != null
         )
         binding.skipSuggestionButton.isVisible = suggestion != null && state.interaction is SurveyInteraction.Idle
-        renderGuideGrid(state, settings, showGuide && state.scanMode == SurveyScanMode.STOP_AND_GO)
+        renderGuideGrid(state, settings, showGuide && state.scanMode == SurveyScanMode.STOP_AND_GO, network)
         binding.surveyGuideHint.isVisible = settings.enabled && map != null && scale == null &&
             state.scanMode == SurveyScanMode.STOP_AND_GO
     }
 
     /** Grid of the guide's cells over the plan and a legend with the guide settings and the scale. */
-    private fun renderGuideGrid(state: SurveyScreenState, settings: SurveyGuideSettings, visible: Boolean) {
+    private fun renderGuideGrid(state: SurveyScreenState, settings: SurveyGuideSettings, visible: Boolean, network: MapNetwork?) {
         val map = state.mapInfo
         val scale = state.metersPerUnit
         val grid = if (visible && map != null) SurveyGuide.grid(map.width, map.height, scale, settings) else null
@@ -674,7 +660,7 @@ class SurveyActivity : AppCompatActivity() {
             R.string.guide_legend,
             formatGuideNumber(config.spacingMeters),
             formatGuideNumber(config.coverageRadiusMeters),
-            mapNetwork(state)?.let { PointActionsDialogs.networkLabel(this, it) } ?: getString(R.string.guide_legend_no_ssid),
+            network?.let { PointActionsDialogs.networkLabel(this, it) } ?: getString(R.string.guide_legend_no_ssid),
             formatGuideNumber(1.0 / scale)
         )
     }
@@ -1151,7 +1137,7 @@ class SurveyActivity : AppCompatActivity() {
                         quantityString(R.plurals.network_count, outcome.results.size)
                     )
                     if (point != null && measure == PointMeasure.COVERAGE_AND_PERFORMANCE) {
-                        if (!activeTests.start(point.pointId!!, point.scanId, outcome.results)) {
+                        activeTests.start(point.pointId!!, point.scanId, outcome.results) {
                             Toast.makeText(this@SurveyActivity, R.string.measure_no_tests, Toast.LENGTH_LONG).show()
                         }
                     }

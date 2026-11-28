@@ -86,6 +86,8 @@ class PointsOverlayView @JvmOverloads constructor(
     // --- Survey guide: coverage gradient (pre-rendered in floor-plan space) and next point ---
     private var coverageBitmap: Bitmap? = null
     private var coverageKey: Any? = null
+    private var coverageLayer: Any? = null
+    private val coverageJobs = LatestOnly()
     private var suggestion: PointF? = null
     private var suggestionMoved = false
     private val density = resources.displayMetrics.density
@@ -137,34 +139,62 @@ class PointsOverlayView @JvmOverloads constructor(
      * Coverage of each measurement: a radial gradient of [radiusPx] floor-plan pixels coloured by
      * its strongest signal. Rendered once into a down-scaled bitmap so panning stays cheap.
      */
-    fun setCoverage(samples: List<CoverageSample>, radiusPx: Float?, sourceWidth: Int, sourceHeight: Int) {
-        val key = listOf(samples, radiusPx, sourceWidth, sourceHeight)
+    /**
+     * Coverage layer. RC4 · 4: the bitmap and its gradients are drawn on a background thread; a
+     * result is shown only if nothing newer was asked for meanwhile. [layer] identifies floor and
+     * network: when it changes, the old layer disappears at once; new samples of the same layer keep
+     * the previous bitmap until the new one is ready. The bitmap keeps the plan's proportions and
+     * is mapped to original floor-plan pixels when drawn, so pan and zoom are unaffected.
+     */
+    fun setCoverage(samples: List<CoverageSample>, radiusPx: Float?, sourceWidth: Int, sourceHeight: Int, layer: Any? = null) {
+        val key = listOf(samples, radiusPx, sourceWidth, sourceHeight, layer)
         if (key == coverageKey) return
-        coverageKey = key
-        coverageBitmap = null
-        if (radiusPx != null && radiusPx > 0f && samples.isNotEmpty() && sourceWidth > 0 && sourceHeight > 0) {
-            val scale = minOf(1f, MAX_COVERAGE_SIDE.toFloat() / maxOf(sourceWidth, sourceHeight))
-            val bitmap = createBitmap(
-                (sourceWidth * scale).toInt().coerceAtLeast(1),
-                (sourceHeight * scale).toInt().coerceAtLeast(1)
-            )
-            val canvas = Canvas(bitmap)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-            val radius = (radiusPx * scale).coerceAtLeast(1f)
-            // Weakest first, so the strongest reading at a spot is the one on top.
-            samples.sortedBy { it.bestRssi ?: Int.MIN_VALUE }.forEach { sample ->
-                val color = SurveyGuide.rssiColor(sample.bestRssi)
-                paint.shader = RadialGradient(
-                    sample.x * scale, sample.y * scale, radius,
-                    intArrayOf(withAlpha(color, 170), withAlpha(color, 120), withAlpha(color, 0)),
-                    floatArrayOf(0f, 0.6f, 1f),
-                    Shader.TileMode.CLAMP
-                )
-                canvas.drawCircle(sample.x * scale, sample.y * scale, radius, paint)
-            }
-            coverageBitmap = bitmap
+        if (layer != coverageLayer || radiusPx == null || samples.isEmpty()) {
+            coverageBitmap = null
+            invalidate()
         }
-        invalidate()
+        coverageKey = key
+        coverageLayer = layer
+        val ticket = coverageJobs.begin()
+        if (radiusPx == null || radiusPx <= 0f || samples.isEmpty() || sourceWidth <= 0 || sourceHeight <= 0) return
+        coverageExecutor.execute {
+            if (!coverageJobs.isCurrent(ticket)) return@execute
+            val bitmap = runCatching { drawCoverage(samples, radiusPx, sourceWidth, sourceHeight) }.getOrNull()
+            post {
+                if (coverageJobs.isCurrent(ticket)) {
+                    coverageBitmap = bitmap
+                    invalidate()
+                }
+            }
+        }
+    }
+
+    private fun drawCoverage(samples: List<CoverageSample>, radiusPx: Float, sourceWidth: Int, sourceHeight: Int): Bitmap {
+        val scale = minOf(1f, MAX_COVERAGE_SIDE.toFloat() / maxOf(sourceWidth, sourceHeight))
+        val bitmap = createBitmap(
+            (sourceWidth * scale).toInt().coerceAtLeast(1),
+            (sourceHeight * scale).toInt().coerceAtLeast(1)
+        )
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val radius = (radiusPx * scale).coerceAtLeast(1f)
+        // Weakest first, so the strongest reading at a spot is the one on top.
+        samples.sortedBy { it.bestRssi ?: Int.MIN_VALUE }.forEach { sample ->
+            val color = SurveyGuide.rssiColor(sample.bestRssi)
+            paint.shader = RadialGradient(
+                sample.x * scale, sample.y * scale, radius,
+                intArrayOf(withAlpha(color, 170), withAlpha(color, 120), withAlpha(color, 0)),
+                floatArrayOf(0f, 0.6f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(sample.x * scale, sample.y * scale, radius, paint)
+        }
+        return bitmap
+    }
+
+    override fun onDetachedFromWindow() {
+        coverageJobs.begin() // anything still drawing is stale
+        super.onDetachedFromWindow()
     }
 
     /** Next suggested point (floor-plan pixels); [moved] when the user placed it by hand. */
@@ -186,12 +216,13 @@ class PointsOverlayView @JvmOverloads constructor(
 
     // ================== DATA SETTERS ==================
 
-    /** Point marker coloured by its [PointState] for the selected SSID; null state = no SSID selected. */
-    /** [redundant]: a second AP of the same SSID above the secondary threshold (drawn as an outer ring). */
-    /** [status]: RC4 · 3 [PointStatus]; performance and failure draw a badge on the marker. */
-    data class PointMarker(val x: Float, val y: Float, val state: String?, val redundant: Boolean = false, val status: String? = null)
-
-    private val pointMarkers = mutableListOf<PointMarker>()
+    /**
+     * Point markers ([MapMarker]): coloured by their [PointState] for the selected network (null
+     * state = no SSID selected), an outer ring for a second AP above the secondary threshold, and
+     * the RC4 · 3 [PointStatus] badge.
+     */
+    private val pointMarkers = mutableListOf<MapMarker>()
+    private var pointMarkersSource: List<MapMarker>? = null
     private val performanceBadgePaint = Paint().apply { color = Color.rgb(21, 101, 192); style = Paint.Style.FILL; isAntiAlias = true }
     private val failureBadgePaint = Paint().apply { color = Color.rgb(198, 40, 40); style = Paint.Style.FILL; isAntiAlias = true }
     private val badgeStrokePaint = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL; isAntiAlias = true }
@@ -205,7 +236,9 @@ class PointsOverlayView @JvmOverloads constructor(
         color = Color.DKGRAY; style = Paint.Style.STROKE; strokeWidth = 5f; isAntiAlias = true
     }
 
-    fun setPointMarkers(markers: List<PointMarker>) {
+    fun setPointMarkers(markers: List<MapMarker>) {
+        if (markers === pointMarkersSource) return // memoized: unchanged since the last state
+        pointMarkersSource = markers
         pointMarkers.clear()
         pointMarkers.addAll(markers)
         invalidate()
@@ -255,9 +288,12 @@ class PointsOverlayView @JvmOverloads constructor(
     }
 
     fun clearAll() {
+        coverageJobs.begin()
         coverageBitmap = null
         guideGrid = null
         coverageKey = null
+        coverageLayer = null
+        pointMarkersSource = null
         suggestion = null
         pointsToDraw.clear()
         pointMarkers.clear()
@@ -460,6 +496,10 @@ class PointsOverlayView @JvmOverloads constructor(
     }
 
     private companion object {
+        /** One background thread draws coverage layers, newest request wins ([LatestOnly]). */
+        private val coverageExecutor: java.util.concurrent.ExecutorService =
+            java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "coverage-layer").apply { isDaemon = true } }
+
         const val MAX_COVERAGE_SIDE = 1_024
         const val SUGGESTION_RADIUS_DP = 18f
         val SUGGESTION_COLOR = Color.rgb(21, 101, 192)
