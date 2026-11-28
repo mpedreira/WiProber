@@ -2,7 +2,9 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
-## Unreleased
+## 4.2.0
+
+Same app as 4.1.1 with a new icon; published as the release APK (`com.mpedreira.nimwifi`) and the debug APK (`com.mpedreira.nimwifi.debug`).
 
 ### Changed
 - **New app icon**: a black «N» with a signal-coverage blob (green levels, red hot spot), on a white background. Adaptive icon with the «N» inside the launcher's safe zone (not clipped by circular masks), classic and round icons, and the Play Store image.
