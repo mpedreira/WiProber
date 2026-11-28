@@ -171,10 +171,11 @@ object PerformanceExport {
                     }
                 })
             }
-            // Only with requirements: without them the file is exactly as before.
+            // RC4 · 5: every SSID section has a verdict (signal profile always; declared criteria on top).
             verdict?.takeIf { it.hasVerdict }?.let { model ->
-                add("requirements", GsonBuilder().create().toJsonTree(model.requirements).asJsonObject.apply {
+                add("requirements", GsonBuilder().create().toJsonTree(model.requirements ?: Requirements()).asJsonObject.apply {
                     addProperty("rssiThresholdDbm", model.weakDbm)
+                    addProperty("secondaryThresholdDbm", model.secondaryDbm)
                     addProperty("signalProfile", model.profile)
                 })
                 add("verdicts", JsonArray().apply {
@@ -206,6 +207,9 @@ object PerformanceExport {
         addProperty("pointsWithData", v.withData)
         addProperty("percentPassing", v.percentPassing)
         addProperty("outagesOnFloor", v.outagesOnFloor)
+        addProperty("scope", v.scope)
+        addProperty("inconclusiveReason", v.inconclusiveReason)
+        add("pending", JsonArray().apply { v.pending.forEach(::add) })
         add("floorChecks", JsonArray().apply { v.floorChecks.forEach { add(checkRow(it)) } })
         add("points", JsonArray().apply {
             v.points.forEach { p ->
@@ -224,7 +228,14 @@ object PerformanceExport {
             .toByteArray(StandardCharsets.UTF_8)
 
     /** Writes the export bundle: the ESX archive untouched plus the performance file and the readable report. */
-    fun writeBundle(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray, reportHtml: ByteArray? = null) {
+    fun writeBundle(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray, reportHtml: ByteArray? = null) =
+        writeEntries(output, esxFileName, esxArchive, performanceJson, reportHtml?.let { bytes -> { zip: OutputStream -> zip.write(bytes) } })
+
+    /** RC4 · 5: the report streamed from a staged file, never held in memory whole. */
+    fun writeBundle(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray, reportHtml: File) =
+        writeEntries(output, esxFileName, esxArchive, performanceJson) { zip: OutputStream -> reportHtml.inputStream().use { it.copyTo(zip, 64 * 1024) } }
+
+    private fun writeEntries(output: OutputStream, esxFileName: String, esxArchive: File, performanceJson: ByteArray, writeReport: ((OutputStream) -> Unit)?) {
         ZipOutputStream(output).use { zip ->
             zip.putNextEntry(ZipEntry(esxFileName))
             esxArchive.inputStream().use { it.copyTo(zip, 64 * 1024) }
@@ -232,9 +243,9 @@ object PerformanceExport {
             zip.putNextEntry(ZipEntry(FILE_NAME))
             zip.write(performanceJson)
             zip.closeEntry()
-            reportHtml?.let {
+            writeReport?.let { write ->
                 zip.putNextEntry(ZipEntry(SurveyReport.FILE_NAME))
-                zip.write(it)
+                write(zip)
                 zip.closeEntry()
             }
         }

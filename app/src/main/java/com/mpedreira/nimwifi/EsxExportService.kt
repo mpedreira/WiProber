@@ -88,15 +88,19 @@ class EsxExportService(
                 val reportModel = SurveyReport.build(snapshot, now, reportSsid, weakDbm = reportProfile.primaryDbm, profile = reportProfile.id,
                     planImages = planImages(snapshot), requirements = imported?.requirements, apNames = apNames, ouiRegistry = ouiRegistry())
                 val performance = PerformanceExport.build(report, bundleEsxName, now, snapshot, reportModel, apNames)
+                // RC4 · 5: the report is written block by block to a staged file and streamed into the ZIP.
+                val reportFile = File(exportDirectory, SurveyReport.FILE_NAME)
+                reportFile.outputStream().buffered().writer(Charsets.UTF_8).use { SurveyReport.writeTo(reportModel, it) }
                 bundleArchive.outputStream().buffered().use { output ->
                     PerformanceExport.writeBundle(
                         output,
                         bundleEsxName,
                         completeArchive,
                         PerformanceExport.toBytes(performance),
-                        SurveyReport.html(reportModel).toByteArray(Charsets.UTF_8)
+                        reportFile
                     )
                 }
+                reportFile.delete()
                 StagedExport.verifyZip(bundleArchive, setOf(bundleEsxName, PerformanceExport.FILE_NAME, SurveyReport.FILE_NAME), nestedEsx = bundleEsxName)
                 bundleArchive
             } else {

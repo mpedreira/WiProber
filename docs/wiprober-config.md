@@ -124,7 +124,7 @@ The preview lists what was stripped and which credentials must be provided for t
 
 ## Report requirements (verdict)
 
-`requirements` (optional) turns the report into a decision: for each SSID and floor, whether it meets the thresholds and which points fail. **Every value is yours: there is no default.** Without the section (or with it empty) the report and the export are exactly as before.
+Since RC4 every floor/SSID section of the report opens with a decision — **Cumple**, **No cumple** or **No concluyente** — judged by the **signal profile** (`guide.profile`): coverage (strongest AP of the SSID ≥ the profile's primary threshold) and **second AP** (second strongest distinct AP of the SSID ≥ the profile's secondary threshold, redundancy for roaming) at every point. `requirements` (optional) adds performance, services, bands and roaming to that decision. **Every value is yours: there is no default.** Without the section only coverage and the second AP decide, and the report says which criteria were not declared.
 
 ```json
 "requirements": {
@@ -148,7 +148,7 @@ The preview lists what was stripped and which credentials must be provided for t
 
 Signal uses the **signal profile's threshold** (`guide.profile`), the same as the map. Limits are inclusive (a value equal to the threshold meets it). Aliases are unique; numbers must be ≥ 0 and percentages ≤ 100, otherwise the import is refused with the reason.
 
-The verdict has three states per point and per SSID/floor: **meets**, **does not meet**, **missing data**. A point has *missing data* when a requirement has no valid measurement there (planned point, imported point without local RF, a run skipped, cancelled or without value): `null` is never `0` nor a network failure. Any failure decides; otherwise any missing datum; otherwise it meets. A loss of reachability inside a point's measurement window makes the point fail even when its median is good; an AP change without loss is only explained. Each SSID is judged on its own.
+The verdict has three states per point and per SSID/floor: **meets**, **does not meet**, **not conclusive** (`missing_data`). A point is *not conclusive* when a criterion has no valid measurement there (planned point, imported point without local RF, a run skipped, cancelled, limited by the server (HTTP 429) or without value): `null` is never `0` nor a network failure. The section then says why and what remains to be measured (per criterion: how many points, which, and why), and lists the points with their reasons in words — e.g. «P17 · buena señal · falla «acceso a la aplicación»», «P22 · sin medición local», telling apart an SSID absent in a valid scan, no local measurement and a test limited by the server. A service failing at a point is listed there even when no criterion is declared for it (it then does not decide). Any failure decides; otherwise any missing datum; otherwise it meets. A loss of reachability inside a point's measurement window makes the point fail even when its median is good; an AP change without loss is only explained. Each SSID is judged on its own.
 
 ## AP names (BSSID → AP)
 

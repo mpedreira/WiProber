@@ -34,7 +34,7 @@
     "intervalMs": 200
   },
   "requirements": {
-    "_comment": "Optional thresholds of the report verdict (example values, not defaults). Omit the section for no verdict.",
+    "_comment": "Optional thresholds of the report verdict (example values, not defaults). Without it the verdict uses only the signal profile (coverage and second AP).",
     "throughput": [
       {
         "alias": "corporate",

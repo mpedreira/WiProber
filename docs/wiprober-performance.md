@@ -38,8 +38,8 @@ Nothing from nimWifi is written inside the `.esx`, and Ekahau's native `throughp
   "scriptSteps":     [ { …row… }, … ],
   "roamingSessions": [ { …row… }, … ],
   "roamingEvents":   [ { …row… }, … ],
-  "requirements":    { … },            // only with requirements configured
-  "verdicts":        [ { …row… }, … ], // only with requirements configured
+  "requirements":    { … },            // criteria applied (RC4: always with the report)
+  "verdicts":        [ { …row… }, … ], // one per floor and SSID (RC4: always with the report)
   "apNames":         [ { …row… }, … ], // only with an AP table
   "apInventory":     [ { …row… }, … ]  // every radio of the floors' local scans
 }
@@ -58,25 +58,28 @@ Nothing from nimWifi is written inside the `.esx`, and Ekahau's native `throughp
 | `roamingSessions` | array | One row per **Continuous track with a roaming probe** — section 3d |
 | `roamingEvents` | array | One row per **roam or outage** found in those tracks — section 3d |
 
-Every array is always present (empty when there is no data), except the additive `requirements`, `verdicts` and `apNames`, which only appear when the configuration has them (section 3e).
+Every array is always present (empty when there is no data), except the additive `requirements` and `verdicts` (present whenever the report is built: since RC4 every section is judged by its signal profile) and `apNames` (only with an AP table) — section 3e.
 
 ## 3e. Verdict and AP names (optional, additive)
 
-`requirements`: the thresholds applied (see `docs/wiprober-config.md`), plus `rssiThresholdDbm` and `signalProfile`.
+`requirements`: the declared thresholds (see `docs/wiprober-config.md`; empty arrays/`null` when none are declared), plus `rssiThresholdDbm`, `secondaryThresholdDbm` (RC4: the profile's second-AP threshold) and `signalProfile`.
 
 `verdicts`: one row per floor and SSID of the report:
 
 | Field | Description |
 |---|---|
 | `floorName`, `floorPlanId`, `ssid` | Where (join with the `.esx` by `floorPlanId`) |
-| `state` | `pass`, `fail` or `missing_data` |
+| `state` | `pass`, `fail` or `missing_data` (*no concluyente*) |
+| `scope` | RC4: what is judged and which criteria were not declared (text) |
+| `inconclusiveReason` | RC4: why it is not conclusive; `null` when it is |
+| `pending[]` | RC4: what remains to be measured, per criterion (points and reasons) |
 | `pointsPassing`, `pointsFailing`, `pointsMissingData` | Points by verdict |
 | `pointsWithData`, `percentPassing` | Denominator (points with valid data for every requirement) and passing % over it; `null` without data |
 | `outagesOnFloor` | Reachability/association losses of the SSID on the floor (also without a roaming requirement) |
 | `floorChecks[]` | Checks of the SSID on the floor: p95 and roaming |
 | `points[]` | `pointId`, `label`, `state`, `checks[]` |
 
-Each check: `requirement` (e.g. `rssi`, `iperf3:corporate:download`, `service:ERP:time`, `outage-during-measurement`, `roaming:outage`), `label`, `state`, `value` (`null` when not measured validly — never 0), `threshold`, `unit`, `runId` (the `activeRuns` row the value comes from) and `reason`.
+Each check: `requirement` (e.g. `rssi`, `second-ap`, `iperf3:corporate:download`, `service:ERP:time`, `outage-during-measurement`, `roaming:outage`), `label`, `state`, `value` (`null` when not measured validly — never 0), `threshold`, `unit`, `runId` (the `activeRuns` row the value comes from) and `reason`.
 
 `apInventory` (4.0.0-rc.5): one row per radio heard in the floors' local scans — `floorName`, `floorPlanId`, `bssid`, `ssids`, `frequencyMhz`, `band` (`2.4`, `5`, `6`), `channel`, `bestRssi`, and what is **inferred** about its AP: `inferredVendor` with `inferredVendorSource` (`wps`: the AP's WPS manufacturer; `oui`: the IEEE assignment of the BSSID's OUI; `vendor-ie`: the OUI of a vendor element, ignoring WMM/WPS, Wi-Fi Alliance and chipsets), `inferredModel` (WPS model, mostly consumer gear), `advertisedName` (name the AP advertises: Cisco element 133, Aruba element) and `locallyAdministered` (such a BSSID has no vendor OUI). Every BSSID is its own row: nothing is grouped. Scans saved before rc.5 only keep the first 512 bytes of their elements, so vendor elements are often missing there.
 

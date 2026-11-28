@@ -50,7 +50,8 @@ New projects are generated as a supported Ekahau subset. Imported projects use a
 - `PerformanceExport.kt`: `wiprober-performance.json` and the export ZIP (untouched ESX + that file + `wiprober-report.html`). It is never written inside the ESX.
 - `SsidCoverage.kt`: Android-free per-SSID point states (ok, weak, SSID not detected in a valid scan, no local measurement), point labels and tap hit-testing.
 - `SurveyReport.kt`: readable per-floor/per-SSID report model and its self-contained HTML.
-- `Requirements.kt`: Android-free report verdict: optional `requirements` thresholds and `VerdictEvaluator` (meets / does not meet / missing data per point and per SSID/floor; null is missing data, never 0).
+- `Requirements.kt`: Android-free report verdict: `VerdictEvaluator` always judges coverage and the second AP with the signal profile, and the optional `requirements` thresholds on top (meets / does not meet / not conclusive per point and per SSID/floor; null is missing data, never 0).
+- `MapDerivations.kt`: Android-free memoized map derivations (network, markers, statuses, coverage samples, suggestion) and `LatestOnly` for background layers.
 - `ApNames.kt`: the user's BSSID → AP name table (`apNames` / `ap-names.csv`), BSSID normalization, and `ApLabels` (name, band, channel, inferred vendor of one radio); display only, never inferred or merged.
 - `BeaconIdentity.kt`: what a beacon says about its AP (vendor elements, WPS, advertised name), extracted when scanning; the ESX keeps its own 512-byte elements.
 - `ApIdentity.kt`: bundled IEEE OUI registry (`res/raw/oui_registry.gz`, not an ESX asset) and the inferred vendor/model of each radio with its source, plus the per-floor AP inventory. Inferences are labelled as such and never group BSSIDs.

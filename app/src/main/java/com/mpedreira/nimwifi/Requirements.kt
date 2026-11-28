@@ -5,9 +5,10 @@ import kotlin.math.roundToLong
 
 /**
  * Optional acceptance criteria of a survey (`requirements` in `wiprober-config.json`): what a
- * warehouse running handhelds needs from each SSID. Without them the report is unchanged. Every
- * threshold is the user's: nothing here has a default value. The RSSI threshold is the signal
- * profile's (see [SignalProfile]), as for the coverage map.
+ * warehouse running handhelds needs from each SSID. Every threshold is the user's: nothing here
+ * has a default value. RC4 · 5: coverage and the second AP are always judged with the signal
+ * profile ([SignalProfile]), as on the map; these criteria add performance, services, bands and
+ * roaming when declared.
  */
 @JsonModel
 data class Requirements(
@@ -61,7 +62,7 @@ data class RoamingRequirement(
     val maxLossesPerFloor: Int? = null
 )
 
-/** cumple / no cumple / faltan datos. */
+/** cumple / no cumple / no concluyente (missing data). */
 object VerdictState {
     const val PASS = "pass"
     const val FAIL = "fail"
@@ -77,8 +78,11 @@ object VerdictState {
     fun label(state: String): String = when (state) {
         PASS -> "cumple"
         FAIL -> "no cumple"
-        else -> "faltan datos"
+        else -> "no concluyente"
     }
+
+    /** RC4 · 5: the heading of a section's decision. */
+    fun title(state: String): String = label(state).replaceFirstChar { it.uppercase() }
 }
 
 /**
@@ -109,8 +113,20 @@ data class SsidVerdict(
     /** Checks of the SSID on the floor as a whole (p95, roaming outages and their count). */
     val floorChecks: List<Check>,
     /** Reachability/association losses of this SSID on the floor, always reported (also without a roaming requirement). */
-    val outagesOnFloor: Int = 0
+    val outagesOnFloor: Int = 0,
+    /** RC4 · 5: what is judged (signal profile always; declared criteria) and what is not declared. */
+    val scope: String = "",
+    /** RC4 · 5: what remains to be measured for a conclusive verdict, grouped by requirement. */
+    val pending: List<String> = emptyList()
 ) {
+    /** RC4 · 5: why the verdict is not conclusive; null when it is. */
+    val inconclusiveReason: String?
+        get() = if (state != VerdictState.MISSING) null else when {
+            points.isEmpty() && floorChecks.isEmpty() -> "ningún punto del SSID en esta planta"
+            withData == 0 -> "ningún punto con muestras válidas de todos los criterios"
+            else -> "${missing} de ${points.size} puntos sin muestras válidas de algún criterio"
+        }
+
     val passing: Int get() = points.count { it.state == VerdictState.PASS }
     val failing: Int get() = points.count { it.state == VerdictState.FAIL }
     val missing: Int get() = points.count { it.state == VerdictState.MISSING }
@@ -135,13 +151,47 @@ object VerdictEvaluator {
         runs: List<ActiveRun>,
         events: List<SurveyReport.FloorEvent>,
         weakDbm: Int,
-        apNames: ApLabels = ApLabels.EMPTY
+        apNames: ApLabels = ApLabels.EMPTY,
+        /** RC4 · 5: the profile's second-AP threshold; null skips the second-AP check (as before RC4). */
+        secondaryDbm: Int? = null
     ): SsidVerdict {
         val ssidEvents = events.filter { it.belongsTo(ssid) }
-        val points = coverage.map { point -> pointVerdict(requirements, ssid, point, runs.filter { it.pointId == point.pointId }, ssidEvents, weakDbm, apNames) }
+        val points = coverage.map { point -> pointVerdict(requirements, ssid, point, runs.filter { it.pointId == point.pointId }, ssidEvents, weakDbm, apNames, secondaryDbm) }
         val floorChecks = floorChecks(requirements, ssid, coverage, runs, ssidEvents, apNames)
         val state = VerdictState.combine(points.map { it.state } + floorChecks.map { it.state })
-        return SsidVerdict(ssid, floorName, state, points, floorChecks, ssidEvents.filter { it.outage }.distinctBy { it.event.key }.size)
+        return SsidVerdict(ssid, floorName, state, points, floorChecks, ssidEvents.filter { it.outage }.distinctBy { it.event.key }.size,
+            scope = scope(requirements, weakDbm, secondaryDbm), pending = pending(points, floorChecks))
+    }
+
+    /** What the verdict judges and what was not declared (so it is not judged). */
+    private fun scope(requirements: Requirements, weakDbm: Int, secondaryDbm: Int?): String {
+        val judged = listOfNotNull(
+            "cobertura (AP más fuerte ≥ $weakDbm dBm)",
+            secondaryDbm?.let { "segundo AP (≥ $it dBm)" },
+            "bandas".takeIf { !requirements.bands.isNullOrEmpty() },
+            "rendimiento iPerf3".takeIf { !requirements.throughput.isNullOrEmpty() },
+            "servicios".takeIf { !requirements.networkTests.isNullOrEmpty() },
+            "roaming".takeIf { requirements.roaming != null }
+        )
+        val notDeclared = listOfNotNull(
+            "rendimiento".takeIf { requirements.throughput.isNullOrEmpty() },
+            "servicios".takeIf { requirements.networkTests.isNullOrEmpty() },
+            "roaming".takeIf { requirements.roaming == null }
+        )
+        return "Se juzga: " + judged.joinToString(", ") + "." +
+            (if (notDeclared.isEmpty()) "" else " Sin criterios declarados de " + notDeclared.joinToString(", ") + ": no deciden el veredicto.")
+    }
+
+    /** Per requirement, the points without a valid sample and why (the first reasons). */
+    private fun pending(points: List<PointVerdict>, floorChecks: List<Check>): List<String> {
+        val byCheck = linkedMapOf<String, MutableList<Pair<String, String?>>>()
+        points.forEach { p -> p.checks.filter { it.state == VerdictState.MISSING }.forEach { c -> byCheck.getOrPut(c.label) { mutableListOf() } += p.label to c.reason } }
+        return byCheck.map { (label, list) ->
+            val reasons = list.mapNotNull { it.second }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
+                .joinToString(", ") { "${it.key} ${it.value}" }
+            "$label: ${list.size} puntos (${list.take(8).joinToString(", ") { it.first }}${if (list.size > 8) "…" else ""})" +
+                (if (reasons.isNotEmpty()) " — $reasons" else "")
+        } + floorChecks.filter { it.state == VerdictState.MISSING }.map { "${it.label} (planta): ${it.reason ?: "sin muestras válidas"}" }
     }
 
     private fun pointVerdict(
@@ -151,10 +201,12 @@ object VerdictEvaluator {
         runs: List<ActiveRun>,
         events: List<SurveyReport.FloorEvent>,
         weakDbm: Int,
-        apNames: ApLabels
+        apNames: ApLabels,
+        secondaryDbm: Int?
     ): PointVerdict {
         val checks = mutableListOf<Check>()
         checks += signal(point, weakDbm, apNames)
+        secondaryDbm?.let { secondAp(point, it, apNames) }?.let { checks += it }
         requirements.bands.orEmpty().forEach { req -> checks += bandSignal(point, req, apNames) }
         val ordered = runs.sortedBy { it.startedAt }
         requirements.throughput.orEmpty().forEach { req ->
@@ -207,6 +259,30 @@ object VerdictEvaluator {
                     point.imported -> "punto importado sin RF local"
                     else -> "sin escaneo válido"
                 })
+        }
+    }
+
+    /**
+     * RC4 · 5: the profile's second AP (redundancy for roaming) on the same latest valid scan. Not
+     * judged where the SSID was not heard at all (the signal check already fails there).
+     */
+    private fun secondAp(point: PointCoverage, secondaryDbm: Int, apNames: ApLabels): Check? = when (point.state) {
+        PointState.SSID_NOT_DETECTED -> null
+        PointState.NOT_MEASURED -> Check("second-ap", "Segundo AP", VerdictState.MISSING, null, secondaryDbm.toDouble(), "dBm",
+            reason = when {
+                point.planned -> "punto planificado sin medir"
+                point.imported -> "punto importado sin RF local"
+                else -> "sin escaneo válido"
+            })
+        else -> {
+            val rssi = point.secondRssi
+            when {
+                rssi == null -> Check("second-ap", "Segundo AP", VerdictState.FAIL, null, secondaryDbm.toDouble(), "dBm", reason = "un solo AP del SSID oído en el punto")
+                rssi >= secondaryDbm -> Check("second-ap", "Segundo AP", VerdictState.PASS, rssi.toDouble(), secondaryDbm.toDouble(), "dBm",
+                    reason = "segundo AP: ${apNames.label(point.secondBssid)}")
+                else -> Check("second-ap", "Segundo AP", VerdictState.FAIL, rssi.toDouble(), secondaryDbm.toDouble(), "dBm",
+                    reason = "segundo AP: ${apNames.label(point.secondBssid)}")
+            }
         }
     }
 
