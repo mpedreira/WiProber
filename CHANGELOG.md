@@ -2,9 +2,9 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
-## Unreleased (RC4 work set)
+## 4.1.0
 
-On top of `4.0.0-rc.5`; not tagged. "RC4" names this set of changes, not a version (the tag `v4.0.0-rc.4` is an earlier build).
+First stable release of the 4.x line: everything in `4.0.0-rc.1`–`rc.5` below, plus the following (developed as the "RC4" work set, which is not the `v4.0.0-rc.4` build).
 
 ### Added
 - **Internet server selector**: *Servidor de Internet* offers Cloudflare (automatic location, the observed data centre is shown), four LibreSpeed servers from the official list (Ámsterdam, Fráncfort, Londres · Clouvider; Roma · GARR) with moderate load, and *Personalizado*. The choice is saved by a stable ID; custom URLs are kept when switching; old settings and imported profiles keep their URLs and select the matching option.
