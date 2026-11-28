@@ -177,6 +177,24 @@ class ThroughputRunnerTest {
         }
     }
 
+    /**
+     * Waits until the iperf3 server process holds the port (a bind attempt fails), without
+     * connecting to it: a fixed sleep was too short on a loaded CI runner (connection refused).
+     */
+    private fun waitUntilListening(port: Int, process: Process, timeoutMillis: Long = 20_000) {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000
+        while (System.nanoTime() < deadline) {
+            check(process.isAlive) { "iperf3 exited before listening: " + process.inputStream.readNBytes(400).decodeToString() }
+            try {
+                ServerSocket(port).close() // still free: not listening yet
+                Thread.sleep(50)
+            } catch (e: java.net.BindException) {
+                return // in use: the server is listening
+            }
+        }
+        error("iperf3 did not listen on $port within $timeoutMillis ms")
+    }
+
     @Test
     fun iperf3UsesTheAssignedResolverAgainstARealServer() {
         val binary = System.getenv("IPERF3_BIN")?.let(::File)
@@ -184,7 +202,7 @@ class ThroughputRunnerTest {
         val port = ServerSocket(0).use { it.localPort }
         val server = ProcessBuilder(binary!!.path, "-s", "-p", port.toString()).redirectErrorStream(true).start()
         try {
-            Thread.sleep(500)
+            waitUntilListening(port, server)
             val network = FakeMeasurementNetwork(hosts = mapOf("iperf.internal" to listOf(FakeMeasurementNetwork.LOOPBACK)))
             val test = runner(network).measure(
                 ThroughputSettings(iperfEnabled = true, iperfHost = "iperf.internal", iperfPort = port, iperfDurationSeconds = 1)
