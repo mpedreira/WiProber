@@ -2,6 +2,23 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
+## Unreleased (RC4 work set)
+
+On top of `4.0.0-rc.5`; not tagged. "RC4" names this set of changes, not a version (the tag `v4.0.0-rc.4` is an earlier build).
+
+### Added
+- **Internet server selector**: *Servidor de Internet* offers Cloudflare (automatic location, the observed data centre is shown), four LibreSpeed servers from the official list (Ámsterdam, Fráncfort, Londres · Clouvider; Roma · GARR) with moderate load, and *Personalizado*. The choice is saved by a stable ID; custom URLs are kept when switching; old settings and imported profiles keep their URLs and select the matching option.
+- **HTTP 429 handling**: a server limiting requests stops new requests at once, partial bytes are diagnosis only, `Retry-After` is honoured per host and port, other destinations go on.
+- **Probar servidor**: a short, bounded, cancellable check of the selected or typed URLs over the test Wi-Fi, never saved with a point. Per URL: proxy configured in Android (none, manual, PAC, unknown) and route observed (explicit proxy, direct, undetermined), HTTP code and cause (407 told apart from 429), also in the point sheet, the report and the JSON.
+- **Stop-and-Go with two actions**: *Medir cobertura* and *Cobertura + rendimiento* in the dock; the action travels with the measurement across permission and settings round trips. Planned points keep their ID; points are pending / coverage / performance / failure (badge on the map, counts in the dock).
+- **Point sheet**: latest signal of the map network and the latest attempt per service (result, reason, proxy, route, HTTP code), the last valid value with its date when the latest failed, and a collapsible history.
+- **Decision report**: every floor/SSID section opens with *Cumple / No cumple / No concluyente* — coverage and second AP always by the signal profile, declared requirements on top — with what remains to be measured and the points with their reasons. Internet servers are identified (provider, city, observed data centre) and kept in separate series.
+
+### Changed
+- With a web proxy for the URL, a failed direct TCP check no longer skips the HTTP speed test.
+- The profile and its credentials are read off the main thread, once per run; map markers, statuses, coverage and the next point are recomputed only when their own inputs change; the coverage layer and the template thumbnail are drawn in the background (stale results are dropped).
+- The report embeds each floor plan once and is written block by block into the export ZIP. `requirements` and `verdicts` are now always in `wiprober-performance.json` (additive: `secondaryThresholdDbm`, `scope`, `inconclusiveReason`, `pending`).
+
 ## 4.0.0-rc.5
 
 ### Added
