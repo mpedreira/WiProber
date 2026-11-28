@@ -115,7 +115,9 @@ object SurveyReport {
     data class PlanImage(val dataUri: String, val originalWidth: Int, val originalHeight: Int)
 
     /** One mark on the plan. [approximate]: a Continuous scan placed on the route by time. */
-    data class MapMark(val x: Float, val y: Float, val source: String, val state: String, val rssi: Int?, val label: String?, val approximate: Boolean) {
+    /** [verdict]: the point's [VerdictState] (points only; Continuous scans are not judged), its fill colour. */
+    data class MapMark(val x: Float, val y: Float, val source: String, val state: String, val rssi: Int?, val label: String?, val approximate: Boolean,
+                       val pointId: String? = null, val verdict: String? = null) {
         companion object {
             const val STOP = "stop"
             const val CONTINUOUS = "continuous"
@@ -443,7 +445,10 @@ object SurveyReport {
             VerdictEvaluator.evaluate(requirements ?: Requirements(), it, floorName, coverage, runs, events, weakDbm, apLabels, secondaryDbm)
         }
         val reasons = if (ssid != null && verdict != null) pointReasons(ssid, coverage, verdict, ssidRuns, weakDbm) else emptyList()
-        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, marks, sources, verdict, routeFacts(ssidRuns, ssid), reasons)
+        // Points on the map are coloured by their verdict; the signal stays written on them.
+        val pointVerdicts = verdict?.points.orEmpty().associate { it.pointId to it.state }
+        val judged = marks.map { m -> m.pointId?.let { id -> pointVerdicts[id] }?.let { m.copy(verdict = it) } ?: m }
+        return SsidSection(ssid, coverage, metrics, apChanges, outages, runFacts, judged, sources, verdict, routeFacts(ssidRuns, ssid), reasons)
     }
 
     /**
@@ -550,7 +555,7 @@ object SurveyReport {
                 p.imported -> MapMark.IMPORTED
                 else -> MapMark.STOP
             }
-            MapMark(p.x, p.y, source, p.state, p.strongestRssi, p.label, approximate = false)
+            MapMark(p.x, p.y, source, p.state, p.strongestRssi, p.label, approximate = false, pointId = p.pointId)
         }.toMutableList()
         var placed = 0
         var unplaced = 0
@@ -971,6 +976,12 @@ object SurveyReport {
         else -> "#777777"
     }
 
+    private fun verdictColor(state: String) = when (state) {
+        VerdictState.PASS -> "#1b6e20"
+        VerdictState.FAIL -> "#b00020"
+        else -> "#757575"
+    }
+
     /** The plan with the SSID's marks, in original-image pixels. */
     private fun appendMap(out: StringBuilder, image: PlanImage, section: SsidSection, weakDbm: Int, e: (Any?) -> String, planRef: String) {
         val w = image.originalWidth
@@ -982,9 +993,11 @@ object SurveyReport {
         if (planRef.isNotEmpty()) out.append("<use href=\"#").append(planRef).append("\"/>")
         else out.append("<image href=\"").append(image.dataUri).append("\" width=\"$w\" height=\"$h\"/>")
         section.marks.sortedBy { if (it.source == MapMark.CONTINUOUS) 0 else 1 }.forEach { m ->
-            val color = stateColor(m.state)
+            val color = m.verdict?.let(::verdictColor) ?: stateColor(m.state)
             val title = buildString {
-                append(m.label ?: m.source).append(": ").append(stateLabel(m.state))
+                append(m.label ?: m.source).append(": ")
+                m.verdict?.let { append(VerdictState.title(it)).append(" · ") }
+                append(stateLabel(m.state))
                 m.rssi?.let { append(" · ").append(it).append(" dBm (umbral ").append(weakDbm).append(")") }
                 if (m.approximate) append(" · posición aproximada")
             }
@@ -999,8 +1012,8 @@ object SurveyReport {
                 }
             }
         }
-        out.append("</svg><figcaption class=\"muted\">Verde: buena señal · naranja: débil (por debajo de ").append(weakDbm)
-            .append(" dBm, con su valor) · rojo: SSID no detectado en un escaneo válido · anillo discontinuo: sin medición local · puntos pequeños: escaneos continuos, posición aproximada. Las zonas sin marca no tienen muestra.</figcaption></figure>")
+        out.append("</svg><figcaption class=\"muted\">Puntos por veredicto: verde cumple · rojo no cumple · gris no concluyente; el número es su señal en dBm (umbral ").append(weakDbm)
+            .append(" dBm). Anillo discontinuo: sin medición local. Puntos pequeños: escaneos continuos por señal (verde buena, naranja débil, rojo SSID no detectado), posición aproximada. Las zonas sin marca no tienen muestra.</figcaption></figure>")
     }
 
     fun stateLabel(state: String) = when (state) {

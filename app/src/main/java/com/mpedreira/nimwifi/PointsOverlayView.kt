@@ -224,6 +224,7 @@ class PointsOverlayView @JvmOverloads constructor(
     private val pointMarkers = mutableListOf<MapMarker>()
     private var pointMarkersSource: List<MapMarker>? = null
     private val performanceBadgePaint = Paint().apply { color = Color.rgb(21, 101, 192); style = Paint.Style.FILL; isAntiAlias = true }
+    private val inconclusivePaint = Paint().apply { color = Color.rgb(117, 117, 117); style = Paint.Style.FILL; isAntiAlias = true }
     private val failureBadgePaint = Paint().apply { color = Color.rgb(198, 40, 40); style = Paint.Style.FILL; isAntiAlias = true }
     private val badgeStrokePaint = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL; isAntiAlias = true }
     private val badgeMarkPaint = Paint().apply {
@@ -363,10 +364,16 @@ class PointsOverlayView @JvmOverloads constructor(
                     canvas.drawCircle(t[0], t[1], radius, strokePaint)
                     canvas.drawCircle(
                         t[0], t[1], radius,
-                        when (marker.state) {
-                            PointState.OK -> okPaint
-                            PointState.WEAK -> weakPaint
-                            else -> pointPaint
+                        // By verdict: green meets, red does not, grey not conclusive; else by signal.
+                        when (marker.verdict) {
+                            VerdictState.PASS -> okPaint
+                            VerdictState.FAIL -> pointPaint
+                            VerdictState.MISSING -> inconclusivePaint
+                            else -> when (marker.state) {
+                                PointState.OK -> okPaint
+                                PointState.WEAK -> weakPaint
+                                else -> pointPaint
+                            }
                         }
                     )
                 }

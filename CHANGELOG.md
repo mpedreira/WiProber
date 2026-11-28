@@ -12,6 +12,7 @@ On top of `4.0.0-rc.5`; not tagged. "RC4" names this set of changes, not a versi
 - **Probar servidor**: a short, bounded, cancellable check of the selected or typed URLs over the test Wi-Fi, never saved with a point. Per URL: proxy configured in Android (none, manual, PAC, unknown) and route observed (explicit proxy, direct, undetermined), HTTP code and cause (407 told apart from 429), also in the point sheet, the report and the JSON.
 - **Stop-and-Go with two actions**: *Medir cobertura* and *Cobertura + rendimiento* in the dock; the action travels with the measurement across permission and settings round trips. Planned points keep their ID; points are pending / coverage / performance / failure (badge on the map, counts in the dock).
 - **Point sheet**: latest signal of the map network and the latest attempt per service (result, reason, proxy, route, HTTP code), the last valid value with its date when the latest failed, and a collapsible history.
+- **Points by verdict**: on the report maps every point is coloured by its verdict (its dBm stays written); in the app, *Colorear puntos por veredicto* (survey menu, remembered) does the same while the coverage gradient stays by signal.
 - **Decision report**: every floor/SSID section opens with *Cumple / No cumple / No concluyente* — coverage and second AP always by the signal profile, declared requirements on top — with what remains to be measured and the points with their reasons. Internet servers are identified (provider, city, observed data centre) and kept in separate series.
 
 ### Changed

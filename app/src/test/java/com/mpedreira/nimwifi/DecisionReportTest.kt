@@ -82,6 +82,39 @@ class DecisionReportTest {
     }
 
     @Test
+    fun pointsOnTheReportMapAreColouredByVerdictAndKeepTheirSignal() {
+        val model = SurveyReport.build(snapshot, t0, "Ops", weakDbm = -67, planImages = plans)
+        val marks = labelled(model, 0, "Ops").marks.associateBy { it.pointId }
+        assertEquals(VerdictState.PASS, marks.getValue("g-17").verdict) // service failures are listed, not judged without criteria
+        assertEquals(VerdictState.FAIL, marks.getValue("g-18").verdict)
+        assertEquals(VerdictState.MISSING, marks.getValue("g-22").verdict)
+        val html = SurveyReport.html(model)
+        assertTrue(html.contains("fill=\"#b00020\"") && html.contains("Puntos por veredicto"))
+        assertTrue(">-55</text>" in html) // the signal is still written on the point
+    }
+
+    @Test
+    fun theAppMapColoursPointsByVerdictOnlyWhenAskedAndKeepsCoverageBySignal() {
+        val survey = snapshot.floors.first().survey
+        val state = SurveyScreenState(mapInfo = survey.mapInfo, metersPerUnit = survey.metersPerUnit, scanPoints = survey.scanPoints,
+            activeRuns = survey.activeRuns, plannedPoints = survey.plannedPoints)
+        val settings = SurveyGuideSettings(ssidFilter = "Ops")
+        val d = MapDerivations()
+        assertTrue(d.markers(state, settings).all { it.verdict == null })
+        val byVerdict = d.markers(state, settings, byVerdict = true)
+        assertEquals(setOf(VerdictState.PASS, VerdictState.FAIL, VerdictState.MISSING), byVerdict.mapNotNull { it.verdict }.toSet())
+        assertEquals(PointState.SSID_NOT_DETECTED, byVerdict.first { it.verdict == VerdictState.FAIL }.state) // the signal state is kept
+        val coverage = d.coverage(state, settings)
+        d.markers(state, settings, byVerdict = true)
+        assertEquals(1, d.verdictComputations)
+        assertTrue(coverage === d.coverage(state, settings))
+        // A declared requirement changes the verdict: P17's application is now judged.
+        val strict = d.markers(state, settings, byVerdict = true,
+            requirements = Requirements(networkTests = listOf(ServiceRequirement("acceso a la aplicación", maxMedianMs = 500.0))))
+        assertEquals(VerdictState.MISSING, strict.first { it.x == 10f }.verdict)
+    }
+
+    @Test
     fun internetServersAreIdentifiedAndTheirSeriesKeptApart() {
         val model = SurveyReport.build(snapshot, t0, "Ops", weakDbm = -67)
         val downloads = labelled(model, 0, "Ops").metrics.filter { it.category == TargetCategory.INTERNET && it.measure == "download" }

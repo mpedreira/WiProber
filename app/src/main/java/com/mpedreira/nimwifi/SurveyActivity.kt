@@ -138,6 +138,8 @@ class SurveyActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The configuration screen or an import may have changed the requirements.
+        refreshVerdictRequirements()
         androidCoordinator.resumePendingScanAccess()
         if (isProjectReady && viewModel.screenState.value.isTracking) {
             startContinuousScanningLoop()
@@ -371,6 +373,7 @@ class SurveyActivity : AppCompatActivity() {
         binding.surveyToolbar.setNavigationOnClickListener {
             if (canChangeFloor()) finish()
         }
+        binding.surveyToolbar.menu.findItem(R.id.action_points_by_verdict)?.isChecked = surveyGuideStore.pointsByVerdict()
         binding.surveyToolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.action_export_esx -> {
@@ -389,6 +392,14 @@ class SurveyActivity : AppCompatActivity() {
                 }
                 R.id.action_point_template -> {
                     androidCoordinator.openPointTemplateFile()
+                    true
+                }
+                R.id.action_points_by_verdict -> {
+                    val byVerdict = !surveyGuideStore.pointsByVerdict()
+                    surveyGuideStore.setPointsByVerdict(byVerdict)
+                    item.isChecked = byVerdict
+                    renderMap(viewModel.screenState.value)
+                    Toast.makeText(this, if (byVerdict) R.string.points_by_verdict_on else R.string.points_by_verdict_off, Toast.LENGTH_LONG).show()
                     true
                 }
                 R.id.action_map_ssid -> {
@@ -573,7 +584,22 @@ class SurveyActivity : AppCompatActivity() {
     /** Points coloured by their state for the map network, with their status badge; planned points as hollow rings. */
     private fun renderPointMarkers(state: SurveyScreenState, settings: SurveyGuideSettings) {
         binding.pointsOverlay.setScanPoints(emptyList())
-        binding.pointsOverlay.setPointMarkers(mapDerivations.markers(state, settings))
+        binding.pointsOverlay.setPointMarkers(mapDerivations.markers(state, settings, surveyGuideStore.pointsByVerdict(), verdictRequirements))
+    }
+
+    /** Declared requirements of the active profile, read off the main thread (the verdict colours). */
+    private var verdictRequirements: Requirements? = null
+
+    private fun refreshVerdictRequirements() {
+        lifecycleScope.launch {
+            val requirements = withContext(Dispatchers.IO) {
+                runCatching { WiproberConfigStore(applicationContext).snapshot().imported.requirements }.getOrNull()
+            }
+            if (requirements != verdictRequirements) {
+                verdictRequirements = requirements
+                renderMap(viewModel.screenState.value)
+            }
+        }
     }
 
     /** The existing point under a tap (touch radius in screen pixels converted to plan pixels). */

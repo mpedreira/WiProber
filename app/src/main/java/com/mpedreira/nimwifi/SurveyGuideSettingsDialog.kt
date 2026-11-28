@@ -37,7 +37,13 @@ class SurveyGuideSettingsStore(context: Context) {
         }
     }
 
+    /** Map points coloured by the report's verdict instead of the signal (the coverage layer stays by signal). */
+    fun pointsByVerdict(): Boolean = prefs.getBoolean(POINTS_BY_VERDICT, false)
+
+    fun setPointsByVerdict(value: Boolean) = prefs.edit { putBoolean(POINTS_BY_VERDICT, value) }
+
     private companion object {
+        const val POINTS_BY_VERDICT = "points_by_verdict"
         const val PREFS = "survey_guide_settings"
         const val ENABLED = "enabled"
         const val SPACING = "spacing_m"

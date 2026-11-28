@@ -28,8 +28,12 @@ class Memo<T> {
     }
 }
 
-/** A marker of the map: position, coverage state for the map network, second AP and point status. */
-data class MapMarker(val x: Float, val y: Float, val state: String?, val redundant: Boolean = false, val status: String? = null)
+/**
+ * A marker of the map: position, coverage state for the map network, second AP and point status.
+ * [verdict]: the point's [VerdictState] when the map colours points by verdict (null: by signal).
+ */
+data class MapMarker(val x: Float, val y: Float, val state: String?, val redundant: Boolean = false, val status: String? = null,
+                     val verdict: String? = null)
 
 /**
  * RC4 · 4: what the map draws, each part derived from its own inputs (Android-free). The
@@ -42,12 +46,34 @@ class MapDerivations(private val coverageCache: CoverageSampleCache = CoverageSa
     private val statuses = Memo<Map<String, String>>()
     private val markers = Memo<List<MapMarker>>()
     private val suggestion = Memo<SurveyCoordinate?>()
+    private val verdicts = Memo<Map<String, String>>()
 
     val networkComputations get() = network.computations
     val markerComputations get() = markers.computations
     val statusComputations get() = statuses.computations
     val suggestionComputations get() = suggestion.computations
     val coverageComputations get() = coverageCache.computations
+    val verdictComputations get() = verdicts.computations
+
+    /**
+     * The report's verdict of each point for the map network (SSID + band), as the report judges
+     * it: coverage and second AP by the signal profile, [requirements] on top. Empty without a network.
+     */
+    fun verdicts(state: SurveyScreenState, settings: SurveyGuideSettings, requirements: Requirements?): Map<String, String> {
+        val network = network(state, settings) ?: return emptyMap()
+        val map = state.mapInfo ?: return emptyMap()
+        val signal = settings.signal
+        return verdicts.get(network, signal.primaryDbm, signal.secondaryDbm, requirements, state.scanPoints, state.plannedPoints,
+            state.activeRuns, state.continuousScanSessions) {
+            val coverage = SsidCoverage.points(state.scanPoints, state.plannedPoints, network.ssid, signal.primaryDbm,
+                signal.secondaryDbm, state.activeRuns, band = network.band)
+            val survey = ProjectSnapshot(map, state.metersPerUnit, state.scanPoints, state.continuousScanSessions, state.notes,
+                activeRuns = state.activeRuns, plannedPoints = state.plannedPoints)
+            val events = SurveyReport.floorEvents(survey, state.activeRuns)
+            VerdictEvaluator.evaluate(requirements ?: Requirements(), network.ssid, "", coverage, state.activeRuns, events,
+                signal.primaryDbm, secondaryDbm = signal.secondaryDbm).points.associate { it.pointId to it.state }
+        }
+    }
 
     /** The primary network (SSID + band): the chosen one, else the most widely detected SSID. */
     fun network(state: SurveyScreenState, settings: SurveyGuideSettings): MapNetwork? =
@@ -58,12 +84,16 @@ class MapDerivations(private val coverageCache: CoverageSampleCache = CoverageSa
     fun statuses(state: SurveyScreenState): Map<String, String> =
         statuses.get(state.scanPoints, state.plannedPoints, state.activeRuns) { PointStatus.all(state) }
 
-    /** One marker per physical point, coloured for the map network, with its status badge. */
-    fun markers(state: SurveyScreenState, settings: SurveyGuideSettings): List<MapMarker> {
+    /**
+     * One marker per physical point, coloured for the map network, with its status badge. With
+     * [byVerdict], each point carries its verdict; the coverage layer stays by signal.
+     */
+    fun markers(state: SurveyScreenState, settings: SurveyGuideSettings, byVerdict: Boolean = false, requirements: Requirements? = null): List<MapMarker> {
         val network = network(state, settings)
         val statuses = statuses(state)
         val signal = settings.signal
-        return markers.get(network, signal.primaryDbm, signal.secondaryDbm, state.scanPoints, state.plannedPoints, state.activeRuns, statuses) {
+        val verdicts = if (byVerdict) verdicts(state, settings, requirements) else null
+        return markers.get(network, signal.primaryDbm, signal.secondaryDbm, state.scanPoints, state.plannedPoints, state.activeRuns, statuses, verdicts) {
             if (network == null) {
                 state.scanPoints.distinctBy { it.pointId ?: it.scanId ?: "${it.x},${it.y}" }
                     .map { MapMarker(it.x, it.y, null, status = it.pointId?.let(statuses::get)) } +
@@ -72,7 +102,7 @@ class MapDerivations(private val coverageCache: CoverageSampleCache = CoverageSa
             } else {
                 SsidCoverage.points(state.scanPoints, state.plannedPoints, network.ssid, signal.primaryDbm,
                     signal.secondaryDbm, state.activeRuns, band = network.band)
-                    .map { MapMarker(it.x, it.y, it.state, it.secondaryOk, statuses[it.pointId]) } +
+                    .map { MapMarker(it.x, it.y, it.state, it.secondaryOk, statuses[it.pointId], verdicts?.get(it.pointId)) } +
                     state.scanPoints.filter { it.pointId == null }.map { MapMarker(it.x, it.y, null) }
             }
         }

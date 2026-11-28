@@ -479,4 +479,7 @@ SHA-256: %1$s</string>
     <string name="point_sheet_history">Full history (%1$d scans, %2$d runs)</string>
     <string name="point_sheet_hide_history">Hide history</string>
     <string name="template_floor_changed">The floor changed during the import: nothing was added. Import the template again on its floor.</string>
+    <string name="action_points_by_verdict">Colour points by verdict</string>
+    <string name="points_by_verdict_on">Points by verdict: green meets, red does not, grey not conclusive. Coverage stays by signal.</string>
+    <string name="points_by_verdict_off">Points by signal: green good, orange weak, red SSID not detected.</string>
 </resources>

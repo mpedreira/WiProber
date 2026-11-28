@@ -53,7 +53,7 @@ class PassiveReportTest {
         assertTrue("-84 dBm (umbral -67)" in html)
         assertTrue("posición aproximada" in html)
         assertTrue("sin geometría de ruta suficiente (no se dibujan)" in html)
-        assertTrue("Dock 4: Sin medición local" in html)
+        assertTrue("Dock 4: No concluyente · Sin medición local" in html)
         // The bundle also exists without runs.
         assertTrue(PerformanceExport.build(null, "Site.esx", 0L, snapshot).getAsJsonArray("activeRuns").size() == 0)
     }

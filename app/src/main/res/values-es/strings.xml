@@ -479,4 +479,7 @@ SHA-256: %1$s</string>
     <string name="point_sheet_history">Historial completo (%1$d escaneos, %2$d ejecuciones)</string>
     <string name="point_sheet_hide_history">Ocultar historial</string>
     <string name="template_floor_changed">La planta cambió durante la importación: no se añadió nada. Vuelve a importar la plantilla en su planta.</string>
+    <string name="action_points_by_verdict">Colorear puntos por veredicto</string>
+    <string name="points_by_verdict_on">Puntos por veredicto: verde cumple, rojo no cumple, gris no concluyente. La cobertura sigue por señal.</string>
+    <string name="points_by_verdict_off">Puntos por señal: verde buena, naranja débil, rojo SSID no detectado.</string>
 </resources>
