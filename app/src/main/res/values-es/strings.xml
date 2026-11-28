@@ -420,6 +420,13 @@ El ESX de origen sin cambios es otra opción del menú de exportación, y los ar
     <string name="export_source_complete">Se ha escrito el ESX de origen sin cambios.
 SHA-256: %1$s</string>
     <string name="action_continue">Continuar</string>
+    <string name="throughput_internet_server">Servidor de Internet</string>
+    <string name="run_summary_served_from">Servido desde: %1$s</string>
+    <string name="run_summary_rate_limited">El servidor de Internet está limitando peticiones (HTTP 429): sus valores no cuentan. Se puede reintentar a partir de las %1$s; el resto de pruebas ha continuado.</string>
+    <string name="throughput_server_custom">Personalizado (tus dos URLs)</string>
+    <string name="throughput_server_note_cloudflare">Internet público: descarga y subida hasta Cloudflare. Su red anycast elige el centro de datos; se muestra el observado junto al resultado.</string>
+    <string name="throughput_server_note_librespeed">Internet público: un servidor LibreSpeed cedido por su operador. No hay condiciones de uso publicadas para apps como esta: úsalo en los puntos de control elegidos, no de forma continua.</string>
+    <string name="throughput_server_note_custom">URL de descarga (se pide repetidamente; {bytes} se sustituye por el tamaño del trozo) y URL de subida (recibe datos por POST).</string>
     <string name="config_preview_requirements">Requisitos del informe (veredicto): %1$d</string>
     <string name="config_preview_ap_names">Nombres de AP (BSSID → AP): %1$d</string>
     <string name="network_changed_title">La Wi-Fi ha cambiado</string>

@@ -71,7 +71,10 @@ class ThroughputProbe(context: Context, private val clock: MillisClock = SystemM
                 iperf = Iperf3Client(socketFactory = socketFactory, control = control),
                 http = HttpSpeedTest(
                     open = { url -> network?.openHttp(url) ?: throw MeasurementException(ErrorCodes.NOT_ON_WIFI) },
-                    control = control
+                    // Load adapted to the provider (RC4 · 1): few connections and bounded bodies.
+                    streams = settings.sanitized().internetStreams,
+                    control = control,
+                    maxUploadChunkBytes = settings.sanitized().internetMaxUploadChunkBytes
                 ),
                 network = network,
                 beacons = beacons,

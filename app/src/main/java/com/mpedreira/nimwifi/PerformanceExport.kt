@@ -583,6 +583,14 @@ object PerformanceExport {
         addProperty("upSeconds", test.upSeconds)
         addProperty("deviceModel", test.deviceModel)
         addProperty("androidVersion", test.androidVersion)
+        // RC4 · 1: the Internet destination, where it served from and HTTP 429 diagnosis.
+        addProperty("internetServerId", test.internetServerId)
+        addProperty("internetServerLabel", test.internetServerLabel)
+        addProperty("serverLocation", test.serverLocation)
+        addProperty("downPartialMbps", test.downPartialMbps)
+        addProperty("upPartialMbps", test.upPartialMbps)
+        addProperty("downloadRetryAt", test.downloadRetryAt?.let(::isoUtc))
+        addProperty("uploadRetryAt", test.uploadRetryAt?.let(::isoUtc))
         addProperty("error", test.error)
     }
 

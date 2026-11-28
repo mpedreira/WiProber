@@ -141,7 +141,11 @@ Shared by `measurements`, `networkTests` and `scriptSteps`.
 | `latencyFailures` | int \| null | Failed handshakes among the 10; the valid ones are kept (`latencyErrorCode` = `partial_loss`) |
 | `latencyMethod` | string \| null | `tcp-connect`: TCP handshake round trip, not ICMP |
 | `latencyStatus`, `downloadStatus`, `uploadStatus` | string \| null | Phase status: `completed`, `failed`, `skipped` |
-| `latencyErrorCode`, `downloadErrorCode`, `uploadErrorCode` | string \| null | Cause per phase: `resolution_failed`, `connect_failed`, `connection_refused`, `timeout`, `iperf_busy`, `iperf_protocol`, `http_status`, `empty_body` (server answered with no body: never reported as 0), `response_too_large`, `skipped_unreachable`, `not_configured`, `not_on_wifi`, `wifi_lost`… |
+| `latencyErrorCode`, `downloadErrorCode`, `uploadErrorCode` | string \| null | Cause per phase: `resolution_failed`, `connect_failed`, `connection_refused`, `timeout`, `iperf_busy`, `iperf_protocol`, `http_status`, `empty_body` (server answered with no body: never reported as 0), `response_too_large`, `skipped_unreachable`, `not_configured`, `not_on_wifi`, `wifi_lost`, `rate_limited` (HTTP 429), `proxy_auth_required` (HTTP 407)… |
+| `internetServerId`, `internetServerLabel` | string \| null | RC4: the Internet destination selected (`cloudflare-auto`, a LibreSpeed id or `custom`) and its label |
+| `serverLocation` | string \| null | Where the provider served from, when it says (Cloudflare data centre, e.g. `MAD`) |
+| `downPartialMbps`, `upPartialMbps` | number \| null | Rate of the bytes moved before an HTTP 429: diagnosis only, never in medians or verdicts |
+| `downloadRetryAt`, `uploadRetryAt` | ISO-8601 \| null | When the rate-limited server may be tried again |
 | `downBytes`, `downSeconds`, `upBytes`, `upSeconds` | number \| null | Bytes counted and real duration of each transfer |
 | `error` | string \| null | What failed; `null` when everything was measured |
 

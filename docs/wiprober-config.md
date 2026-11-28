@@ -18,6 +18,25 @@ DNS, sockets and HTTP of the run stay bound to the selected network. The check i
 
 Since 4.0.0-rc.2 the run is bound to the **network approved in that check** (its Android handle), not to a new selection. Just before any traffic its identity is checked again: if it is gone, has been replaced by another network, or now reports another SSID, nothing is sent, the run ends `skipped` with `network_changed` and the phone asks to check the network and decide again. Since rc.3 no other network is ever chosen at the start: if the check found no Wi-Fi (or could not run) and a Wi-Fi is there when the run starts, that Wi-Fi has not been checked, so nothing is sent (`network_changed`, `unchecked`) and it goes through the check and decision first; if there is still no Wi-Fi, the run sends nothing and every target records `not on Wi-Fi`, keeping the point. A BSSID change inside the same SSID and network is an AP change and is measured and recorded (`associationChange`). If the network is lost during the run, finished values are kept and the failed phases carry `wifi_lost`; the run never moves to another Wi-Fi or to mobile data. `observedSsid`, `networkVerification` and the new `networkId` of the run describe the network the run was really bound to; `networkDecision` keeps the technician's decision.
 
+## Internet server (public speed test)
+
+*Pruebas de velocidad* has one drop-down **Servidor de Internet** (`throughput.internet.server` in the configuration):
+
+| id | Destination | Load |
+|---|---|---|
+| `cloudflare-auto` | Cloudflare · ubicación automática (its anycast network picks the data centre; the one observed, from `CF-RAY`, is reported as `serverLocation`) | 4 connections |
+| `librespeed-ams-clouvider` | LibreSpeed · Ámsterdam · Clouvider | 2 connections, 10 MiB downloads, 4 MB uploads |
+| `librespeed-fra-clouvider` | LibreSpeed · Fráncfort · Clouvider | idem |
+| `librespeed-lon-clouvider` | LibreSpeed · Londres · Clouvider | idem |
+| `librespeed-rom-garr` | LibreSpeed · Roma · GARR | idem |
+| `custom` | Personalizado: your download URL (`{bytes}` is replaced with the chunk size) and upload URL (POST) | 4 connections |
+
+The LibreSpeed entries come from the official list (`server-list.json` of github.com/librespeed/speedtest) with the paths each publishes (`garbage.php`, `empty.php`), checked for download and upload over HTTPS. LibreSpeed publishes **no usage conditions for third-party clients**: they are servers lent by their operators, so use them for chosen control points and *Probar servidor*, not continuously. The catalogue is `InternetServers.kt`.
+
+*Internet público* measures download and upload up to that external provider; keep the private iPerf3 target for the site's wired server. The selection is saved by id; the custom URLs are kept while another destination is selected and come back with *Personalizado*. Settings and profiles from before keep their URLs and enabled state: URLs that exactly match a catalogue entry select it, anything else is *Personalizado*. Changing the drop-down sends nothing.
+
+**HTTP 429** (*the server is limiting requests*): new requests to that destination stop at once; bytes other connections moved before are kept as `downPartialMbps`/`upPartialMbps` for diagnosis only — never a valid value, median or verdict input — and with no bytes the phase has no value. The phase is `failed` with `rate_limited`. nimWifi does not ask that server (host and port) again before its `Retry-After` (seconds or an HTTP date; 60 s without it): later phases and runs to it are `skipped` with `rate_limited` and `downloadRetryAt`/`uploadRetryAt`, other destinations go on, and the series keeps the same server — switching it is your decision. HTTP 407 (proxy authentication) is `proxy_auth_required`, a different cause.
+
 ## Survey guide and signal profile
 
 `guide.profile` sets when a point's signal is weak on the map and in the report: `pda` (handheld scanners, −67 dBm, second AP −72 dBm, default), `voz` (voice, −67/−67) or `datos` (data, −70/−75). The same profiles as the wifianalisys report; they can also be chosen in the survey-guide settings.

@@ -14,6 +14,7 @@
     },
     "internet": {
       "enabled": true,
+      "server": "cloudflare-auto",
       "downloadUrl": "https://speed.cloudflare.com/__down?bytes={bytes}",
       "uploadUrl": "https://speed.cloudflare.com/__up",
       "durationSeconds": 5

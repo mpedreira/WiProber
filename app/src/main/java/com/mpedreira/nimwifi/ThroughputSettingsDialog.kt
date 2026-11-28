@@ -25,7 +25,11 @@ class ThroughputSettingsStore(context: Context) {
             internetDownloadUrl = prefs.getString(INTERNET_DOWNLOAD, null) ?: defaults.internetDownloadUrl,
             internetUploadUrl = prefs.getString(INTERNET_UPLOAD, null) ?: defaults.internetUploadUrl,
             internetDurationSeconds = prefs.getInt(INTERNET_DURATION, defaults.internetDurationSeconds),
-            expectedSsid = prefs.getString(EXPECTED_SSID, null) ?: defaults.expectedSsid
+            expectedSsid = prefs.getString(EXPECTED_SSID, null) ?: defaults.expectedSsid,
+            // Absent in settings saved before RC4: resolved from the URLs (exact match, else custom).
+            internetServerId = prefs.getString(INTERNET_SERVER, null).orEmpty(),
+            customDownloadUrl = prefs.getString(CUSTOM_DOWNLOAD, null).orEmpty(),
+            customUploadUrl = prefs.getString(CUSTOM_UPLOAD, null).orEmpty()
         ).sanitized()
     }
 
@@ -42,6 +46,9 @@ class ThroughputSettingsStore(context: Context) {
             putString(INTERNET_UPLOAD, clean.internetUploadUrl)
             putInt(INTERNET_DURATION, clean.internetDurationSeconds)
             putString(EXPECTED_SSID, clean.expectedSsid)
+            putString(INTERNET_SERVER, clean.internetServerId)
+            putString(CUSTOM_DOWNLOAD, clean.customDownloadUrl)
+            putString(CUSTOM_UPLOAD, clean.customUploadUrl)
         }
     }
 
@@ -57,6 +64,9 @@ class ThroughputSettingsStore(context: Context) {
         const val INTERNET_UPLOAD = "internet_upload_url"
         const val INTERNET_DURATION = "internet_duration"
         const val EXPECTED_SSID = "expected_ssid"
+        const val INTERNET_SERVER = "internet_server_id"
+        const val CUSTOM_DOWNLOAD = "internet_custom_download_url"
+        const val CUSTOM_UPLOAD = "internet_custom_upload_url"
     }
 }
 
@@ -77,6 +87,26 @@ object ThroughputSettingsDialog {
         val uploadUrl = view.findViewById<TextInputEditText>(R.id.internetUploadUrl)
         val internetDuration = view.findViewById<TextInputEditText>(R.id.internetDuration)
         val expectedSsid = view.findViewById<TextInputEditText>(R.id.expectedSsid)
+        val serverField = view.findViewById<com.google.android.material.textfield.MaterialAutoCompleteTextView>(R.id.internetServer)
+        val customUrls = view.findViewById<android.view.View>(R.id.internetCustomUrls)
+        val serverNote = view.findViewById<android.widget.TextView>(R.id.internetServerNote)
+        // RC4 · 1: one drop-down; choosing only changes the destination, no traffic is sent.
+        val serverIds = InternetServers.all.map { it.id } + InternetServers.CUSTOM
+        val serverLabels = InternetServers.all.map { it.label } + activity.getString(R.string.throughput_server_custom)
+        serverField.setSimpleItems(serverLabels.toTypedArray())
+        var selectedServer = InternetServers.CLOUDFLARE
+
+        fun showServer(id: String) {
+            selectedServer = id
+            serverField.setText(serverLabels[serverIds.indexOf(id).coerceAtLeast(0)], false)
+            customUrls.visibility = if (id == InternetServers.CUSTOM) android.view.View.VISIBLE else android.view.View.GONE
+            serverNote.setText(when {
+                id == InternetServers.CUSTOM -> R.string.throughput_server_note_custom
+                id == InternetServers.CLOUDFLARE -> R.string.throughput_server_note_cloudflare
+                else -> R.string.throughput_server_note_librespeed
+            })
+        }
+        serverField.setOnItemClickListener { _, _, position, _ -> showServer(serverIds[position]) }
 
         fun fill(settings: ThroughputSettings) {
             iperfEnabled.isChecked = settings.iperfEnabled
@@ -85,8 +115,10 @@ object ThroughputSettingsDialog {
             iperfPort.setText(number(settings.iperfPort))
             iperfDuration.setText(number(settings.iperfDurationSeconds))
             internetEnabled.isChecked = settings.internetEnabled
-            downloadUrl.setText(settings.internetDownloadUrl)
-            uploadUrl.setText(settings.internetUploadUrl)
+            // The custom fields keep the custom URLs, whatever destination is selected now.
+            downloadUrl.setText(settings.customDownloadUrl)
+            uploadUrl.setText(settings.customUploadUrl)
+            showServer(settings.internetServerId.ifEmpty { InternetServers.CLOUDFLARE })
             internetDuration.setText(number(settings.internetDurationSeconds))
             expectedSsid.setText(settings.expectedSsid)
         }
@@ -107,6 +139,9 @@ object ThroughputSettingsDialog {
                         iperfDurationSeconds = iperfDuration.text?.toString()?.toIntOrNull()
                             ?: current.iperfDurationSeconds,
                         internetEnabled = internetEnabled.isChecked,
+                        internetServerId = selectedServer,
+                        customDownloadUrl = downloadUrl.text?.toString().orEmpty(),
+                        customUploadUrl = uploadUrl.text?.toString().orEmpty(),
                         internetDownloadUrl = downloadUrl.text?.toString().orEmpty(),
                         internetUploadUrl = uploadUrl.text?.toString().orEmpty(),
                         internetDurationSeconds = internetDuration.text?.toString()?.toIntOrNull()
@@ -126,7 +161,11 @@ object ThroughputSettingsDialog {
                     iperfEnabled = iperfEnabled.isChecked,
                     iperfLabel = iperfLabel.text?.toString().orEmpty(),
                     iperfHost = iperfHost.text?.toString().orEmpty(), // never wipe the user's server
-                    internetEnabled = internetEnabled.isChecked
+                    internetEnabled = internetEnabled.isChecked,
+                    internetServerId = InternetServers.CLOUDFLARE,
+                    // Nor the custom URLs: they come back when "Personalizado" is chosen again.
+                    customDownloadUrl = downloadUrl.text?.toString().orEmpty(),
+                    customUploadUrl = uploadUrl.text?.toString().orEmpty()
                 ).sanitized()
             )
         }

@@ -109,13 +109,31 @@ class ThroughputRunner(
         val uploadEndpointId: String? = null,
         val uploadHost: String? = null,
         val uploadPort: Int? = null,
+        /** RC4 · 1: the Internet destination selected, for the export. */
+        val serverId: String? = null,
+        val serverLabel: String? = null,
         val download: (InetAddress) -> TransferResult,
         /** Null when the direction is not configured. */
         val upload: ((InetAddress?) -> TransferResult)?
     )
 
     /** Outcome of one phase: value or error, with the facts needed for the export. */
-    private class PhaseOutcome<T>(val value: T?, val status: String, val code: String?)
+    private class PhaseOutcome<T>(
+        val value: T?, val status: String, val code: String?,
+        /** RC4 · 1: the HTTP 429 that ended the phase, with the bytes moved before it. */
+        val rate: RateLimitedException? = null,
+        /** When the limited server may be tried again (epoch ms). */
+        val retryAt: Long? = null
+    )
+
+    /** A phase not started because its server is still within the time it asked to wait. */
+    private fun <T> stillLimited(host: String?, label: String, errors: MutableList<String>): PhaseOutcome<T>? {
+        val until = RateLimits.limitedUntil(host, clock.now()) ?: return null
+        errors += "$label skipped: $host is limiting requests until ${isoUtc(until)}"
+        return PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.RATE_LIMITED, retryAt = until)
+    }
+
+    private fun isoUtc(millis: Long): String = java.time.Instant.ofEpochMilli(millis).toString()
 
     fun measure(
         settings: ThroughputSettings,
@@ -300,6 +318,8 @@ class ThroughputRunner(
             uploadEndpointId = upload?.takeIf { it.host != null }?.let(::endpointId),
             uploadHost = upload?.host,
             uploadPort = upload?.let(::defaultPort),
+            serverId = config.internetServerId.ifEmpty { null },
+            serverLabel = config.internetServer?.label ?: "Personalizado",
             download = { http.download(config.internetDownloadUrl, config.internetDurationSeconds) },
             upload = if (upload == null) null else {
                 { http.upload(config.internetUploadUrl, config.internetDurationSeconds) }
@@ -397,6 +417,13 @@ class ThroughputRunner(
             latencyStatus = latency!!.status,
             latencyErrorCode = latencyCode,
             downMbps = download?.value?.let { toMbps(it.bitsPerSecond) },
+            downPartialMbps = download?.rate?.partialBitsPerSecond?.let(::toMbps),
+            downloadRetryAt = download?.retryAt,
+            upPartialMbps = upload?.rate?.partialBitsPerSecond?.let(::toMbps),
+            uploadRetryAt = upload?.retryAt,
+            serverLocation = download?.value?.serverLocation ?: upload?.value?.serverLocation,
+            internetServerId = target.serverId,
+            internetServerLabel = target.serverId?.let { target.serverLabel },
             downBytes = download?.value?.bytes,
             downSeconds = download?.value?.seconds?.let(::round),
             downloadStatus = download?.status ?: RunStatus.PENDING,
@@ -418,10 +445,18 @@ class ThroughputRunner(
         val address = stats?.address
         val transferDeadline = (target.durationSeconds + TRANSFER_GRACE_SECONDS) * 1_000L
         val download: PhaseOutcome<TransferResult>
+        val downloadLimited = if (target.method == ThroughputTestResult.METHOD_HTTP) {
+            stillLimited<TransferResult>(RateLimits.endpoint(target.host, target.port), "download", errors)
+        } else {
+            null
+        }
         if (address == null) {
             // The pre-checked endpoint is unreachable: its transfers would only add more timeouts.
             errors += "download skipped: server unreachable"
             download = PhaseOutcome(null, RunStatus.SKIPPED, ErrorCodes.SKIPPED_UNREACHABLE)
+            tracker.skip(target.alias, ThroughputPhase.DOWNLOAD)
+        } else if (downloadLimited != null) {
+            download = downloadLimited
             tracker.skip(target.alias, ThroughputPhase.DOWNLOAD)
         } else {
             var outcome: PhaseOutcome<TransferResult>? = null
@@ -435,7 +470,16 @@ class ThroughputRunner(
 
         val uploadTest = target.upload
         var uploadPrecheck: PhaseOutcome<LatencyStats>?
+        val uploadLimited = if (target.method == ThroughputTestResult.METHOD_HTTP && uploadTest != null) {
+            stillLimited<TransferResult>(RateLimits.endpoint(target.uploadHost ?: target.host, target.uploadPort ?: target.port), "upload", errors)
+        } else {
+            null
+        }
         val upload: PhaseOutcome<TransferResult> = when {
+            uploadLimited != null -> {
+                tracker.skip(target.alias, ThroughputPhase.UPLOAD)
+                uploadLimited
+            }
             uploadTest == null -> {
                 errors += "upload: not configured"
                 tracker.skip(target.alias, ThroughputPhase.UPLOAD)
@@ -544,6 +588,11 @@ class ThroughputRunner(
             PhaseOutcome(control.phase(deadlineMillis, block), RunStatus.COMPLETED, null)
         } catch (e: MeasurementCancelled) {
             throw e
+        } catch (e: RateLimitedException) {
+            // No new request to that server before it allows; the series keeps the same server.
+            val retryAt = RateLimits.record(e.host, e.retryAfterMillis, clock.now())
+            errors += "$label: ${ErrorCodes.RATE_LIMITED} (HTTP 429 from ${e.host}; retry after ${isoUtc(retryAt)})"
+            PhaseOutcome(null, RunStatus.FAILED, ErrorCodes.RATE_LIMITED, e, retryAt)
         } catch (e: Exception) {
             val code = if (network?.isAvailable() == false) ErrorCodes.WIFI_LOST else ErrorClassifier.code(e)
             errors += "$label: $code (${ErrorClassifier.detail(e)})"

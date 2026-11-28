@@ -420,6 +420,13 @@ The unchanged source ESX is a separate option in the export menu, and the analys
     <string name="export_source_complete">The source ESX was written unchanged.
 SHA-256: %1$s</string>
     <string name="action_continue">Continue</string>
+    <string name="throughput_internet_server">Internet server</string>
+    <string name="run_summary_served_from">Served from: %1$s</string>
+    <string name="run_summary_rate_limited">The Internet server is limiting requests (HTTP 429): its values are not counted. It can be tried again from %1$s; other tests went on.</string>
+    <string name="throughput_server_custom">Custom (your two URLs)</string>
+    <string name="throughput_server_note_cloudflare">Public Internet: download and upload up to Cloudflare. Its anycast network picks the data centre; the one observed is shown with the result.</string>
+    <string name="throughput_server_note_librespeed">Public Internet: a LibreSpeed server lent by its operator. No usage conditions are published for apps like this one: use it for chosen control points, not continuously.</string>
+    <string name="throughput_server_note_custom">Download URL (fetched repeatedly; {bytes} is replaced with the chunk size) and upload URL (receives POSTed data).</string>
     <string name="config_preview_requirements">Report requirements (verdict): %1$d</string>
     <string name="config_preview_ap_names">AP names (BSSID → AP): %1$d</string>
     <string name="network_changed_title">The Wi-Fi network changed</string>

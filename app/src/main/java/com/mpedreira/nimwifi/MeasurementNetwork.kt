@@ -106,6 +106,10 @@ object ErrorCodes {
     const val IPERF_BUSY = "iperf_busy"
     const val IPERF_PROTOCOL = "iperf_protocol"
     const val HTTP_STATUS = "http_status"
+    /** RC4 · 1: HTTP 429, the server is limiting requests (see Retry-After); never a network failure. */
+    const val RATE_LIMITED = "rate_limited"
+    /** RC4 · 2: HTTP 407, the proxy asks for authentication. */
+    const val PROXY_AUTH_REQUIRED = "proxy_auth_required"
     const val EMPTY_BODY = "empty_body"
     const val RESPONSE_TOO_LARGE = "response_too_large"
     const val PARTIAL_LOSS = "partial_loss"

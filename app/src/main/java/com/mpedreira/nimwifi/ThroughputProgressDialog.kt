@@ -150,6 +150,13 @@ object ActiveRunSummary {
             else -> context.getString(R.string.run_summary_failed, run.statusReason ?: run.status)
         }
         val results = run.results?.takeIf { it.tests.isNotEmpty() }?.let(ThroughputSummary::format)
-        return listOfNotNull(status, results).joinToString("\n")
+        // RC4 · 1: where the public server served from, and when a limited server can be tried again.
+        val tests = run.results?.tests.orEmpty()
+        val served = tests.mapNotNull { t -> t.serverLocation?.let { "${t.internetServerLabel ?: t.target} · $it" } }.distinct()
+            .takeIf { it.isNotEmpty() }?.let { context.getString(R.string.run_summary_served_from, it.joinToString(", ")) }
+        val retry = tests.flatMap { listOfNotNull(it.downloadRetryAt, it.uploadRetryAt) }.maxOrNull()?.let { at ->
+            context.getString(R.string.run_summary_rate_limited, java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(at)))
+        }
+        return listOfNotNull(status, results, served, retry).joinToString("\n")
     }
 }

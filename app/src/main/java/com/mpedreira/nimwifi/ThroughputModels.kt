@@ -87,6 +87,17 @@ data class ThroughputTestResult(
     val upSeconds: Double? = null,
     val deviceModel: String? = null,
     val androidVersion: String? = null,
+    /** RC4 · 1: the Internet destination selected (catalogue id or `custom`) and its label. */
+    val internetServerId: String? = null,
+    val internetServerLabel: String? = null,
+    /** Where the provider served from, when it says (e.g. Cloudflare data centre `MAD`). */
+    val serverLocation: String? = null,
+    /** Rate of the bytes moved before an HTTP 429: diagnosis only, never a valid value. */
+    val downPartialMbps: Double? = null,
+    val upPartialMbps: Double? = null,
+    /** When the rate-limited server may be tried again (epoch ms). */
+    val downloadRetryAt: Long? = null,
+    val uploadRetryAt: Long? = null,
     val error: String? = null
 ) {
     companion object {
@@ -97,7 +108,28 @@ data class ThroughputTestResult(
 }
 
 /** One finished transfer: rate, bytes actually counted and real duration. */
-data class TransferResult(val bitsPerSecond: Double, val bytes: Long, val seconds: Double)
+data class TransferResult(
+    val bitsPerSecond: Double,
+    val bytes: Long,
+    val seconds: Double,
+    /** RC4 · 1: where the provider served from, when it says (Cloudflare's data centre in CF-RAY). */
+    val serverLocation: String? = null
+)
+
+/**
+ * RC4 · 1: the server answered HTTP 429. New requests to it stopped; [bytes] transferred by
+ * other connections before that are kept for diagnosis only (never a valid rate).
+ * [retryAfterMillis] is the server's `Retry-After`, when it sent one.
+ */
+class RateLimitedException(
+    val host: String,
+    val retryAfterMillis: Long?,
+    val bytes: Long = 0,
+    val seconds: Double = 0.0
+) : MeasurementException(ErrorCodes.RATE_LIMITED, "HTTP 429 from $host: the server is limiting requests" +
+    (retryAfterMillis?.let { " (Retry-After ${it / 1000} s)" } ?: "")) {
+    val partialBitsPerSecond: Double? get() = if (bytes > 0 && seconds > 0) bytes * 8.0 / seconds else null
+}
 
 /** Stable identifiers of the built-in throughput targets. */
 object TargetIds {
@@ -149,18 +181,53 @@ data class ThroughputSettings(
      * with the network it would use; a mismatch or an unknown association needs a decision.
      * Not the map SSID (the passive filter of the coverage map).
      */
-    val expectedSsid: String = ""
+    val expectedSsid: String = "",
+    /**
+     * RC4 · 1: the Internet destination chosen in the drop-down ([InternetServers]); empty in
+     * settings saved before, resolved from the URLs ([InternetServers.match]).
+     */
+    val internetServerId: String = "",
+    /** URLs typed for *Personalizado*, kept while another destination is selected. */
+    val customDownloadUrl: String = "",
+    val customUploadUrl: String = ""
 ) {
     val anyEnabled: Boolean get() = iperfEnabled || internetEnabled
 
+    /** The catalogue entry in use; null for a custom destination. */
+    val internetServer: InternetServer? get() = InternetServers.byId(internetServerId)
+
+    val internetStreams: Int get() = internetServer?.streams ?: InternetServers.CUSTOM_STREAMS
+    val internetMaxUploadChunkBytes: Int get() = internetServer?.maxUploadChunkBytes ?: InternetServers.CUSTOM_MAX_UPLOAD_CHUNK_BYTES
+
+    /**
+     * Resolves the selection: a known destination sets the URLs measured; *Personalizado* uses
+     * the custom URLs. Settings without an id keep their URLs: they select the catalogue entry
+     * they match exactly, else *Personalizado* with those URLs (nothing is lost).
+     */
+    private fun resolvedInternet(): ThroughputSettings {
+        val download = internetDownloadUrl.trim()
+        val upload = internetUploadUrl.trim()
+        val id = internetServerId.trim().takeIf { it == InternetServers.CUSTOM || InternetServers.byId(it) != null }
+            ?: InternetServers.match(download, upload)
+        val server = InternetServers.byId(id)
+        return if (server != null) {
+            copy(internetServerId = id, internetDownloadUrl = server.downloadUrl, internetUploadUrl = server.uploadUrl,
+                customDownloadUrl = customDownloadUrl.trim(), customUploadUrl = customUploadUrl.trim())
+        } else {
+            // Custom: the typed URLs, else the ones the settings had (a migrated or imported profile).
+            val customDown = customDownloadUrl.trim().ifEmpty { download }
+            val customUp = customUploadUrl.trim().ifEmpty { upload }
+            copy(internetServerId = InternetServers.CUSTOM, internetDownloadUrl = customDown, internetUploadUrl = customUp,
+                customDownloadUrl = customDown, customUploadUrl = customUp)
+        }
+    }
+
     /** Returns a copy with values trimmed and clamped to what the tests support. */
-    fun sanitized(): ThroughputSettings = copy(
+    fun sanitized(): ThroughputSettings = resolvedInternet().copy(
         iperfLabel = iperfLabel.trim().ifEmpty { DEFAULT_IPERF_LABEL },
         iperfHost = iperfHost.trim(),
         iperfPort = iperfPort.coerceIn(1, 65_535),
         iperfDurationSeconds = iperfDurationSeconds.coerceIn(MIN_DURATION_SECONDS, MAX_DURATION_SECONDS),
-        internetDownloadUrl = internetDownloadUrl.trim(),
-        internetUploadUrl = internetUploadUrl.trim(),
         internetDurationSeconds = internetDurationSeconds.coerceIn(MIN_DURATION_SECONDS, MAX_DURATION_SECONDS),
         expectedSsid = expectedSsid.trim().take(32)
     )

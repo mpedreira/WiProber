@@ -32,6 +32,7 @@ object ConfigExport {
                 })
                 add("internet", JsonObject().apply {
                     addProperty("enabled", throughput.internetEnabled)
+                    addProperty("server", throughput.internetServerId)
                     addProperty("downloadUrl", throughput.internetDownloadUrl)
                     addProperty("uploadUrl", throughput.internetUploadUrl)
                     addProperty("durationSeconds", throughput.internetDurationSeconds)

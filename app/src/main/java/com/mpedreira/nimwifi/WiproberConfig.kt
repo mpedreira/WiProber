@@ -249,7 +249,11 @@ object WiproberConfigParser {
             t.copy(
                 internetDownloadUrl = SecretRefs.extract(t.internetDownloadUrl, "internet_download", extra, moved),
                 internetUploadUrl = SecretRefs.extract(t.internetUploadUrl, "internet_upload", extra, moved)
-            )
+            ).let { safe ->
+                // A custom destination keeps its URLs apart too: the same credentials never stay there.
+                if (t.internetServerId != InternetServers.CUSTOM) safe
+                else safe.copy(customDownloadUrl = safe.internetDownloadUrl, customUploadUrl = safe.internetUploadUrl)
+            }
         }
         return WiproberConfig(
             throughput = safeThroughput,
@@ -391,6 +395,8 @@ object WiproberConfigParser {
             internetDownloadUrl = internet?.string("downloadUrl") ?: d.internetDownloadUrl,
             internetUploadUrl = internet?.string("uploadUrl") ?: d.internetUploadUrl,
             internetDurationSeconds = internet?.int("durationSeconds") ?: d.internetDurationSeconds,
+            // RC4 · 1: the destination id; without it the URLs select it (exact match, else custom).
+            internetServerId = internet?.string("server")?.trim().orEmpty(),
             expectedSsid = json.string("expectedSsid") ?: d.expectedSsid
         ).sanitized()
     }
