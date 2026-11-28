@@ -73,12 +73,29 @@ jobs:
             echo "field=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Release signing key
+        id: release_key
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_B64" ]; then
+            echo "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::RELEASE_KEYSTORE_B64 is not set: the release APK (com.mpedreira.nimwifi) is built unsigned and not uploaded."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Unit tests (iPerf3 integration against a real iperf3), lint and builds
         env:
           IPERF3_BIN: /usr/bin/iperf3
           FIELD_KEYSTORE_PASSWORD: ${{ secrets.FIELD_KEYSTORE_PASSWORD }}
           FIELD_KEY_ALIAS: ${{ secrets.FIELD_KEY_ALIAS }}
           FIELD_KEY_PASSWORD: ${{ secrets.FIELD_KEY_PASSWORD }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: >-
           ./gradlew --no-daemon --continue
           -PappVersionName=${{ steps.version.outputs.name }}
@@ -156,6 +173,62 @@ jobs:
             echo "| Channel | **$KIND** |"
             echo "| Instrumentation tests | built, **not executed** (no device) |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the release APK (package com.mpedreira.nimwifi, release key)
+        if: ${{ steps.release_key.outputs.release == 'true' }}
+        env:
+          # Optional repository variable (not a secret): pins the release certificate.
+          RELEASE_CERT_SHA256: ${{ vars.RELEASE_CERT_SHA256 }}
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          NAME="${{ steps.version.outputs.name }}"
+          EXPECTED_CODE="$(./gradlew -q --no-daemon :app:printVersionInfo -PappVersionName="$NAME" | sed -n 's/^versionCode=//p')"
+          test -n "$EXPECTED_CODE" || { echo "::error::printVersionInfo gave no versionCode"; exit 1; }
+          IDENTITY="$("$RUNNER_TEMP/verifier/verify-apk.sh" --apk "$APK" --package com.mpedreira.nimwifi \
+            --version-name "$NAME" --version-code "$EXPECTED_CODE" --source-sha "${{ steps.version.outputs.sha }}" \
+            ${RELEASE_CERT_SHA256:+--expect-cert "$RELEASE_CERT_SHA256"})"
+          echo "$IDENTITY"
+          field() { sed -n "s/^$1=//p" <<<"$IDENTITY"; }
+          CERT="$(field signerCertificateSha256)"; APK_SHA="$(field apkSha256)"
+          # Never the debug/field identity: the release key is its own.
+          DEBUG_CERT=3f527115f1fdb7d0ea5f70e16ef9700f31e8651e007dfc2468180863613e6304
+          if [ "$CERT" = "$DEBUG_CERT" ]; then echo "::error::The release APK is signed with the debug key"; exit 1; fi
+          mkdir -p out-release
+          cp "$APK" "out-release/nimWifi-$NAME.apk"
+          cp app/build/outputs/apk/release/output-metadata.json out-release/
+          (cd out-release && sha256sum "nimWifi-$NAME.apk" > SHA256SUMS)
+          cat > out-release/build-info.json <<EOF
+          {
+            "tag": "$TAG",
+            "sourceSha": "${{ steps.version.outputs.sha }}",
+            "package": "$(field package)",
+            "versionName": "$(field versionName)",
+            "versionCode": $(field versionCode),
+            "apkSha256": "$APK_SHA",
+            "signerCertificateSha256": "$CERT",
+            "channel": "release",
+            "certificatePinned": $([ -n "$RELEASE_CERT_SHA256" ] && echo true || echo false),
+            "instrumentation": "built, not executed (no device in CI)",
+            "workflowRun": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          {
+            echo "### $TAG · release"
+            echo "| | |"; echo "|---|---|"
+            echo "| Package | \`$(field package)\` |"
+            echo "| Version | \`$(field versionName)\` ($(field versionCode)) |"
+            echo "| APK SHA-256 | \`$APK_SHA\` |"
+            echo "| Signer SHA-256 | \`$CERT\`$([ -n "$RELEASE_CERT_SHA256" ] && echo ' (pinned)') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release APK
+        if: ${{ steps.release_key.outputs.release == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nimwifi-${{ steps.version.outputs.name }}-release
+          path: out-release/
+          if-no-files-found: error
+          compression-level: 0
 
       - name: Upload field-channel APK
         if: ${{ steps.verify.outputs.kind == 'field' }}

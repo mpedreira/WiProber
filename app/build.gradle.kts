@@ -76,6 +76,19 @@ android {
         }
     }
 
+    // Release identity (package com.mpedreira.nimwifi, docs/release-process.md): its own key, from
+    // these variables only. Without them the release APK stays unsigned; it never falls back to a
+    // debug or field key, so a release build can never be signed with the wrong identity.
+    val releaseKeystore = providers.environmentVariable("RELEASE_KEYSTORE_FILE").orNull
+    val releaseSigning = releaseKeystore?.let { path ->
+        signingConfigs.create("release") {
+            storeFile = file(path)
+            storePassword = providers.environmentVariable("RELEASE_KEYSTORE_PASSWORD").orNull
+            keyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").orNull
+            keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").orNull
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -83,6 +96,7 @@ android {
             fieldSigning?.let { signingConfig = it }
         }
         release {
+            releaseSigning?.let { signingConfig = it }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

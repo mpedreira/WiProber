@@ -2,6 +2,11 @@
 
 nimWifi is a personal fork of [WiProber](https://github.com/htechno/WiProber) (MIT). Versions follow semantic versioning from 4.0.0.
 
+## Unreleased
+
+### Added
+- **Signed release APK** (package `com.mpedreira.nimwifi`, no `-debug`): the field workflow builds, verifies and uploads it when the `RELEASE_*` secrets are set (own key, optional certificate pin, never the debug key). See `docs/release-process.md`.
+
 ## 4.1.0
 
 First stable release of the 4.x line: everything in `4.0.0-rc.1`–`rc.5` below, plus the following (developed as the "RC4" work set, which is not the `v4.0.0-rc.4` build).

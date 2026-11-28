@@ -49,6 +49,30 @@ The field channel keeps the package `com.mpedreira.nimwifi.debug` (that of `.5`)
 
 **Recommended field key: the key that signed `.1`–`.5`.** It is the debug keystore of the machine that built them (`~/.android/debug.keystore`, alias `androiddebugkey`, certificate `3f527115…6304`). Back it up outside the repository, convert it to PKCS12 if needed and store it as `FIELD_KEYSTORE_B64` (`base64 -w0`), `FIELD_KEYSTORE_PASSWORD`, `FIELD_KEY_ALIAS`, `FIELD_KEY_PASSWORD`. If that keystore is lost, create a dedicated key instead (`keytool -genkeypair -alias nimwifi-field -keyalg RSA -keysize 3072 -validity 10000 -keystore nimwifi-field.p12 -storetype PKCS12`) and accept the uninstall described below.
 
+## Release channel (package `com.mpedreira.nimwifi`)
+
+From 4.1.1 the field workflow can also build the **release** APK: package `com.mpedreira.nimwifi` (no `.debug` suffix), `versionName` without `-debug`, R8 enabled, signed with its **own key**. It is another app for Android: it never updates a `.debug` installation, and both can be installed side by side.
+
+| Builds | Package | Signed with |
+|---|---|---|
+| Field workflow with `RELEASE_KEYSTORE_B64` | `com.mpedreira.nimwifi` | The release key (see `build-info.json`; pinned with `RELEASE_CERT_SHA256`) |
+| Without it | — | Not signed and not uploaded (`app-release-unsigned.apk`); never a debug or field key |
+
+**Key.** Create it once, outside the repository, and keep a backup of the file and its passwords: without it no update of the release app can ever be published.
+
+```
+keytool -genkeypair -alias nimwifi-release -keyalg RSA -keysize 3072 -validity 10000 \
+  -keystore nimwifi-release.p12 -storetype PKCS12
+base64 -w0 nimwifi-release.p12        # → RELEASE_KEYSTORE_B64
+keytool -list -v -keystore nimwifi-release.p12 | grep SHA256   # → RELEASE_CERT_SHA256 (lowercase, no colons)
+```
+
+**Repository settings** (*Settings → Secrets and variables → Actions*, or `https://github.com/<owner>/<repo>/settings/secrets/actions`; owner or admin only, not in the GitHub mobile app). Secrets: `RELEASE_KEYSTORE_B64`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`. Variable (optional, not secret): `RELEASE_CERT_SHA256` — the build then fails if the APK is signed by any other certificate. With the GitHub CLI: `gh secret set RELEASE_KEYSTORE_B64 < nimwifi-release.b64`, `gh variable set RELEASE_CERT_SHA256 --body <sha256>`.
+
+**What the workflow checks.** `scripts/verify-apk.sh` on `app-release.apk`: package `com.mpedreira.nimwifi`, `versionName` = the tag, `versionCode` from `printVersionInfo`, valid signature, the pinned certificate when set, and never the debug key `3f527115…6304`. The artifact `nimwifi-<version>-release` has `nimWifi-<version>.apk`, `SHA256SUMS`, `output-metadata.json` and `build-info.json` (`channel: release`). The debug artifact is still built as before.
+
+**Moving projects from the debug app.** In the `.debug` app, *Back up project* for each project; in the release app, restore each copy (same IDs, everything included). Check them, then uninstall the debug app. Test the release APK on a device before using it in the field: it is the R8 build.
+
 ### Transition from `3.0.0-throughput.5`
 
 - **Same package.** With the recommended key, 4.x installs **over** `.5` and keeps its projects: the update reopens them (saved projects stay readable, schema migrations included).
