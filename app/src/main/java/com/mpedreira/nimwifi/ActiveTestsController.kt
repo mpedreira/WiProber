@@ -35,12 +35,13 @@ class ActiveTestsController(
     /**
      * Runs the configured active tests on a saved point. The run lives in the ViewModel, so a
      * rotation neither stops nor restarts it; the executor only captures application-level objects.
+     * False when there is nothing to run.
      */
-    fun start(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>) {
+    fun start(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>): Boolean {
         lastStart = Triple(pointId, scanId, scanResults)
         val settings = throughputStore.load()
         val imported = configStore.load()
-        if (ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isEmpty()) return
+        if (ThroughputRunner.plan(settings, imported.enabledTests, imported.enabledScripts).isEmpty()) return false
         // Mejora 13: before sending anything, which Wi-Fi the tests would use and whether it is the declared one.
         activity.lifecycleScope.launch {
             val step = withContext(Dispatchers.IO) { NetworkCheckFlow.begin { probe.preflight(settings.sanitized().expectedSsid) } }
@@ -67,6 +68,7 @@ class ActiveTestsController(
                 is NetworkCheckFlow.Step.Run -> run(pointId, scanId, scanResults, step.preflight, step.decision)
             }
         }
+        return true
     }
 
     private fun run(pointId: String, scanId: String?, scanResults: List<android.net.wifi.ScanResult>, preflight: NetworkPreflight?, decision: String?) {

@@ -260,7 +260,6 @@
     <string name="band_6">6 GHz</string>
     <string name="map_ssid_selected">Map: %1$s. Green = good signal, orange = weak signal measured, red with a cross = SSID not detected in a valid scan, hollow = no local measurement. Signal is the strongest AP of this SSID in the scan (not necessarily the connected AP); circles are an approximate influence area.</string>
     <string name="point_actions_title">Point %1$s</string>
-    <string name="point_measure_here">Measure at this point (scan + tests)</string>
     <string name="point_active_only">Active tests only at this point</string>
     <string name="point_new_here">New point here</string>
     <string name="template_preview_title">Import point template</string>
@@ -453,4 +452,30 @@ SHA-256: %1$s</string>
     <string name="config_change_failed">The configuration was not changed: %1$s</string>
     <string name="config_corrupt">The stored configuration cannot be read (%1$s). It is not used; remove it and import it again.</string>
     <string name="config_export_shareable">Export shareable summary</string>
+    <!-- RC4 · 3: Stop-and-Go actions and point sheet -->
+    <string name="measure_coverage">Measure coverage</string>
+    <string name="measure_coverage_performance">Coverage + performance</string>
+    <string name="measure_coverage_here">Measure coverage here</string>
+    <string name="measure_coverage_performance_here">Measure coverage + performance here</string>
+    <string name="measure_no_tests">No active tests configured: only coverage was measured</string>
+    <string name="point_status_counts">%1$d pending · %2$d coverage · %3$d performance · %4$d failed</string>
+    <string name="point_status_pending">Pending</string>
+    <string name="point_status_coverage">Coverage measured</string>
+    <string name="point_status_performance">Performance OK</string>
+    <string name="point_status_failure">A test failed</string>
+    <string name="point_sheet_status">Status: %1$s</string>
+    <string name="point_sheet_signal">Latest signal · %1$s</string>
+    <string name="point_sheet_signal_value">%1$d dBm · %2$s%3$s · %4$s</string>
+    <string name="point_sheet_signal_absent">Not detected in a valid scan (%1$d networks) · %2$s</string>
+    <string name="point_sheet_signal_empty">Empty scan · %1$s</string>
+    <string name="point_sheet_no_scan">No local scan yet</string>
+    <string name="point_sheet_services">Latest attempt per service</string>
+    <string name="point_sheet_last_run">Latest run: %1$s · %2$s%3$s</string>
+    <string name="point_sheet_ok">OK</string>
+    <string name="point_sheet_failed">Failed</string>
+    <string name="point_sheet_last_valid">Last valid: %1$s · %2$s</string>
+    <string name="point_sheet_retry">retry after %1$s</string>
+    <string name="point_sheet_route">proxy: %1$s · route: %2$s</string>
+    <string name="point_sheet_history">Full history (%1$d scans, %2$d runs)</string>
+    <string name="point_sheet_hide_history">Hide history</string>
 </resources>

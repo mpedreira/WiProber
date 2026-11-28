@@ -106,6 +106,10 @@ class SurveyActivity : AppCompatActivity() {
         lastTouchX = savedInstanceState?.getFloat(STATE_LAST_TOUCH_X) ?: lastTouchX
         lastTouchY = savedInstanceState?.getFloat(STATE_LAST_TOUCH_Y) ?: lastTouchY
         currentMapUri = savedInstanceState?.getString(STATE_CURRENT_MAP_URI)?.let(Uri::parse)
+        // RC4 · 3: the selected action survives recreation (also after a process death).
+        savedInstanceState?.getString(STATE_MEASURE_ACTION)?.let { name ->
+            PointMeasure.entries.firstOrNull { it.name == name }?.let(viewModel::setMeasureAction)
+        }
         binding = ActivitySurveyBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -150,6 +154,7 @@ class SurveyActivity : AppCompatActivity() {
         outState.putStringArrayList(STATE_FLOOR_IDS, ArrayList(availableFloors.map(FloorOption::id)))
         outState.putStringArrayList(STATE_FLOOR_NAMES, ArrayList(availableFloors.map(FloorOption::name)))
         outState.putString(STATE_PROJECT_TITLE, currentProjectTitle)
+        outState.putString(STATE_MEASURE_ACTION, viewModel.screenState.value.measureAction.name)
         super.onSaveInstanceState(outState)
     }
 
@@ -272,12 +277,21 @@ class SurveyActivity : AppCompatActivity() {
                     val pointCount = quantityString(R.plurals.survey_point_count, summary.stopAndGoPoints)
                     val routeCount = quantityString(R.plurals.survey_route_count, summary.continuousRoutes)
                     val noteCount = quantityString(R.plurals.survey_note_count, summary.notes)
-                    binding.surveySummaryText.text = getString(
+                    val floorSummary = getString(
                         R.string.survey_floor_summary,
                         pointCount,
                         routeCount,
                         noteCount
                     )
+                    // RC4 · 3: with planned points or tests, how many are still pending, measured or failing.
+                    binding.surveySummaryText.text = if (state.plannedPoints.isEmpty() && state.activeRuns.isEmpty()) {
+                        floorSummary
+                    } else {
+                        val counts = PointStatus.all(state).values.groupingBy { it }.eachCount()
+                        floorSummary + "\n" + getString(R.string.point_status_counts,
+                            counts[PointStatus.PENDING] ?: 0, counts[PointStatus.COVERAGE] ?: 0,
+                            counts[PointStatus.PERFORMANCE] ?: 0, counts[PointStatus.FAILURE] ?: 0)
+                    }
                     val floorName = availableFloors
                         .firstOrNull { it.id == currentFloorId }
                         ?.name
@@ -297,6 +311,16 @@ class SurveyActivity : AppCompatActivity() {
                     }
                     if (binding.scanModeToggle.checkedButtonId != expectedModeButton) {
                         binding.scanModeToggle.check(expectedModeButton)
+                    }
+                    binding.measureActionToggle.visibility =
+                        if (state.scanMode == SurveyScanMode.STOP_AND_GO) View.VISIBLE else View.GONE
+                    val expectedMeasureButton = if (state.measureAction == PointMeasure.COVERAGE_AND_PERFORMANCE) {
+                        R.id.measurePerformanceButton
+                    } else {
+                        R.id.measureCoverageButton
+                    }
+                    if (binding.measureActionToggle.checkedButtonId != expectedMeasureButton) {
+                        binding.measureActionToggle.check(expectedMeasureButton)
                     }
 
                     if (!previous.isTracking && state.isTracking) startTrackingStatusTicker()
@@ -434,6 +458,13 @@ class SurveyActivity : AppCompatActivity() {
             }
         }
 
+        binding.measureActionToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            viewModel.setMeasureAction(
+                if (checkedId == R.id.measurePerformanceButton) PointMeasure.COVERAGE_AND_PERFORMANCE else PointMeasure.COVERAGE
+            )
+        }
+
         binding.continuousActionButton.setOnClickListener {
             val state = viewModel.screenState.value
             if (state.isTracking) {
@@ -533,14 +564,19 @@ class SurveyActivity : AppCompatActivity() {
     private fun renderPointMarkers(state: SurveyScreenState) {
         val network = mapNetwork(state)
         val ssid = network?.ssid
+        // RC4 · 3: performance passed / failed as a badge on each point.
+        val statuses = PointStatus.all(state)
         binding.pointsOverlay.setScanPoints(emptyList())
         binding.pointsOverlay.setPointMarkers(
             if (ssid == null) {
-                state.scanPoints.map { PointsOverlayView.PointMarker(it.x, it.y, null) } +
-                    state.plannedPoints.map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED) }
+                state.scanPoints.distinctBy { it.pointId ?: it.scanId ?: "${it.x},${it.y}" }
+                    .map { PointsOverlayView.PointMarker(it.x, it.y, null, status = it.pointId?.let(statuses::get)) } +
+                    state.plannedPoints.filter { p -> state.scanPoints.none { it.pointId == p.pointId } }
+                        .map { PointsOverlayView.PointMarker(it.x, it.y, PointState.NOT_MEASURED, status = statuses[it.pointId]) }
             } else {
                 SsidCoverage.points(state.scanPoints, state.plannedPoints, ssid, surveyGuideStore.load().signal.primaryDbm,
-                    surveyGuideStore.load().signal.secondaryDbm, state.activeRuns, band = network.band).map { PointsOverlayView.PointMarker(it.x, it.y, it.state, it.secondaryOk) } +
+                    surveyGuideStore.load().signal.secondaryDbm, state.activeRuns, band = network.band)
+                    .map { PointsOverlayView.PointMarker(it.x, it.y, it.state, it.secondaryOk, statuses[it.pointId]) } +
                     state.scanPoints.filter { it.pointId == null }.map { PointsOverlayView.PointMarker(it.x, it.y, null) }
             }
         )
@@ -561,10 +597,13 @@ class SurveyActivity : AppCompatActivity() {
             onDetails = {
                 val current = viewModel.screenState.value
                 val ssid = mapSsid(current)
-                PointDetails.of(current, pointId, ssid)?.let { PointActionsDialogs.showPointDetails(this, it, ssid) }
+                val network = mapNetwork(current)
+                PointDetails.of(current, pointId, ssid, network?.band)?.let {
+                    PointActionsDialogs.showPointDetails(this, it, ssid, network?.let { n -> PointActionsDialogs.networkLabel(this, n) })
+                }
             },
-            onMeasure = {
-                if (prepareForScan() && viewModel.requestMeasureAtPoint(pointId)) androidCoordinator.ensureWifiScanAccess()
+            onMeasure = { measure ->
+                if (prepareForScan() && viewModel.requestMeasureAtPoint(pointId, measure)) androidCoordinator.ensureWifiScanAccess()
             },
             onActiveOnly = { activeTests.start(pointId, scanId = null, scanResults = emptyList()) },
             onNewPoint = {
@@ -1103,13 +1142,19 @@ class SurveyActivity : AppCompatActivity() {
             when (val outcome = wifiScanner.scan()) {
                 is WifiScanOutcome.Success -> {
                     val wifiInfoList = mapScanResults(outcome.results)
+                    // RC4 · 3: the action chosen when the measurement was asked for, not the current one.
+                    val measure = viewModel.scanningMeasure()
                     // The passive scan is saved as a point first; active tests run on it afterwards.
                     val point = viewModel.completeStopAndGoScan(wifiInfoList)
                     binding.surveyStatusText.text = getString(
                         R.string.scan_completed,
                         quantityString(R.plurals.network_count, outcome.results.size)
                     )
-                    if (point != null) activeTests.start(point.pointId!!, point.scanId, outcome.results)
+                    if (point != null && measure == PointMeasure.COVERAGE_AND_PERFORMANCE) {
+                        if (!activeTests.start(point.pointId!!, point.scanId, outcome.results)) {
+                            Toast.makeText(this@SurveyActivity, R.string.measure_no_tests, Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
 
                 is WifiScanOutcome.Failure -> {
@@ -1719,6 +1764,7 @@ class SurveyActivity : AppCompatActivity() {
         private const val STATE_FLOOR_IDS = "floor_ids"
         private const val STATE_FLOOR_NAMES = "floor_names"
         private const val STATE_PROJECT_TITLE = "project_title"
+        private const val STATE_MEASURE_ACTION = "measure_action"
     }
 
     private data class FloorOption(val id: String, val name: String)

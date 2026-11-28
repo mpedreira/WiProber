@@ -4,9 +4,13 @@
 
 In Stop-and-Go, tap an existing point — measured locally, imported from an ESX, or planned from a template — to choose:
 
-- **Measure at this point (scan + tests):** a new passive scan at exactly the point's coordinates, followed by the configured active tests. It keeps the point's `pointId`; the original scan (or the imported ESX survey) is left untouched.
+- **Point details:** the sheet. On top, the latest signal of the map network (SSID + band) — or that it was not detected in a valid scan — and the latest attempt of each service (target, network test, script) with its result, reason, proxy, route and HTTP code. When that attempt failed and an earlier one was valid, both are shown with their dates. The full history of scans and runs folds below.
+- **Measure coverage here:** a new passive scan at exactly the point's coordinates. It keeps the point's `pointId`; the original scan (or the imported ESX survey) is left untouched.
+- **Measure coverage + performance here:** the same scan, followed by the configured active tests.
 - **Active tests only at this point:** the active tests without a new scan (`scanId: null` in the export).
-- **New point here:** a new point at the tap position.
+- **New point here:** a new point at the tap position, with the action selected in the dock.
+
+A planned point keeps its ID, so a technician can mark where a full test is due and come back to the same place. Each point is *pending* (nothing measured locally), *coverage* (scanned, no tests), *performance* (its latest run passed) or *failure* (its latest run, or a test in it, failed); runs the user skipped or cancelled do not change it.
 
 Undo removes only the latest local action (scan, run or template import). Coordinates stay in original floor-plan pixels, so new measurements line up with imported geometry.
 

@@ -4,6 +4,12 @@ data class SurveyCoordinate(val x: Float, val y: Float)
 
 enum class SurveyScanMode { STOP_AND_GO, CONTINUOUS }
 
+/**
+ * RC4 · 3: what a Stop-and-Go measurement records. [COVERAGE]: the passive scan only.
+ * [COVERAGE_AND_PERFORMANCE]: the same scan, then the active tests of the current profile.
+ */
+enum class PointMeasure { COVERAGE, COVERAGE_AND_PERFORMANCE }
+
 /** Retained across recreation; a system round trip must finish before another one starts. */
 enum class ScanAccessStep {
     CHECKING, PERMISSION_REQUEST, PERMISSION_EXPLANATION, APP_SETTINGS,
@@ -24,7 +30,11 @@ sealed interface PendingScanRequest {
     val coordinate: SurveyCoordinate
 
     /** [pointId]: measure again at an existing (local, imported or planned) point; null = new point. */
-    data class StopAndGo(override val coordinate: SurveyCoordinate, val pointId: String? = null) : PendingScanRequest
+    data class StopAndGo(
+        override val coordinate: SurveyCoordinate,
+        val pointId: String? = null,
+        val measure: PointMeasure = PointMeasure.COVERAGE
+    ) : PendingScanRequest
     /** [resumeSessionId]: continue an interrupted route with a new stretch. */
     data class ContinuousStart(override val coordinate: SurveyCoordinate, val resumeSessionId: String? = null) : PendingScanRequest
 }
@@ -38,7 +48,11 @@ sealed interface SurveyInteraction {
         val request: PendingScanRequest,
         val step: ScanAccessStep = ScanAccessStep.CHECKING
     ) : SurveyInteraction
-    data class StopAndGoScanning(val coordinate: SurveyCoordinate, val pointId: String? = null) : SurveyInteraction
+    data class StopAndGoScanning(
+        val coordinate: SurveyCoordinate,
+        val pointId: String? = null,
+        val measure: PointMeasure = PointMeasure.COVERAGE
+    ) : SurveyInteraction
     data class ContinuousTracking(
         val startedAt: Long,
         val waypoints: List<SurveyCoordinate>,
@@ -74,6 +88,8 @@ data class SurveyScreenState(
     /** Phase currently running in the active run, for the progress dialog. */
     val activeRunProgress: ThroughputProgress? = null,
     val scanMode: SurveyScanMode = SurveyScanMode.STOP_AND_GO,
+    /** Action a tap on the plan measures with (RC4 · 3); kept across recreation. */
+    val measureAction: PointMeasure = PointMeasure.COVERAGE,
     val interaction: SurveyInteraction = SurveyInteraction.Idle,
     val lastUndoneAction: LastAction? = null
 ) {

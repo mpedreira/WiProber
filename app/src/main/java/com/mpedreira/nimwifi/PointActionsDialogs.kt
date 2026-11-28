@@ -5,20 +5,27 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /** Dialogs for reusing points, importing a point template and choosing the map SSID. */
 object PointActionsDialogs {
-    /** Tap on an existing point: measure again there, active tests only, or a new point at the tap. */
+    /**
+     * Tap on an existing point (local, imported or planned, RC4 · 3): its sheet, a new coverage
+     * measurement or coverage + performance at its exact position and identity, active tests only,
+     * or a new point at the tap.
+     */
     fun showPointActions(
         context: Context,
         label: String,
         canRunActiveTests: Boolean,
         onDetails: () -> Unit,
-        onMeasure: () -> Unit,
+        onMeasure: (PointMeasure) -> Unit,
         onActiveOnly: () -> Unit,
         onNewPoint: () -> Unit
     ) {
         val options = buildList {
             add(context.getString(R.string.point_details) to onDetails)
-            add(context.getString(R.string.point_measure_here) to onMeasure)
-            if (canRunActiveTests) add(context.getString(R.string.point_active_only) to onActiveOnly)
+            add(context.getString(R.string.measure_coverage_here) to { onMeasure(PointMeasure.COVERAGE) })
+            if (canRunActiveTests) {
+                add(context.getString(R.string.measure_coverage_performance_here) to { onMeasure(PointMeasure.COVERAGE_AND_PERFORMANCE) })
+                add(context.getString(R.string.point_active_only) to onActiveOnly)
+            }
             add(context.getString(R.string.point_new_here) to onNewPoint)
         }
         MaterialAlertDialogBuilder(context)
@@ -28,16 +35,66 @@ object PointActionsDialogs {
             .show()
     }
 
-    /** The point sheet: its scans and every run with status, values and errors, newest first. */
-    fun showPointDetails(context: Context, details: PointDetails, ssid: String?) {
+    fun statusLabel(context: Context, status: String): String = context.getString(when (status) {
+        PointStatus.PENDING -> R.string.point_status_pending
+        PointStatus.COVERAGE -> R.string.point_status_coverage
+        PointStatus.PERFORMANCE -> R.string.point_status_performance
+        else -> R.string.point_status_failure
+    })
+
+    /**
+     * RC4 · 3: the point sheet. On top, the latest signal of the map network and the latest
+     * attempt of each service (result, reason, proxy and HTTP code); when that attempt failed and
+     * an earlier one was valid, both with their dates. The full history folds below.
+     */
+    fun showPointDetails(context: Context, details: PointDetails, ssid: String?, networkLabel: String? = ssid) {
         val time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.MEDIUM)
-        val text = buildString {
-            append(context.getString(R.string.point_details_position, details.x.toInt(), details.y.toInt()))
+        fun at(millis: Long) = time.format(java.util.Date(millis))
+        val summary = buildString {
+            append(context.getString(R.string.point_sheet_status, statusLabel(context, details.status)))
             if (details.imported) append("\n").append(context.getString(R.string.point_details_imported))
             if (details.planned) append("\n").append(context.getString(R.string.point_details_planned))
+            append("\n\n")
+            val scan = details.latestScan
+            append(context.getString(R.string.point_sheet_signal, networkLabel ?: context.getString(R.string.guide_legend_no_ssid))).append("\n")
+            append(when {
+                scan == null -> context.getString(R.string.point_sheet_no_scan)
+                ssid == null -> context.getString(R.string.point_details_networks, scan.networks) + " · " + at(scan.at)
+                scan.strongestRssi != null -> context.getString(R.string.point_sheet_signal_value, scan.strongestRssi, scan.strongestBssid.orEmpty(),
+                    WifiBands.of(scan.frequency)?.let { " · $it GHz" }.orEmpty(), at(scan.at))
+                scan.networks > 0 -> context.getString(R.string.point_sheet_signal_absent, scan.networks, at(scan.at))
+                else -> context.getString(R.string.point_sheet_signal_empty, at(scan.at))
+            })
+            details.lastRun?.takeIf { it.status != RunStatus.COMPLETED }?.let { run ->
+                append("\n\n").append(context.getString(R.string.point_sheet_last_run, at(run.startedAt), run.status,
+                    run.statusReason?.let { " ($it)" }.orEmpty()))
+            }
+            if (details.services.isNotEmpty()) {
+                append("\n\n").append(context.getString(R.string.point_sheet_services))
+                details.services.forEach { history ->
+                    val a = history.last
+                    append("\n• ").append(a.label).append(": ")
+                        .append(context.getString(if (a.ok) R.string.point_sheet_ok else R.string.point_sheet_failed))
+                    a.value?.let { append(" · ").append(it) }
+                    a.reason?.let { append(" · ").append(it) }
+                    a.httpStatus?.let { append(" · HTTP ").append(it) }
+                    if (a.proxyConfig != null || a.route != null) {
+                        append(" · ").append(context.getString(R.string.point_sheet_route,
+                            ServerCheckDialog.proxyLabel(context, a.proxyConfig), ServerCheckDialog.routeLabel(context, a.route)))
+                    }
+                    a.retryAt?.let { append(" · ").append(context.getString(R.string.point_sheet_retry, at(it))) }
+                    append(" · ").append(at(a.at))
+                    history.lastValid?.let { v ->
+                        append("\n   ").append(context.getString(R.string.point_sheet_last_valid, v.value ?: "—", at(v.at)))
+                    }
+                }
+            }
+        }
+        val history = buildString {
+            append(context.getString(R.string.point_details_position, details.x.toInt(), details.y.toInt()))
             append("\n\n").append(context.getString(R.string.point_details_scans, details.scans.size))
             details.scans.forEach { scan ->
-                append("\n• ").append(time.format(java.util.Date(scan.at))).append(" · ")
+                append("\n• ").append(at(scan.at)).append(" · ")
                     .append(context.getString(R.string.point_details_networks, scan.networks))
                 if (ssid != null) {
                     append(" · ").append(ssid).append(": ")
@@ -46,7 +103,7 @@ object PointActionsDialogs {
             }
             append("\n\n").append(context.getString(R.string.point_details_runs, details.runs.size))
             details.runs.forEach { run ->
-                append("\n\n• ").append(time.format(java.util.Date(run.startedAt))).append(" · ").append(run.status)
+                append("\n\n• ").append(at(run.startedAt)).append(" · ").append(run.status)
                 run.statusReason?.let { append(" (").append(it).append(")") }
                 if (run.scanId == null) append(" · ").append(context.getString(R.string.point_details_active_only))
                 PointDetails.resultLines(run).forEach { append("\n   ").append(it) }
@@ -55,9 +112,36 @@ object PointActionsDialogs {
                 }
             }
         }
+        val density = context.resources.displayMetrics.density
+        val pad = (24 * density).toInt()
+        val historyText = android.widget.TextView(context).apply {
+            text = history
+            visibility = android.view.View.GONE
+            setTextIsSelectable(true)
+            setPadding(0, (8 * density).toInt(), 0, 0)
+        }
+        val historyLabel = context.getString(R.string.point_sheet_history, details.scans.size, details.runs.size)
+        val toggle = com.google.android.material.button.MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = historyLabel
+            minHeight = (48 * density).toInt()
+            setOnClickListener {
+                val show = historyText.visibility != android.view.View.VISIBLE
+                historyText.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+                text = if (show) context.getString(R.string.point_sheet_hide_history) else historyLabel
+            }
+        }
+        val content = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, (8 * density).toInt(), pad, 0)
+            addView(android.widget.TextView(context).apply { text = summary; setTextIsSelectable(true) })
+            addView(toggle, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (12 * density).toInt() })
+            addView(historyText)
+        }
         MaterialAlertDialogBuilder(context)
             .setTitle(context.getString(R.string.point_actions_title, details.label))
-            .setMessage(text)
+            .setView(android.widget.ScrollView(context).apply { addView(content) })
             .setPositiveButton(R.string.action_ok, null)
             .show()
     }

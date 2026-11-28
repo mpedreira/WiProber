@@ -162,6 +162,35 @@
                     android:text="@string/scan_mode_continuous" />
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
+            <!-- RC4 · 3: what a tap on the plan measures (Stop-and-Go). -->
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/measureActionToggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                app:checkedButton="@id/measureCoverageButton"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/measureCoverageButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:maxLines="2"
+                    android:text="@string/measure_coverage" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/measurePerformanceButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:maxLines="2"
+                    android:text="@string/measure_coverage_performance" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -183,7 +212,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center"
-                    android:maxLines="1"
+                    android:maxLines="2"
                     android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
                     tools:text="2 points · 1 route · 3 notes" />
 

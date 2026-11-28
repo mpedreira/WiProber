@@ -262,7 +262,6 @@
     <string name="band_6">6 GHz</string>
     <string name="map_ssid_selected">Mapa: %1$s. Verde = buena señal, naranja = señal débil medida, rojo con aspa = SSID no detectado en un escaneo válido, hueco = sin medición local. La señal es la del AP más fuerte de este SSID en el escaneo (no necesariamente el AP conectado); los círculos son un área de influencia aproximada.</string>
     <string name="point_actions_title">Punto %1$s</string>
-    <string name="point_measure_here">Medir en este punto (escaneo + pruebas)</string>
     <string name="point_active_only">Solo pruebas activas en este punto</string>
     <string name="point_new_here">Nuevo punto aquí</string>
     <string name="template_preview_title">Importar plantilla de puntos</string>
@@ -453,4 +452,30 @@ SHA-256: %1$s</string>
     <string name="config_change_failed">No se ha cambiado la configuración: %1$s</string>
     <string name="config_corrupt">No se puede leer la configuración guardada (%1$s). No se usa; quítala y vuelve a importarla.</string>
     <string name="config_export_shareable">Exportar resumen compartible</string>
+    <!-- RC4 · 3: Stop-and-Go actions and point sheet -->
+    <string name="measure_coverage">Medir cobertura</string>
+    <string name="measure_coverage_performance">Cobertura + rendimiento</string>
+    <string name="measure_coverage_here">Medir cobertura aquí</string>
+    <string name="measure_coverage_performance_here">Medir cobertura + rendimiento aquí</string>
+    <string name="measure_no_tests">No hay pruebas activas configuradas: solo se midió la cobertura</string>
+    <string name="point_status_counts">%1$d pendientes · %2$d cobertura · %3$d rendimiento · %4$d con fallo</string>
+    <string name="point_status_pending">Pendiente</string>
+    <string name="point_status_coverage">Cobertura medida</string>
+    <string name="point_status_performance">Rendimiento correcto</string>
+    <string name="point_status_failure">Falló una prueba</string>
+    <string name="point_sheet_status">Estado: %1$s</string>
+    <string name="point_sheet_signal">Última señal · %1$s</string>
+    <string name="point_sheet_signal_value">%1$d dBm · %2$s%3$s · %4$s</string>
+    <string name="point_sheet_signal_absent">No detectada en un escaneo válido (%1$d redes) · %2$s</string>
+    <string name="point_sheet_signal_empty">Escaneo vacío · %1$s</string>
+    <string name="point_sheet_no_scan">Sin escaneo local todavía</string>
+    <string name="point_sheet_services">Último intento por servicio</string>
+    <string name="point_sheet_last_run">Última ejecución: %1$s · %2$s%3$s</string>
+    <string name="point_sheet_ok">Correcto</string>
+    <string name="point_sheet_failed">Falló</string>
+    <string name="point_sheet_last_valid">Último válido: %1$s · %2$s</string>
+    <string name="point_sheet_retry">reintentar después de %1$s</string>
+    <string name="point_sheet_route">proxy: %1$s · ruta: %2$s</string>
+    <string name="point_sheet_history">Historial completo (%1$d escaneos, %2$d ejecuciones)</string>
+    <string name="point_sheet_hide_history">Ocultar historial</string>
 </resources>

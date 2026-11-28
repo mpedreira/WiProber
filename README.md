@@ -104,8 +104,9 @@ This is a debug-signed APK (`com.mpedreira.nimwifi.debug`), not a production-sig
 
 ### Stop-and-Go Mode (Default)
 1.  Open or create a project.
-2.  Tap on the map to scan. A **Red Dot** will appear.
-3.  Wait for the scan to finish. Repeat.
+2.  Choose what a tap measures in the dock: **Measure coverage** (the passive scan only) or **Coverage + performance** (the same scan, then the active tests of the current profile). The choice is kept across rotations and permission or settings round trips.
+3.  Tap on the map to measure. A dot appears; wait for the scan to finish. Repeat.
+4.  Tap an existing or planned point to see its sheet, measure coverage or coverage + performance again at the same point, run **active tests only**, or start a new point there. A badge marks points whose latest tests passed (blue) or failed (red); with planned points or tests, the dock counts pending, coverage, performance and failed points.
 
 ### Continuous Mode
 1.  **Disable Throttling:** Ensure "Wi-Fi scan throttling" is OFF in Developer Options.
@@ -123,12 +124,12 @@ This is a debug-signed APK (`com.mpedreira.nimwifi.debug`), not a production-sig
 
 ### Throughput tests (fork)
 1.  In the survey menu → **Throughput tests**, enable the iPerf3 test (server, port, target name shown in the export) and/or the Internet test (download/upload URLs, Cloudflare by default). Durations are seconds per direction (default 5).
-2.  Measure Stop-and-Go points as usual: after each scan a dialog shows every phase with a countdown and the values already measured. An unreachable server is skipped quickly.
+2.  Measure Stop-and-Go points with **Coverage + performance**: after each scan a dialog shows every phase with a countdown and the values already measured. An unreachable server is skipped quickly (unless a web proxy may carry its HTTP test). *Probar servidor* checks the selected Internet server first.
 
 ### Imported configuration: network tests, scripts and roaming (fork)
 1.  Prepare a `wiprober-config.json` (start from the [example](docs/wiprober-config.example.json)) or record a browser `.har` (Developer tools → Network → *Save all as HAR*; only GET requests of documents/XHR/fetch are kept).
 2.  In the survey menu → **Configuration…** → **Import file…**, select it. The dialog lists the imported tests, scripts and roaming probe; **Remove tests & scripts** clears them.
-3.  Network tests and scripts run at every Stop-and-Go point after the throughput tests. The roaming probe runs during Continuous tracks.
+3.  Network tests and scripts run after the throughput tests at every point measured with **Coverage + performance** (or *Active tests only*). The roaming probe runs during Continuous tracks.
 4.  Use a read-only test account in scripts: credentials in the file are stored in clear text on the phone.
 
 ### Export

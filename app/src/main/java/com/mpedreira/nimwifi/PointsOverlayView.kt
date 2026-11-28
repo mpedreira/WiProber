@@ -188,9 +188,16 @@ class PointsOverlayView @JvmOverloads constructor(
 
     /** Point marker coloured by its [PointState] for the selected SSID; null state = no SSID selected. */
     /** [redundant]: a second AP of the same SSID above the secondary threshold (drawn as an outer ring). */
-    data class PointMarker(val x: Float, val y: Float, val state: String?, val redundant: Boolean = false)
+    /** [status]: RC4 · 3 [PointStatus]; performance and failure draw a badge on the marker. */
+    data class PointMarker(val x: Float, val y: Float, val state: String?, val redundant: Boolean = false, val status: String? = null)
 
     private val pointMarkers = mutableListOf<PointMarker>()
+    private val performanceBadgePaint = Paint().apply { color = Color.rgb(21, 101, 192); style = Paint.Style.FILL; isAntiAlias = true }
+    private val failureBadgePaint = Paint().apply { color = Color.rgb(198, 40, 40); style = Paint.Style.FILL; isAntiAlias = true }
+    private val badgeStrokePaint = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL; isAntiAlias = true }
+    private val badgeMarkPaint = Paint().apply {
+        color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 3f; strokeCap = Paint.Cap.ROUND; isAntiAlias = true
+    }
     private val okPaint = Paint().apply { color = Color.rgb(27, 110, 32); style = Paint.Style.FILL; isAntiAlias = true }
     private val okRingPaint = Paint().apply { color = Color.rgb(27, 110, 32); style = Paint.Style.STROKE; strokeWidth = 3f; isAntiAlias = true }
     private val weakPaint = Paint().apply { color = Color.rgb(230, 126, 0); style = Paint.Style.FILL; isAntiAlias = true }
@@ -326,6 +333,23 @@ class PointsOverlayView @JvmOverloads constructor(
                             else -> pointPaint
                         }
                     )
+                }
+            }
+            // Badge at the upper right: blue (performance passed) or red with a bar (a test failed).
+            val badge = when (marker.status) {
+                PointStatus.PERFORMANCE -> performanceBadgePaint
+                PointStatus.FAILURE -> failureBadgePaint
+                else -> null
+            }
+            if (badge != null) {
+                val bx = t[0] + radius * 0.85f
+                val by = t[1] - radius * 0.85f
+                val br = radius * 0.55f
+                canvas.drawCircle(bx, by, br + 2f, badgeStrokePaint)
+                canvas.drawCircle(bx, by, br, badge)
+                if (marker.status == PointStatus.FAILURE) {
+                    canvas.drawLine(bx, by - br * 0.55f, bx, by + br * 0.15f, badgeMarkPaint)
+                    canvas.drawPoint(bx, by + br * 0.5f, badgeMarkPaint)
                 }
             }
         }

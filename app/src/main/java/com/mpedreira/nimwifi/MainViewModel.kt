@@ -240,6 +240,7 @@ class MainViewModel @JvmOverloads constructor(
         activeRunJob?.cancel()
         activeRunJob = null
         val selectedScanMode = _screenState.value.scanMode
+        val selectedMeasure = _screenState.value.measureAction
         clearActiveSession()
         recentScanTimestamps.clear()
         _screenState.value = SurveyScreenState(
@@ -257,6 +258,7 @@ class MainViewModel @JvmOverloads constructor(
             interruptedRoutes = routeDrafts.filter { draft -> continuousSessions.none { it.id == draft.sessionId } }
                 .map(RouteDrafts::migrateLegacy),
             scanMode = selectedScanMode,
+            measureAction = selectedMeasure,
             actionHistory = buildList {
                 repeat(scanPoints.count { !it.importedFromEsx }) { add(LastAction.SCAN) }
                 repeat(continuousSessions.count { !it.importedFromEsx }) { add(LastAction.SCAN_SESSION) }
@@ -341,13 +343,19 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun requestStopAndGoScan(x: Float, y: Float): Boolean {
+    /** RC4 · 3: the action the next tap on the plan measures with. */
+    fun setMeasureAction(measure: PointMeasure) {
+        _screenState.update { it.copy(measureAction = measure) }
+    }
+
+    /** A new point at the tap, measured with [measure] (default: the selected action). */
+    fun requestStopAndGoScan(x: Float, y: Float, measure: PointMeasure = _screenState.value.measureAction): Boolean {
         val state = _screenState.value
         if (!state.hasMap || state.scanMode != SurveyScanMode.STOP_AND_GO ||
             state.interaction !is SurveyInteraction.Idle
         ) return false
         setInteraction(
-            SurveyInteraction.AwaitingScanAccess(PendingScanRequest.StopAndGo(SurveyCoordinate(x, y)))
+            SurveyInteraction.AwaitingScanAccess(PendingScanRequest.StopAndGo(SurveyCoordinate(x, y), measure = measure))
         )
         return true
     }
@@ -357,13 +365,16 @@ class MainViewModel @JvmOverloads constructor(
      * an existing local, imported or planned point, reusing its pointId. Earlier scans and runs
      * of the point are kept.
      */
-    fun requestMeasureAtPoint(pointId: String): Boolean {
+    fun requestMeasureAtPoint(pointId: String, measure: PointMeasure = _screenState.value.measureAction): Boolean {
         val state = _screenState.value
         if (!state.hasMap || state.scanMode != SurveyScanMode.STOP_AND_GO || state.interaction !is SurveyInteraction.Idle) return false
         val position = state.pointPosition(pointId) ?: return false
-        setInteraction(SurveyInteraction.AwaitingScanAccess(PendingScanRequest.StopAndGo(position, pointId)))
+        setInteraction(SurveyInteraction.AwaitingScanAccess(PendingScanRequest.StopAndGo(position, pointId, measure)))
         return true
     }
+
+    /** What the Stop-and-Go scan in progress measures; null when none is running. */
+    fun scanningMeasure(): PointMeasure? = (_screenState.value.interaction as? SurveyInteraction.StopAndGoScanning)?.measure
 
     /** Adds the points of one template import (Undo removes them as a batch). */
     fun addPlannedPoints(points: List<PlannedPoint>): Boolean {
@@ -408,7 +419,7 @@ class MainViewModel @JvmOverloads constructor(
         val request = pendingScanRequest() ?: return null
         return when (request) {
             is PendingScanRequest.StopAndGo -> {
-                setInteraction(SurveyInteraction.StopAndGoScanning(request.coordinate, request.pointId))
+                setInteraction(SurveyInteraction.StopAndGoScanning(request.coordinate, request.pointId, request.measure))
                 StartedScanAction.StopAndGo(request.coordinate)
             }
             is PendingScanRequest.ContinuousStart -> {
